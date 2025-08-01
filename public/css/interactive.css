@@ -1,0 +1,144 @@
+/* GENERAL */
+@media screen and (max-width:39.9375em) {
+	.parentResize{
+		border-radius: 0px;
+	}
+}
+
+/* DRAGGABLE */
+.draggable {
+    position: absolute;
+}
+
+/* RESIZABLE */
+.parentResize{	
+	-webkit-box-shadow: 0px 0px 35px 0px rgba(0,0,0,0.3);
+	-moz-box-shadow: 0px 0px 35px 0px rgba(0,0,0,0.3);
+	box-shadow: 0px 0px 35px 0px rgba(0,0,0,0.3);    
+    grid-template-areas:
+        "d c b"
+        "a i e"
+        "f g h";
+	place-self: center;	
+}
+
+.resizable { grid-area: i; }
+.left { grid-area: a; }
+.right { grid-area: e; }
+.top { grid-area: c; }
+.bottom { grid-area: g; }
+.upperLeft { grid-area: d; }
+.upperRight { grid-area: b; }
+.lowerLeft { grid-area: f; }
+.lowerRight { grid-area: h; }
+
+.resizable,.left,.right,.top,.bottom,.upperLeft,.upperRight,.lowerLeft,.lowerRight{
+	background-color: #F5F5F5;
+}
+
+.left:hover, .right:hover { cursor: ew-resize; }
+.top:hover, .bottom:hover { cursor: ns-resize; }
+.upperLeft:hover, .lowerRight:hover, .lowerRight:active { cursor: nwse-resize; }
+.upperRight:hover, .lowerLeft:hover, .lowerLeft:active { cursor: nesw-resize; }
+
+/* MIN MAX CLOSE */
+.btnContainer { float: right; }
+
+.dragPoint::after{
+	content: '';
+    display: block;
+    clear: both;
+}
+
+.mmcBtn{	
+    float: right;
+    width: 25px;
+    height: 25px;    
+    border: none;
+    background: #F5F5F5;
+    outline: none;
+	border-radius: 2.5px;
+	cursor: pointer;
+	transition: background .15s ease;		
+	display: -webkit-box;
+	display: -moz-box;
+	display: -ms-flexbox;
+	display: -webkit-flex;
+	display: flex;
+	align-items:center;
+}
+.mmcBtn:hover{
+	background: #C1C1C1;
+}
+.mmcBtn:hover .dragPath{
+	fill: #222;
+}
+
+.svgIcon { width: 55%; height: 55%; margin: auto;}
+.path { fill: rgb(255, 255, 255); }
+
+.dragPath{ 
+	fill: #222;
+	cursor: pointer;
+	transition: fill .15s ease;
+}
+
+
+#minimizeZone{
+    position: absolute;
+    bottom: 0px;
+    width: 100%;
+    overflow: hidden;
+	text-align: center;
+}
+
+#minimizeZone > button{
+	padding: 0;
+}
+
+#minimizeZone > button > img{
+	margin: 0;
+}
+
+#minimizeZone > button:hover > img{
+	-webkit-transform: scale(1.5);
+	-moz-transform: scale(1.5);
+	-o-transform: scale(1.5);
+	-ms-transform: scale(1.5);
+	transform: scale(1.5);		
+}
+
+.minimizedTitle {
+    display: table-cell;
+    vertical-align: middle;    
+    color: white;
+}
+
+.dropdownBtn { 
+    width: 20px;
+    padding: 0px;
+    border: none;
+    text-align: center;
+    color: white;
+    outline: none;
+}
+
+#dropdownList {
+    display: none;
+    position: fixed;
+    bottom: 0px;
+    right: 20px;
+    width: 100px;
+    background-color: rgba(48, 55, 97, 0.473);
+    overflow-x: hidden;
+}
+
+.dropdownItem {
+    padding: 4px;
+    height: 14px;
+    overflow: hidden;
+}
+
+.dropdownItem, .dropdownList, .dropdownItemx { cursor: default; }
+
+.dropdownItem:hover { background-color: rgba(62, 68, 102, 0.473); }

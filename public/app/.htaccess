@@ -1,0 +1,24 @@
+# Do not remove this line or mod_rewrite rules and search engine friendly URLs will stop working
+RewriteBase /
+
+<IfModule mod_headers.c>
+    # Remova completamente as configurações do X-Frame-Options
+    Header always unset X-Frame-Options
+</IfModule>
+
+
+Header set Cache-Control "max-age=0, public"
+
+<Directory /tools/uploads/documents> 
+    Options -Indexes 
+</Directory>
+
+php_flag display_startup_errors On
+php_flag display_errors On
+
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^/?(.*)$ /?username=/$1 [L,QSA]
+
+

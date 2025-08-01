@@ -1,0 +1,35 @@
+@import url('https://fonts.googleapis.com/css?family=Ubuntu&display=swap');
+html{
+	font-family: 'Ubuntu', sans-serif;
+}
+
+.how{
+	width: 900px;
+	margin: 20px auto;
+	color: #444;
+	border: 2px solid #ccc;
+	padding: 15px;
+	font-family: 'Ubuntu', sans-serif;
+	border-radius: 20px;
+	background-color: #F9F9F9;
+}
+
+p.sub-titulo{
+ font-size: 20px;
+}
+
+.name{
+	margin-left: 20px;
+}
+
+.direita{
+ text-align: right;
+}
+
+.center{
+ text-align: center;
+}
+
+.mes{
+	text-transform: capitalize;
+}

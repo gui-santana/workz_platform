@@ -1,0 +1,19 @@
+{
+    "name": "workz/platform",
+    "description": "The Workz! professional social network.",
+    "type": "project",
+    "license": "proprietary",
+    "autoload": {
+        "psr-4": {
+            "Workz\\Platform\\": "src/",
+            "Workz\\Platform\\Database\\Migrations\\": "database/migrations/"
+        }
+    },
+    "require": {
+        "firebase/php-jwt": "^6.11",
+        "league/oauth2-client": "^2.8",
+        "league/oauth2-google": "^4.0",
+        "thenetworg/oauth2-azure": "^2.2",
+        "vlucas/phpdotenv": "^5.6"
+    }
+}
