@@ -8,17 +8,6 @@
     box-sizing: inherit
 }
 
-@font-face {
-    font-family: SanFrancisco;.
-    src: url("fonts/SF-Pro-Display-Regular.otf") format("opentype");
-}
-
-@font-face {
-    font-family: SanFrancisco;
-    font-weight: bold;
-    src: url("path/SF-Pro-Display-Regular.otf") format("opentype");
-}
-
 html {
     font-family: sans-serif;	
     -ms-text-size-adjust: 100%;
@@ -2436,7 +2425,7 @@ border: 0px solid #ffffff;
     height: 36px;
 }
 .la-ball-scale-pulse > div {
-	background-image: url('images/icons/workz/100x100.png'); background-size: cover;
+	background-image: url('../images/icons/workz/100x100.png'); background-size: cover;
     position: absolute;
     top: 0;
     left: 0;
@@ -2745,8 +2734,7 @@ border: 0px solid #ffffff;
 }
 /* ON - OFF SWITCH */
 .onoffswitch {
-	position: relative; width: 45px;
-	-webkit-user-select:none; -moz-user-select:none; -ms-user-select: none;
+	position: relative; width: 45px;	
 }
 .onoffswitch-checkbox {
 	position: absolute;

@@ -1,13 +1,13 @@
 <div class="cm-pad-15-h large-3-5 medium-4 small-12 flex hide-for-small-only" style="flex-direction: column;">
 	<!-- PAGE IMAGE -->
-	<div class="<?if($mobile == 0){?>large-12 medium-12 small-12<?}else{?>large-3 medium-3 small-3<?}?>	">
+	<div class="<?php if($mobile == 0){?>large-12 medium-12 small-12<?php }else{?>large-3 medium-3 small-3<?php }?>	">
 		<div class="large-12 w-square position-relative">											
-			<div class="w-circle w-square-content position-relative border-div-gray" style="background: url(data:image/jpeg;base64,<? if(!empty($_GET)){ echo $pgim; }else{ echo $loggedUser['im']; } ?>); background-size: cover; background-position: center; background-repeat: no-repeat;" />
+			<div class="w-circle w-square-content position-relative border-div-gray" style="background: url(data:image/jpeg;base64,<?php  if(!empty($_GET)){ echo $pgim; }else{ echo $loggedUser['im']; } ?>); background-size: cover; background-position: center; background-repeat: no-repeat;" />
 			</div>																					
 		</div>
 	</div>	
 	<div class="cm-mg-25-t background-white cm-pad-15 w-shadow-1 w-rounded-20 height-tr" style="flex-grow: 1;">
-		<?
+		<?php 
 		if(!empty($_GET) && isset($_SESSION['wz'])){
 			if(isset($_GET['team']) || isset($_GET['company'])){				
 				if($user_level === ''){
@@ -19,7 +19,7 @@
 					</span>				
 					<a onclick="pageJoin('insert')" class="font-weight-500 w-color-bl-to-or pointer" style="vertical-align: middle;">Solicitar acesso</a>
 				</div>
-				<?
+				<?php 
 				}elseif($user_level === 0){
 				?>								
 				<div class="large-12 medium-12 small-12 text-ellipsis display-block cm-pad-5-t cm-pad-5-b">
@@ -29,7 +29,7 @@
 					</span>																	
 					<a class="font-weight-500 dark" style="vertical-align: middle;"> Aguardando</a>									
 				</div>
-				<?
+				<?php 
 				}elseif($user_level > 2){
 				?>								
 				<div class="large-12 medium-12 small-12 text-ellipsis display-block cm-pad-5-t cm-pad-5-b">
@@ -41,12 +41,12 @@
 							toggleSidebar(); 
 							var config = $('<div id=config class=height-100></div>'); 
 							$('#sidebar').append(config); 
-							goTo('partes/resources/modal_content/config_home.php', 'config', '<? echo $pgid.'&op=0'; ?>', '<? echo key($_GET); ?>');"	
+							goTo('partes/resources/modal_content/config_home.php', 'config', '<?php  echo $pgid.'&op=0'; ?>', '<?php  echo key($_GET); ?>');"	
 					class="pointer">
 						<a class="font-weight-500 w-color-bl-to-or pointer" style="vertical-align: middle;"> Ajustes</a>									
 					</label>
 				</div>
-				<?
+				<?php 
 				}
 				if(!empty($user_level) && $user_level > 0 && $user_level < 3){
 				?>
@@ -57,7 +57,7 @@
 					</span>				
 					<a onclick="pageJoin('delete')" class="font-weight-500 w-color-bl-to-or pointer" style="vertical-align: middle;" title="Deixar de ser membro"> Desvicular-se</a>
 				</div>				
-				<?
+				<?php 
 				}				
 				?>
 				<script>
@@ -124,24 +124,24 @@
 						<i class="fas fa-circle fa-stack-2x light-gray"></i>
 						<i class="fas fa-user-friends fa-stack-1x fa-inverse dark"></i>					
 					</span>				
-					<a class="font-weight-500 dark" style="vertical-align: middle;"><? echo count($users); ?> Membro<?if(count($users) > 1){?>s<?}?></a>
+					<a class="font-weight-500 dark" style="vertical-align: middle;"><?php  echo count($users); ?> Membro<?php if(count($users) > 1){?>s<?php }?></a>
 				</div>
-				<?			
+				<?php 			
 			}elseif(isset($_GET['profile'])){				
 				//PROFILE OPTIONS - PRIVACIDADE										
 				if(isset($_SESSION['wz']) && $pgid != $_SESSION['wz'] && $pgpc > 0){					
 					if($vsg = search('hnw', 'usg', '', "s0 = '{$_SESSION['wz']}' AND s1 = '{$_GET['profile']}'")){
-					if(count($vsg) > 0){
-					?>
-					<div class="large-12 medium-12 small-12 text-ellipsis display-block cm-pad-5-t cm-pad-5-b">
-						<span class="fa-stack" style="vertical-align: middle;">
-							<i class="fas fa-circle fa-stack-2x light-gray"></i>
-							<i class="fas fa-eye-slash fa-stack-1x fa-inverse dark"></i>					
-						</span>													
-						<a onclick="followUser(<?= $_GET['profile'] ?>, 'delete')" class="font-weight-500 w-color-bl-to-or pointer" style="vertical-align: middle;"> Deixar de Seguir</a>
-					</div>
-					<?php
-					}					
+						if(count($vsg) > 0){
+						?>
+						<div class="large-12 medium-12 small-12 text-ellipsis display-block cm-pad-5-t cm-pad-5-b">
+							<span class="fa-stack" style="vertical-align: middle;">
+								<i class="fas fa-circle fa-stack-2x light-gray"></i>
+								<i class="fas fa-eye-slash fa-stack-1x fa-inverse dark"></i>					
+							</span>													
+							<a onclick="followUser(<?= $_GET['profile'] ?>, 'delete')" class="font-weight-500 w-color-bl-to-or pointer" style="vertical-align: middle;"> Deixar de Seguir</a>
+						</div>
+						<?php
+						}					
 					}else{
 					?>
 					<div class="large-12 medium-12 small-12 text-ellipsis display-block cm-pad-5-t cm-pad-5-b">
@@ -151,7 +151,7 @@
 						</span>													
 						<a onclick="followUser(<?= $_GET['profile'] ?>, 'insert')" class="font-weight-500 w-color-bl-to-or pointer" style="vertical-align: middle;"> Seguir</a>
 					</div>											
-					<?	
+					<?php 	
 					}
 					?>
 					<script>
@@ -208,7 +208,7 @@
 						goTo('partes/resources/modal_content/config_home.php', 'config', '<?= $pgid.'&op=0' ?>', '<?= key($_GET) ?>');
 					}											
 				</script>
-				<?
+				<?php 
 				}						
 			}
 		}elseif(isset($_SESSION['wz'])){
@@ -220,9 +220,9 @@
 					<i class="fas fa-circle fa-stack-2x light-gray"></i>
 					<i class="fas fa-address-card fa-stack-1x fa-inverse dark"></i>					
 				</span>				
-				<a <?if(!empty($username)){?> href="/<? echo $username; ?>" <?}else{?> target="_blank" href="/?profile=<? echo $_SESSION['wz']; ?>" <?}?>" class="font-weight-500 w-color-bl-to-or pointer" style="vertical-align: middle;">Meu Perfil</a>
+				<a <?php if(!empty($username)){?> href="/<?php  echo $username; ?>" <?php }else{?> target="_blank" href="/?profile=<?php  echo $_SESSION['wz']; ?>" <?php }?>" class="font-weight-500 w-color-bl-to-or pointer" style="vertical-align: middle;">Meu Perfil</a>
 			</div>
-		<?
+		<?php 
 		}
 		
 			if($pgpc > 0 && !empty($_GET)){
@@ -236,7 +236,7 @@
 					<a class="font-weight-500 w-color-bl-to-or pointer" style="vertical-align: middle;"> Compartilhar</a>									
 				</label>
 			</div>
-			<?
+			<?php 
 			}
 			?>
 			<hr>
@@ -268,7 +268,7 @@
 				</span>				
 				<a href="/logout.php" class="font-weight-500 w-color-bl-to-or pointer" style="vertical-align: middle;">Sair</a>
 			</div>
-			<?
+			<?php 
 		
 		?>				
 	</div>

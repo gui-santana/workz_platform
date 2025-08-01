@@ -1,4 +1,4 @@
-<?
+<?php 
 if($mobile == 1){
 	$nPag = 9;
 }else{
@@ -54,9 +54,9 @@ $np = ceil($arrQtd/$nPag);
 		bottom: -30px !important;
 	}
 </style>
-<div id="appContainer" class="w-rounded-15 cm-pad-7-5 cm-pad-0-h <? if($np > 1){?> cm-pad-50-b <?}?> background-white-transparent-50 large-12 medium-12 small-12 w-rounded-25 w-shadow-2 backdrop-blur">
-	<div class="js-flickity carousel large-12 medium-12 small-12 clearfix"  data-flickity='{ "cellAlign": "left", "percentPosition": false, "prevNextButtons": false, "pageDots": <? if($np == 1){?> false <?}else{?> true <?} ?>, "fullscreen": false }'>
-	 <?
+<div id="appContainer" class="w-rounded-15 cm-pad-7-5 cm-pad-0-h <?php  if($np > 1){?> cm-pad-50-b <?php }?> background-white-transparent-50 large-12 medium-12 small-12 w-rounded-25 w-shadow-2 backdrop-blur">
+	<div class="js-flickity carousel large-12 medium-12 small-12 clearfix"  data-flickity='{ "cellAlign": "left", "percentPosition": false, "prevNextButtons": false, "pageDots": <?php  if($np == 1){?> false <?php }else{?> true <?php } ?>, "fullscreen": false }'>
+	 <?php 
 		for($a = 1; $a <= $np; $a++){			
 			$kb = ($a * $nPag) - 1;
 			$ka = ($kb - ($nPag - 1));
@@ -65,7 +65,7 @@ $np = ceil($arrQtd/$nPag);
 			}		
 			?>
 			<div class="large-12 medium-12 small-12 clearfix cm-pad-7-5-b">
-				<?				
+				<?php 				
 				for($i = $ka; $i <= $kb; $i++){
 					if(array_key_exists($i, $arr)){
 						$app = $arr[$i];
@@ -73,17 +73,17 @@ $np = ceil($arrQtd/$nPag);
 						?>				
 						<div title="<?= $app['tt'] ?>" onclick="newWindow('<?= $url ?>', '<?= $app['id'] ?>', btoa(encodeURIComponent('<?= $app['im'] ?>')), '<?= $app['tt'] ?>')" class="large-3 medium-3 small-4 float-left cm-pad-7-5 w-color-bl-to-or pointer">						
 							<div class="large-12 w-square position-relative">
-								<div class="w-rounded-20 w-square-content w-shadow-1 pointer position-relative" style="background: url(<? if($app['im'] == ''){?>https://workz.com.br/images/no-image.jpg<?}else{?>data:image/jpeg;base64,<? echo $app['im']; } ?>); background-size: cover; background-position: center; background-repeat: no-repeat;">						
+								<div class="w-rounded-20 w-square-content w-shadow-1 pointer position-relative" style="background: url(<?php  if($app['im'] == ''){?>https://workz.com.br/images/no-image.jpg<?php }else{?>data:image/jpeg;base64,<?php  echo $app['im']; } ?>); background-size: cover; background-position: center; background-repeat: no-repeat;">						
 								</div>
 							</div>
 							<p class="text-ellipsis text-center fs-d" style="margin-top: 2.5px"><?= $app['tt'] ?></p>						
 						</div>
-						<?
+						<?php 
 					}						
 				}
 				?>				
 			</div>
-			<?
+			<?php 
 		}
 		?>	
 	</div>

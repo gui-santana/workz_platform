@@ -1,4 +1,4 @@
-<?
+<?php 
 session_start();
 require('../../../functions/search.php');
 require('../../../functions/update.php');
@@ -12,7 +12,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 //
 ?>
 <div class="large-12 medium-12 small-12 height-100 background-gray overflow-auto position-relative">
-<?php	
+<?php 	
 
 	$vr = '';
 	if(isset($_POST['vr']) && !empty($_POST['vr'])){
@@ -88,7 +88,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 		
 		?>					
 		<div class="large-12 medium-12 small-12 height-100">			
-			<?
+			<?php 
 			if($_GET['qt'] == 0){
 			?>
 			<div id="main" class="">
@@ -156,7 +156,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 				Além disso, proporciona uma forma mais acessível de exibir o seu conteúdo por meio de links diretos ou mecanismos de busca.
 				</p>
 			</div>	
-			<?
+			<?php 
 			}else{
 			?>
 			<div class="cm-pad-20 cm-pad-t-0 large-12 medium-12 small-12 text-ellipsis">
@@ -220,7 +220,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 				}	
 			</style>
 			<div id="divForm" class="cm-pad-20-h cm-pad-40-b" style="height: calc(100% - 63.75px);">
-				<?php
+				<?php 
 				//PUBLICAÇÃO
 				if($_GET['qt'] == 1){
 				?>				
@@ -257,7 +257,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 						<i class="fas fa-circle fa-stack-2x white-transparent cm-pad-0 cm-mg-0 w-shadow"></i>
 						<i class="fas fa-redo-alt fa-inverse fa-stack-1x white cm-pad-0 cm-mg-0"></i>
 						</span>
-						<?php
+						<?php 
 						if ($mobile == 0) {
 						echo '<button onclick="startCameraAndRecording()" style="background: linear-gradient(to right, #85d0ff, #9a85ff); border: none; padding: 10px 20px; border-radius: 5px; color: white; font-size: 16px; cursor: pointer;" title="Abrir Câmera"><i class="fas fa-camera"></i></button>';
 						echo '<button id="stop-recording-btn" onclick="stopRecording()" style="display: none; background: linear-gradient(to right, #ff5c8d, #ffa585); padding: 10px 20px; border: none; border-radius: 5px; color: white; font-size: 16px; cursor: pointer;" title="Parar Gravação"><i class="fas fa-stop"></i></button>';
@@ -304,7 +304,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 					</div>
 				  </div>
 				</div>
-				<?php				
+				<?php 				
 				//Scripts
 				include('posts.php');				
 				//FOTOS DO ÁLBUM
@@ -336,7 +336,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 					<div class="large-12 medium-12 small-12 cm-pad-20-h cm-pad-20-t cm-pad-5-b">			
 						<div class="w-shadow w-rounded-15">					
 							<div 
-							onclick="sendPost('<?php echo $_GET['qt']; ?>', '<?php echo $getURL; ?>', 6, '<?php echo $sideline; ?>', btoa(encodeURIComponent(document.getElementById('drop-area').innerHTML)))" 
+							onclick="sendPost('<?php  echo $_GET['qt']; ?>', '<?php  echo $getURL; ?>', 6, '<?php  echo $sideline; ?>', btoa(encodeURIComponent(document.getElementById('drop-area').innerHTML)))" 
 							class="cm-pad-5-t cm-pad-5-b large-12 medium-12 small-12 position-relative text-ellipsis w-color-bl-to-or pointer w-bkg-wh-to-gr cm-pad-5-h w-rounded-15">
 								<div class="large-12 medium-12 small-12 text-ellipsis cm-pad-5">
 									<span class="fa-stack orange" style="vertical-align: middle;">
@@ -348,7 +348,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 							</div>
 						</div>
 					</div>
-					<?php
+					<?php 
 				//LINK DE NOTÍCIA	
 				}elseif ($_GET['qt'] == 3) {
 					?>
@@ -364,7 +364,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 								</div>
 							</div>
 							<div class="pointer large-12 medium-12 small-12 cm-pad-5 position-relative text-ellipsis w-bkg-wh-to-gr w-rounded-15-b">
-								<div onclick="var url = document.getElementById('url').value; goTo('partes/resources/modal_content/editor.php', 'config', 3, url<?php if($getURL <> "") { ?> + <?php echo "'&" . $getURL . "'"; } ?>);" class="large-12 medium-12 small-12 text-ellipsis cm-pad-5">
+								<div onclick="var url = document.getElementById('url').value; goTo('partes/resources/modal_content/editor.php', 'config', 3, url<?php  if($getURL <> "") { ?> + <?php  echo "'&" . $getURL . "'"; } ?>);" class="large-12 medium-12 small-12 text-ellipsis cm-pad-5">
 									<span class="fa-stack orange" style="vertical-align: middle;">
 										<i class="fas fa-circle fa-stack-2x light-gray"></i>
 										<i class="fas fa-arrow-up fa-stack-1x fa-inverse dark"></i>
@@ -374,7 +374,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 							</div>
 						</div>
 					</div>
-					<?php
+					<?php 
 					if (isset($_GET['vr']) && $_GET['vr'] !== '') {
 						$url = htmlspecialchars($_GET['vr']);
 						// Verificação de Resposta HTTP
@@ -453,12 +453,12 @@ $mobile = $detect->isMobile() ? 1 : 0;
 							<p class="gray text-center cm-pad-15">Pré-visualização</p>							
 							<div class="position-relative centered" style="height: 400px; width: 300px;">
 								<div id="content" class="w-square-content position-relative w-rounded-20 w-shadow-1">
-									<img class="position-absolute large-12 medium-12 small-12 height-100 w-rounded-20" src="<?php echo $imageUrl; ?>" style="object-fit: cover; object-position: center;" />
+									<img class="position-absolute large-12 medium-12 small-12 height-100 w-rounded-20" src="<?php  echo $imageUrl; ?>" style="object-fit: cover; object-position: center;" />
 									<div class="w-rounded-20-b position-absolute abs-l-0 abs-b-0 abs-r-0 large-12 medium-12 small-12 w-color-wh-to-or overflow-y-auto" style="top: 75px; background: linear-gradient(to bottom,  rgba(0,0,0,0) 0%,rgba(0,0,0,0.5) 100%);">
 										<div class="cm-pad-15 cm-pad-50-b position-absolute abs-b-0">
-											<a class="w-color-wh-to-or" href="<?php echo $url; ?>" target="_blank">
-												<small class="text-ellipsis white"><?php echo htmlspecialchars($result['site_name']); ?></small>
-												<h3 class="font-weight-500 text-ellipsis-2 "><?php echo htmlspecialchars($result['title']); ?></h3>
+											<a class="w-color-wh-to-or" href="<?php  echo $url; ?>" target="_blank">
+												<small class="text-ellipsis white"><?php  echo htmlspecialchars($result['site_name']); ?></small>
+												<h3 class="font-weight-500 text-ellipsis-2 "><?php  echo htmlspecialchars($result['title']); ?></h3>
 											</a>
 										</div>
 									</div>
@@ -469,7 +469,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 									<div class="large-12 medium-12 small-12 position-relative text-ellipsis background-white w-rounded-15">
 										<div class="large-12 medium-12 small-12 text-ellipsis display-center-general-container">
 											<div class="float-left large-2 medium-2 small-4 text-ellipsis cm-pad-15-l">Legenda</div>
-											<textarea class="float-left border-none large-10 medium-10 small-8 cm-pad-10 cm-pad-5-l" style="min-height: 100px" id="lg" name="lg" placeholder="Escreva algo..."><?php echo htmlspecialchars($result['description']); ?></textarea>
+											<textarea class="float-left border-none large-10 medium-10 small-8 cm-pad-10 cm-pad-5-l" style="min-height: 100px" id="lg" name="lg" placeholder="Escreva algo..."><?php  echo htmlspecialchars($result['description']); ?></textarea>
 										</div>
 									</div>
 								</div>
@@ -489,7 +489,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 									</div>
 								</div>
 							</div>
-							<?php
+							<?php 
 						} catch (Exception $e) {
 							echo 'Erro: ' . $e->getMessage();
 							exit;
@@ -548,7 +548,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 							<div class="pointer large-12 medium-12 small-12 cm-pad-5 position-relative text-ellipsis w-bkg-wh-to-gr w-rounded-15-b">
 								<div onclick="
 									var url = document.getElementById('url').value; 
-									goTo('partes/resources/modal_content/editor.php', 'config', 4, url<?php if($getURL <> ""){?> + <? echo "'&".$getURL."'";} ?>);																									
+									goTo('partes/resources/modal_content/editor.php', 'config', 4, url<?php  if($getURL <> ""){?> + <?php  echo "'&".$getURL."'";} ?>);																									
 									" class="large-12 medium-12 small-12 text-ellipsis cm-pad-5">
 									<span class="fa-stack orange" style="vertical-align: middle;">
 										<i class="fas fa-circle fa-stack-2x light-gray"></i>
@@ -561,7 +561,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 					</div>
 					<p class="gray text-center cm-pad-15">Plataformas suportadas: YouTube, DailyMotion, Vimeo e Canva.</p>
 					<a id="videoTitle"></a>
-					<?					
+					<?php 					
 					//YOUTUBE VIDEO
 					if(isset($_GET['vr']) && $_GET['vr'] <> ''){
 						// Obtém a URL de entrada
@@ -606,7 +606,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 										</div>
 									</div>
 								</div>								
-								<?								
+								<?php 								
 							} else {
 								echo "URL de vídeo inválida ou não suportada.";
 							}
@@ -623,7 +623,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 				  <input type="submit" value="Enviar Vídeo">
 				</form>
 
-				<?
+				<?php 
 				}
 			}
 			?>
@@ -684,7 +684,7 @@ $mobile = $detect->isMobile() ? 1 : 0;
 
 			</script>
 		</div>		
-		<?
+		<?php 
 	}		
 	?>
 </div>

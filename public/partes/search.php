@@ -1,5 +1,5 @@
 <div class="cm-mg-100-t column large-12">
-	<?
+	<?php 
 	if(isset($_GET['users'])){
 		$search_type = 'p';
 		$placeholder = 'Encontrar pessoas';
@@ -12,33 +12,33 @@
 	}	
 	?>
 	<div class="large-12 cm-mg-30 cm-mg-0-h">					
-		<input id="search_input" class="w-rounded-30 w-rounded-5 input-border cm-pad-15 w-shadow large-12 medium-12 small-12" type="text" placeholder="<? echo $placeholder; ?>"/>		
+		<input id="search_input" class="w-rounded-30 w-rounded-5 input-border cm-pad-15 w-shadow large-12 medium-12 small-12" type="text" placeholder="<?php  echo $placeholder; ?>"/>		
 	</div>			
 	<div id="search_result" class="cm-mg-30-b" style="height: 600px">
 	</div>
 </div>
 <script>
-<?
+<?php 
 if(isset($_GET['u'])){
 ?>
 window.onload = function(){
-	goTo('backengine/consulta_comunidade.php', 'search_result', 0 + '|<? echo $search_type; ?>,u:<? echo $_GET['u']; ?>|', '');
+	goTo('backengine/consulta_comunidade.php', 'search_result', 0 + '|<?php  echo $search_type; ?>,u:<?php  echo $_GET['u']; ?>|', '');
 }
-<?	
+<?php 	
 }else{	
 ?>
 window.onload = function(){
 	console.log('ok');
-	goTo('backengine/consulta_comunidade.php', 'search_result', 0 + '|<? echo $search_type; ?>', '');
+	goTo('backengine/consulta_comunidade.php', 'search_result', 0 + '|<?php  echo $search_type; ?>', '');
 }
-<?
+<?php 
 }
 ?>
 
 	var uview = 1;		
 	$('#search_input').keyup(function(){
 		uview = 1;
-		goTo('backengine/consulta_comunidade.php', 'search_result', 0 + '|<? echo $search_type; ?>', $(this).val());
+		goTo('backengine/consulta_comunidade.php', 'search_result', 0 + '|<?php  echo $search_type; ?>', $(this).val());
 	});
 	
 	let isLoading = false; // Variável para evitar múltiplas requisições

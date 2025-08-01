@@ -113,9 +113,9 @@ if ($post_id && !empty($postData)) {
 		<!-- JQUERY -->
 		<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js"></script>
 		<!-- STYLESHEETS -->
-		<link href="RequestReducedStyle.css" rel="Stylesheet" type="text/css" />
-		<link href="cm-pad.css" rel="Stylesheet" type="text/css" />
-		<link href="sizes.css" rel="Stylesheet" type="text/css" />		
+		<link href="css/RequestReducedStyle.css" rel="Stylesheet" type="text/css" />
+		<link href="css/cm-pad.css" rel="Stylesheet" type="text/css" />
+		<link href="css/sizes.css" rel="Stylesheet" type="text/css" />		
 		<!-- InteractiveJS -->
 		<script type='text/javascript' src="js/interactive.js"></script>
 		<script type='text/javascript' src="js/autosize.js"></script>

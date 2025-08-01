@@ -1,4 +1,4 @@
-<?
+<?php 
 $moderador = 0;	
 //PROFILE
 if(isset($_GET['profile']) && !isset($_GET['company']) && !isset($_GET['team']) && !isset($_GET['post']) && !isset($_GET['p'])){	

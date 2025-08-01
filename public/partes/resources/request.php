@@ -1,4 +1,4 @@
-<?
+<?php
 if(isset($_POST['fnc'])){
 	if($_POST['fnc'] == 'hd'){
 		require_once($_SERVER['DOCUMENT_ROOT'].'/functions/update.php');			
