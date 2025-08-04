@@ -5,6 +5,7 @@ namespace Workz\Platform\Controllers;
 
 use Workz\Platform\Models\General;
 
+
 class UserController
 {
     private General $generalModel;
@@ -13,6 +14,45 @@ class UserController
     {
         $this->generalModel = new General();
     }
+
+    public function me(): void
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        header('Content-Type: application/json; charset=utf-8');
+
+        // 2) Autenticação
+        if (empty($_SESSION['wz'])) {
+            http_response_code(401);
+            echo json_encode([
+                'message' => 'Unauthorized.',
+                'status'  => 'error'
+            ]);
+            exit;
+        }
+
+        $userId = $_SESSION['wz'];
+
+        if ($results = $this->generalModel->search('workz_data', 'hus', ['*'], ['id' => $userId])){
+            $userData = $results[0];
+            http_response_code(200);
+            echo json_encode([
+                'id' => $results[0]['id'],
+                'name' => $results[0]['tt'],
+                'email' => $results[0]['ml']
+            ]);
+            exit;                
+        } else {
+            http_response_code(404);
+            echo json_encode([
+                'message' => 'User not found.',
+                'status'  => 'error'
+            ]);
+            exit;
+        }
+    }
+
 
     public function register(): void
     {
@@ -38,14 +78,14 @@ class UserController
         $password = password_hash($input['password'], PASSWORD_DEFAULT); // Hash da senha
 
         // Verifica se o usuário ou e-mail já existem
-        $existingUser = $this->generalModel->search('users', ['username' => $username], false);
+        $existingUser = $this->generalModel->search('workz_data', 'hus', ['*'], ['tt' => $username], false);
         if ($existingUser) {
             http_response_code(409); // Conflict
             echo json_encode(['message' => 'Username already exists.', 'status' => 'error']);
             return;
         }
 
-        $existingEmail = $this->generalModel->search('users', ['email' => $email], false);
+        $existingEmail = $this->generalModel->search('workz_data','hus', ['*'], ['ml' => $email], false);
         if ($existingEmail) {
             http_response_code(409); // Conflict
             echo json_encode(['message' => 'Email already registered.', 'status' => 'error']);
@@ -53,13 +93,13 @@ class UserController
         }
 
         $data = [
-            'username' => $username,
-            'email' => $email,
-            'password' => $password,
-            'created_at' => date('Y-m-d H:i:s')
+            'tt' => $username,
+            'ml' => $email,
+            'pw' => $password,
+            'dt' => date('Y-m-d H:i:s')
         ];
 
-        $userId = $this->generalModel->insert('users', $data);
+        $userId = $this->generalModel->insert('workz_data','hus', $data);
 
         if ($userId) {
             http_response_code(201); // Created
@@ -68,7 +108,8 @@ class UserController
                 'status' => 'success',
                 'user_id' => $userId
             ]);
-        } else {            http_response_code(500); // Internal Server Error
+        } else {            
+            http_response_code(500); // Internal Server Error
             echo json_encode(['message' => 'Failed to register user.', 'status' => 'error']);
         }
     }

@@ -74,11 +74,11 @@ if ($post_id && !empty($postData)) {
 <html id="html" class="no-js" lang="pt-br">
 	<head>
 		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">		
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 		<meta name="theme-color" content="#FD5F1E" />
 		<meta name="msapplication-navbutton-color" content="#FD5F1E" />
-		<meta name="mobile-web-app-capable" content="yes">		
-		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />		
+		<meta name="mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 		<meta name="description" content='<?php echo $description; ?>'>
 		<meta name="keywords" content="<?php if(isset($keywords)){ echo $keywords; }?>">		
 		<meta name="twitter:site" content="<?php echo $url; ?>" />	
@@ -91,10 +91,10 @@ if ($post_id && !empty($postData)) {
 		<meta property="og:description" content='<?php echo $description; ?>' />
 		<meta property="og:image" content='<?php echo $image; ?>' />
 		<meta property="og:image:width" content="200">
-		<meta property="og:image:height" content="200">	
+		<meta property="og:image:height" content="200">
 		<meta property="fb:app_id" content="377640206404323" />
-		<meta property="fb:admins" content="1152984661440076"/>		
-		<title><?php echo $title; ?></title>		
+		<meta property="fb:admins" content="1152984661440076"/>
+		<title><?php echo $title; ?></title>
 		<!-- Google OAuth for ProtSpot Apps -->
 		<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4004809821575180" crossorigin="anonymous"></script>
 		<meta name="google-signin-client_id" content="142357823160-7ppge23d63vp2urdkcofqn8fbshbhom9.apps.googleusercontent.com">
@@ -137,10 +137,8 @@ if ($post_id && !empty($postData)) {
 				alert('A funcionalidade de compartilhamento não é suportada neste dispositivo/navegador.');
 			}
 		}
-		</script>		
-		<script src="js/ffmpeg.min.js"></script>
-		<script src="js/whammy.js"></script>
-		<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.1/dist/ffmpeg.min.js"></script>
+		</script>				
+		<script src="js/whammy.js"></script>		
 
 		<?php
 		if(isset($pgcl) && !empty($pgcl)){
@@ -199,7 +197,8 @@ if ($post_id && !empty($postData)) {
 		</style>
 		<?php
 		}
-		?>		
+		?>
+		<script src="https://cdn.tailwindcss.com"></script>		
 	</head>
 	<body data-us="<?= (isset($_SESSION['wz']) && $_SESSION['wz'] != '') ? $_SESSION['wz'] : '' ?>" class="background-gray position-absolute abs-t-0 abs-b-0 abs-r-0 abs-l-0" style="max-height: 100%;">
 		
@@ -357,6 +356,7 @@ if ($post_id && !empty($postData)) {
 						?>
 						</div>
 					</div>
+					<script type="module" src="js/main.js"></script>
 					<?php
 					} else {
 						?>

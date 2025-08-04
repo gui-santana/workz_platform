@@ -3,7 +3,7 @@
         'name' => 'workz/platform',
         'pretty_version' => 'dev-master',
         'version' => 'dev-master',
-        'reference' => '9d48dea4ec68a2a9e7bae1fce0bf841901ce6963',
+        'reference' => 'dc2ca63c43a799220da3932bdc8f71c9882df9c5',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -202,7 +202,7 @@
         'workz/platform' => array(
             'pretty_version' => 'dev-master',
             'version' => 'dev-master',
-            'reference' => '9d48dea4ec68a2a9e7bae1fce0bf841901ce6963',
+            'reference' => 'dc2ca63c43a799220da3932bdc8f71c9882df9c5',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

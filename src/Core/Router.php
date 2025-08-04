@@ -13,23 +13,23 @@ class Router
     private array $routes = [];
 
     /**
-     * Adiciona uma nova rota ao roteador.
-     *
-     * @param string $method O método HTTP (GET, POST, etc.)
-     * @param string $uri A URI da rota (ex: /api/users)
-     * @param array $action O Controller e o método a serem executados [Controller::class, 'methodName']
+     * Adiciona uma nova rota. O URI agora pode ser um padrão de regex.
+     * @param string $method
+     * @param string $pattern O padrão de URL (ex: '/api/users/(\d+)/follow')
+     * @param array $action
+     * @param array|null $middleware
      */
-    public function add(string $method, string $uri, array $action): void
+    public function add(string $method, string $pattern, array $action): void
     {
         $this->routes[] = [
             'method' => $method,
-            'uri' => $uri,
+            'pattern' => $pattern, // Mudámos de 'uri' para 'pattern'
             'action' => $action
         ];
     }
-
+    
     /**
-     * Tenta encontrar e executar a rota correspondente à requisição atual.
+     * Procura uma rota que corresponda ao padrão da URI e executa a sua ação.
      *
      * @param string $uri A URI da requisição atual.
      * @param string $method O método da requisição atual.
@@ -37,24 +37,30 @@ class Router
     public function dispatch(string $uri, string $method): void
     {
         foreach ($this->routes as $route) {
-            // Verifica se o método e a URI da rota registrada correspondem à requisição atual.
-            if ($route['uri'] === $uri && $route['method'] === $method) {
+            // Converte o padrão simples para uma expressão regular completa
+            $regex = "#^" . $route['pattern'] . "$#";
+
+            // Verifica se o método corresponde e se o padrão da URI corresponde
+            if ($route['method'] === $method && preg_match($regex, $uri, $matches)) {
                 
-                // Extrai o nome da classe do Controller e o método a ser chamado.
+                // Remove a correspondência completa da URL do array de 'matches'
+                // para que fiquem apenas os parâmetros capturados (ex: o ID).
+                array_shift($matches);
+                $params = $matches;
+
+                $payload = null;                
+
                 $controllerClass = $route['action'][0];
                 $controllerMethod = $route['action'][1];
-
-                // Cria uma nova instância do Controller.
                 $controller = new $controllerClass();
 
-                // Chama o método do Controller.
-                $controller->$controllerMethod();
-                return; // Para a execução após encontrar a rota.
+                // Passa o payload e os parâmetros da URL para o método do controller
+                $controller->$controllerMethod($payload, ...$params);
+                return;
             }
         }
 
-        // Se o loop terminar e nenhuma rota for encontrada, retorna um erro 404.
         http_response_code(404);
-        echo json_encode(['error' => 'Not Found']);
+        echo json_encode(['error' => 'Endpoint Not Found']);
     }
 }

@@ -1,0 +1,7 @@
+# Arquivo: .gitignore
+
+# Ignorar o arquivo de variáveis de ambiente local
+.env
+
+# Ignorar a pasta de dependências do Composer
+/vendor
