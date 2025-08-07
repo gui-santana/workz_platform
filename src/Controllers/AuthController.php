@@ -23,14 +23,14 @@ class AuthController
         $this->googleProvider = new Google([            
             'clientId'     => $_ENV['GOOGLE_CLIENT_ID'],
             'clientSecret' => $_ENV['GOOGLE_CLIENT_SECRET'],
-            'redirectUri'  => 'http://localhost:8080/api/auth/google/callback',
+            'redirectUri'  => 'http://localhost:9090/api/auth/google/callback',
         ]);
 
         // Configuração para a Microsoft
         $this->microsoftProvider = new Azure([
             'clientId'          => $_ENV['MICROSOFT_CLIENT_ID'],
             'clientSecret'      => $_ENV['MICROSOFT_CLIENT_SECRET'],
-            'redirectUri'       => 'http://localhost:8080/api/auth/microsoft/callback',
+            'redirectUri'       => 'http://localhost:9090/api/auth/microsoft/callback',
             'scopes'            => ['openid', 'profile', 'email', 'User.Read'],
             'defaultEndPointVersion' => '2.0'
         ]);
@@ -78,21 +78,26 @@ class AuthController
             }
 
             // A partir daqui, a lógica é a mesma de antes.
-            //$user = $this->generalModel->find(['email' => $email]);
-            $user = $this->generalModel->search('workz_data','hus', ['ml' => $email]);
+            //$user = $this->generalModel->find(['email' => $email]);            
+            $user = $this->generalModel->search('workz_data', 'hus', ['*'], ['ml' => $email], false);
 
-
-            if (!$user) {
-                $newUserId = $this->generalModel->insert('workz_data','hus', [
-                    'tt' => $name,
-                    'ml' => $email,                    
-                    'pd' => $microsoftUser->getId(),
-                    'dt' => date('Y-m-d H:i:s')
-                ]);
-                $user = $this->generalModel->search('workz_data','hus', ['id' => $newUserId]);
+            if ($user && ($user['provider'] === '' || $user['provider'] === null)) {
+                $user['provider'] = 'microsoft';
+                $this->generalModel->update('workz_data', 'hus', ['provider' => $user['provider']], ['id' => $user['id']]);
             }
 
-            $this->generateAndSendToken($user);
+            if (!$user) {
+                $newUserId = $this->generalModel->insert('workz_data','hus', [                    
+                    'tt' => $name,
+                    'ml' => $email,                    
+                    'dt' => date('Y-m-d H:i:s'),                    
+                    'pd' => $microsoftUser->getId(),
+                    'provider' => 'microsoft'
+                ]);
+                $user = $this->generalModel->search('workz_data', 'hus', ['*'], ['id' => $newUserId], false);
+            }
+
+            $this->generateAndSendToken($user, 'social');
 
         } catch (\Exception $e) {
             http_response_code(500);
@@ -133,20 +138,21 @@ class AuthController
             ]);
 
             $googleUser = $this->googleProvider->getResourceOwner($token);
-            $user = $this->generalModel->search('workz_data','hus', ['email' => $googleUser->getEmail()]);
+            $user = $this->generalModel->search('workz_data', 'hus', ['*'], ['ml' => $googleUser->getEmail()], false);
 
             if (!$user) {
-                $newUserId = $this->generalModel->insert('workz_data','hus', $data = [
+                $newUserId = $this->generalModel->insert('workz_data','hus', [                    
                     'tt' => $googleUser->getName(),
-                    'ml' => $googleUser->getEmail(),
+                    'ml' => $googleUser->getEmail(),                    
+                    'dt' => date('Y-m-d H:i:s'),                    
                     'pd' => $googleUser->getId(),
-                    'dt' => date('Y-m-d H:i:s')
-                ]);                
-                $user = $this->generalModel->search('workz_data','hus', ['id' => $newUserId]);
+                    'provider' => 'google'
+                ]);
+                $user = $this->generalModel->search('workz_data', 'hus', ['*'], ['id' => $newUserId], false);
             }
             
             // O método generateAndSendToken redireciona para o frontend.
-            $this->generateAndSendToken($user);
+            $this->generateAndSendToken($user, 'social');
 
         } catch (\Exception $e) {
             http_response_code(500);
@@ -156,48 +162,49 @@ class AuthController
     }
 
     // ===================================================================
-    // Login local
+    // Login local (OK)
     // ===================================================================
     
     public function login(): void
     {
         $data = json_decode(file_get_contents('php://input'), true);
-
+        
         if (empty($data['email']) || empty($data['password'])) {
-            http_response_code(400);
             echo json_encode(['error' => 'Email e senha são obrigatórios.']);
+            http_response_code(400);            
             return;
         }
 
-        $user = $this->generalModel->search('workz_data','hus', ['email' => $data['email']]);
-        //(['email' => $data['email']]);
+        $user = $this->generalModel->search('workz_data','hus', ['id', 'pw', 'tt', 'provider'], ['ml' => $data['email']], false);
 
         // Verificação 1: O usuário foi encontrado no banco?
         if (!$user) {
-            http_response_code(401); // Unauthorized
             echo json_encode(['error' => 'Credenciais inválidas (usuário não encontrado).']);
+            http_response_code(401); // Unauthorized            
             return;
         }
 
         // Verificação 2: A senha foi fornecida no banco? (Para contas locais)
-        if (!isset($user['password']) || $user['password'] === null) {
-            http_response_code(401); // Unauthorized
+        if (!isset($user['pw']) || $user['pw'] === null || empty($user['pw'])) {
             echo json_encode(['error' => 'Esta conta deve ser acessada via login social.']);
-            return;
-        }
-
-        // Verificação 3: A senha corresponde?
-        if (!password_verify($data['password'], $user['password'])) {
             http_response_code(401); // Unauthorized
-            echo json_encode(['error' => 'Credenciais inválidas (senha incorreta).']);
             return;
         }
 
+        // Verificação 3: A senha corresponde?            
+            
+
+        if (!password_verify($data['password'], $user['pw'])) {
+            echo json_encode(['error' => 'Credenciais inválidas (senha incorreta).']);
+            http_response_code(401); // Unauthorized
+            return;
+        }
+        
         // Se tudo passou, gera o token
-        $this->generateAndSendToken($user);
+        $this->generateAndSendToken($user, 'local');
     }
     
-    private function generateAndSendToken(array $user): void
+    private function generateAndSendToken(array $user, string $type = 'local'): void
     {
         $secretKey = $_ENV['JWT_SECRET'];
         $issuedAt = time();
@@ -207,17 +214,17 @@ class AuthController
             'iat'  => $issuedAt,
             'exp'  => $expire,
             'sub'  => $user['id'],
-            'name' => $user['name']
+            'name' => $user['tt']
         ];
 
         $jwt = JWT::encode($payload, $secretKey, 'HS256');
 
         // Verificamos o campo 'provider' do utilizador.
-        $isSocialLogin = ($user['provider'] === 'google' || $user['provider'] === 'microsoft');
+        $isSocialLogin = ($type === 'social' && ($user['provider'] === 'google' || $user['provider'] === 'microsoft'));
 
         if ($isSocialLogin) {
             // LÓGICA PARA LOGIN SOCIAL            
-            $frontendUrl = 'http://localhost:8080';
+            $frontendUrl = 'http://localhost:9090';
             header('Location: ' . $frontendUrl . '?token=' . $jwt);
             exit();
 
@@ -228,7 +235,7 @@ class AuthController
                 'message' => 'Login bem-sucedido!',
                 'token' => $jwt
             ]);
-        }        
+        }   
     }
 
     // ===================================================================
@@ -239,50 +246,75 @@ class AuthController
     {
         $data = json_decode(file_get_contents('php://input'), true);
 
-        //1. Validação dos dados de entrada
-        if(empty($data['name']) || empty($data['email']) || empty($data['password'])){
-            http_response_code(400); //Bad Request
-            echo json_encode(['error' => 'Todos os campos são obrigatórios.']);
+        if (empty($data['name']) || empty($data['email']) || empty($data['password']) || empty($data['password-repeat'])){
+            echo json_encode(['error' => 'Nome de usuário, email e senha são obrigatórios.']);
+            http_response_code(400);            
             return;
         }
 
-        if(!filter_var($data['email'], FILTER_VALIDATE_EMAIL)){
-            http_response_code(400);
-            echo json_encode(['error' => 'Formato de e-mail inválido.']);
+        // Verifica se o email já está em uso
+        $existingUser = $this->generalModel->search('workz_data', 'hus', ['id'], ['ml' => $data['email']], false);
+        if ($existingUser) {
+            echo json_encode(['error' => 'Este email já está registrado.']);
+            http_response_code(409); // Conflict            
             return;
         }
 
-        //2. Verifica se o usuário já existe
-        $existingUser = $this->generalModel->search('workz_data','hus', ['email' => $data['email']]);
-        if($existingUser){
-            http_response_code(400);
-            echo json_encode(['error' => 'Este e-mail já está sendo utilizado.']);
+        // Valida o formato do e-mail
+        if (filter_var($data['email'], FILTER_VALIDATE_EMAIL) === false) {
+            echo json_encode(['error' => 'O formato do e-mail é inválido.']);
+            http_response_code(400);            
             return;
         }
 
-        //3. Cria o novo usuário (o Model irá hashear a senha)
-        $newUserId = $this->generalModel->insert('workz_data','hus', $data = [
+        // Checa se as senhas conferem
+        if ($data['password'] !== $data['password-repeat']) {
+            echo json_encode(['error' => 'As senhas não conferem.']);
+            http_response_code(400);            
+            return;
+        }
+
+        // Valida o formato da senha
+        if (!$this->isValidPassword($data['password'])) {
+            echo json_encode(['error' => 'A senha deve conter pelo menos 8 caracteres, uma letra maiúscula, uma letra minúscula, um número e um caractere especial.']);
+            http_response_code(400);            
+            return;
+        }
+
+        // Criptografa a senha
+        $hashedPassword = password_hash($data['password'], PASSWORD_DEFAULT);        
+        
+
+        $userId = $this->generalModel->insert('workz_data', 'hus', [
             'tt' => $data['name'],
             'ml' => $data['email'],
-            'pw' => $data['password'],
-            'dt' => date('Y-m-d H:i:s')
+            'pw' => $hashedPassword,
+            'dt' => date('Y-m-d H:i:s'),
+            'provider' => 'local' // Indica que é um registro local
         ]);
 
-        //4. Retorna uma resposta de sucesso
-        if($newUserId){
-                        
-            // LÓGICA PARA LOGIN LOCAL (DO FORMULÁRIO)            
-            http_response_code(201);
-            echo json_encode([
-                'userId' => $newUserId,
-                'message' => 'Cadastro bem-sucedido!'                
-            ]);
+        if ($userId) {
+            // Busca o usuário recém-criado para gerar o token
+            $user = $this->generalModel->search('workz_data', 'hus', ['id', 'tt', 'ml', 'provider'], ['id' => $userId], false);            
+            
+            // Verificação 1: O usuário foi encontrado no banco?
+            if (!$user) {
+                echo json_encode(['error' => 'Credenciais inválidas (usuário não encontrado).']);
+                http_response_code(401); // Unauthorized            
+                return;
+            }
 
-        }else{
-            http_response_code(500); //Erro
-            echo json_encode(['error' => 'Ocorreu um erro ao criar a conta.'.$data ]);            
-        }
+            $this->generateAndSendToken($user);
 
+        } else {
+            http_response_code(500);
+            echo json_encode(['error' => 'Falha ao registrar o usuário.']);
+        }        
+    }
+
+    public function isValidPassword($password) {
+        $regex = '/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&.#])[A-Za-z\d@$!%*?&.#]{8,}$/';
+        return preg_match($regex, $password);
     }
 
 }

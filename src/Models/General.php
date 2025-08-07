@@ -25,7 +25,11 @@ class General
     /**
      * Método genérico para inserir dados em uma tabela.
      */
-    public function insert(string $db, string $table, array $data): int|false
+    public function insert(
+        string $db, 
+        string $table, 
+        array $data    
+    ): int|false
     {
         $this->db = Database::getInstance($db);
 

@@ -14,10 +14,11 @@ class AuthMiddleware
      */
     public static function handle(): object
     {
+
         // 1. Pega o cabeçalho de autorização
         if (!isset($_SERVER['HTTP_AUTHORIZATION'])) {
-            http_response_code(401);
             echo json_encode(['error' => 'Token de autenticação não fornecido.']);
+            http_response_code(401);            
             exit();
         }
 
@@ -26,21 +27,23 @@ class AuthMiddleware
         $tokenParts = explode(' ', $authHeader);
 
         if (count($tokenParts) !== 2 || $tokenParts[0] !== 'Bearer') {
-            http_response_code(401);
             echo json_encode(['error' => 'Formato de token inválido.']);
+            http_response_code(401);            
             exit();
         }
 
         $jwt = $tokenParts[1];
         $secretKey = $_ENV['JWT_SECRET']; // A mesma chave usada para criar o token
-
+        
         // 3. Decodifica e valida o token
         try {
-            $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));
+            $decoded = JWT::decode($jwt, new Key($secretKey, 'HS256'));           
+            //echo json_encode(['message' => 'Token válido.']);
+            //http_response_code(200);
             return $decoded;
         } catch (\Exception $e) {
-            http_response_code(401);
             echo json_encode(['error' => 'Token inválido ou expirado.', 'details' => $e->getMessage()]);
+            http_response_code(401);            
             exit();
         }
     }

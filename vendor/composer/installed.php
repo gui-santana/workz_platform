@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'workz/platform',
-        'pretty_version' => 'dev-master',
-        'version' => 'dev-master',
-        'reference' => 'dc2ca63c43a799220da3932bdc8f71c9882df9c5',
+        'pretty_version' => 'dev-main',
+        'version' => 'dev-main',
+        'reference' => '42df9522762a18755080fa3c876baa7d8604a659',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -200,9 +200,9 @@
             'dev_requirement' => false,
         ),
         'workz/platform' => array(
-            'pretty_version' => 'dev-master',
-            'version' => 'dev-master',
-            'reference' => 'dc2ca63c43a799220da3932bdc8f71c9882df9c5',
+            'pretty_version' => 'dev-main',
+            'version' => 'dev-main',
+            'reference' => '42df9522762a18755080fa3c876baa7d8604a659',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

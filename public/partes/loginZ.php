@@ -8,15 +8,6 @@ if(isset($_POST['vr'])) {
 		// Verifica se a decodificação foi bem-sucedida
 		if (json_last_error() === JSON_ERROR_NONE) {								
 
-			session_set_cookie_params([
-				'lifetime' => 0,  // Sessão dura até o navegador ser fechado
-				'path' => '/',
-				'domain' => '.workz.com.br', // Inclui todos os subdomínios
-				'secure' => true,  // Requer HTTPS
-				'httponly' => true,  // Impede acesso via JavaScript
-				'samesite' => 'None'  // Permite compartilhamento entre subdomínios
-			]);
-
 			session_start();
 			
 			require_once('../functions/search.php');

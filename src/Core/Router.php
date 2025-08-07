@@ -19,12 +19,13 @@ class Router
      * @param array $action
      * @param array|null $middleware
      */
-    public function add(string $method, string $pattern, array $action): void
+    public function add(string $method, string $pattern, array $action, ?array $middleware = null): void
     {
         $this->routes[] = [
             'method' => $method,
             'pattern' => $pattern, // Mudámos de 'uri' para 'pattern'
-            'action' => $action
+            'action' => $action,
+            'middleware' => $middleware,
         ];
     }
     
@@ -48,7 +49,12 @@ class Router
                 array_shift($matches);
                 $params = $matches;
 
-                $payload = null;                
+                $payload = null;
+                if ($route['middleware']) {
+                    $middlewareClass = $route['middleware'][0];
+                    $middlewareMethod = $route['middleware'][1];
+                    $payload = $middlewareClass::$middlewareMethod();
+                }
 
                 $controllerClass = $route['action'][0];
                 $controllerMethod = $route['action'][1];

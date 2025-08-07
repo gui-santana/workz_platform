@@ -15,42 +15,28 @@ class UserController
         $this->generalModel = new General();
     }
 
-    public function me(): void
+    /**
+     * Retorna os dados do usuário autenticado.
+     * @param object|null $payload O payload do token JWT injetado pelo roteador.
+     */
+    public function me(?object $payload): void
     {
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
-        }
-        header('Content-Type: application/json; charset=utf-8');
+        // O payload contém o ID do usuário em 'sub' (subject)
+        $userId = $payload->sub;
+        
+        $user = $this->generalModel->search('workz_data','hus', ['*'], ['id' => $userId], false);
 
-        // 2) Autenticação
-        if (empty($_SESSION['wz'])) {
-            http_response_code(401);
-            echo json_encode([
-                'message' => 'Unauthorized.',
-                'status'  => 'error'
-            ]);
-            exit;
-        }
-
-        $userId = $_SESSION['wz'];
-
-        if ($results = $this->generalModel->search('workz_data', 'hus', ['*'], ['id' => $userId])){
-            $userData = $results[0];
-            http_response_code(200);
-            echo json_encode([
-                'id' => $results[0]['id'],
-                'name' => $results[0]['tt'],
-                'email' => $results[0]['ml']
-            ]);
-            exit;                
-        } else {
+        if (!$user) {
             http_response_code(404);
-            echo json_encode([
-                'message' => 'User not found.',
-                'status'  => 'error'
-            ]);
-            exit;
+            echo json_encode(['error' => 'Usuário não encontrado.']);
+            return;
         }
+
+        // Remove a senha do retorno por segurança
+        unset($user['pw']);
+
+        http_response_code(200);
+        echo json_encode($user);
     }
 
 
