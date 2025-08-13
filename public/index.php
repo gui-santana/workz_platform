@@ -5,15 +5,15 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Workz!</title>
         <script src="https://cdn.tailwindcss.com"></script>						
-		<script type='text/javascript' src="js/sweetalert.min.js"></script>
+		<script type='text/javascript' src="/js/sweetalert.min.js"></script>
 		<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js"></script>
 		<link rel="stylesheet" href="/css/main.css">				
-		<link rel="stylesheet" href="css/footerParallax.css" />
+		<link rel="stylesheet" href="/css/footerParallax.css" />
 		<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.15.4/css/all.css" integrity="sha384-DyZ88mC6Up2uqS4h/KRgHuoeGwBcD4Ng9SiP4dIRy0EXTlnuz47vAwmeGwVChigm" crossorigin="anonymous"/>
 		
 		<!-- InteractiveJS -->
-		<script type='text/javascript' src="js/interactive.js"></script>
-		<script type='text/javascript' src="js/autosize.js"></script>
+		<script type='text/javascript' src="/js/interactive.js"></script>
+		<script type='text/javascript' src="/js/autosize.js"></script>
 		<link href="css/interactive.css" rel="stylesheet"/>
 		<script src="https://www.youtube.com/iframe_api"></script>								
 	</head>
@@ -52,11 +52,7 @@
 						<div class="w-full row-span-1 col-span-12 content-center">
 							<img title="Workz!" src="/images/icons/workz_wh/145x60.png"></img>
 						</div>
-						<div id="login" class="px-30 row-span-9 col-span-12 sm:col-span-6 md:col-span-4 content-center  justify-center">
-							<?php
-							//include('partes/loginZ.php');
-							?>														
-						</div>
+						<div id="login" class="px-30 row-span-9 col-span-12 sm:col-span-6 md:col-span-4 content-center  justify-center"></div>
 					</div>
 				</div>
 			</div>
@@ -67,24 +63,12 @@
 						</div>
 					</div>
 				</div>				
-				<script>
-					/*
-				//Ao carregar a janela
-				window.onload = function(){
-					goTo('backengine/timeline.php', 'timeline', '0', '');					
-					timelineScroll('');
-					setTimeout(()=>{
-						observePosts();
-					},500);
-				}
-					*/
-				</script>
 			</div>			
 		</div>
 		<div id="sidebar-wrapper" class="fixed p-0 m-0 top-0 right-0 z-3 w-0 h-full bg-gray-100 overflow-y-auto transition-width duration-500 ease-in-out"></div>
 		<div class="sidebar fixed p-0 m-0 top-0 z-3 bg-gray-100 h-full overflow-y-auto" id="sidebar"></div>
 
-		<script type="module" src="js/main.js"></script>
+		<script type="module" src="/js/main.js"></script>
 
 		<!--link rel="stylesheet" href="css/flickity.css">
 		<link rel="stylesheet" href="/css/fullscreen.css">

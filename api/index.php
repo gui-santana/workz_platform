@@ -65,6 +65,7 @@ $router->add('GET', '/api/auth/microsoft/callback', [AuthController::class, 'han
 $router->add('POST', '/api/insert', [GeneralController::class, 'insert']);
 $router->add('POST', '/api/update', [GeneralController::class, 'update']);
 $router->add('POST', '/api/search', [GeneralController::class, 'search']);
+$router->add('POST', '/api/count', [GeneralController::class, 'count']);
 $router->add('POST', '/api/delete', [GeneralController::class, 'delete']);
 
 // ==================================================

@@ -10,6 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const apiClient = new ApiClient();    
 
     let currentUserData = null;
+    let userPeople = null;
+    let userBusinesses = null;
+    let userTeams = null;
 
    // ===================================================================
     // 🏳️ TEMPLATES - Partes do HTML a ser renderizado
@@ -91,75 +94,46 @@ document.addEventListener('DOMContentLoaded', () => {
             <div id="topbar" class="fixed w-full z-1 content-center">
                 <div class="max-w-screen-xl mx-auto p-7 px-3 xl:px-0 flex items-center justify-between">
                     <a href="/">
-                        <img class="logo-menu" style="width: 145px; height: 76px;" title="Workz!" src="/images/logos/workz/145x76.png">
+                        <!--img class="logo-menu" style="width: 145px; height: 76px;" title="Workz!" src="/images/logos/workz/145x76.png"-->
                     </a>
                     <img class="page-thumb h-11 w-11 shadow-lg pointer object-cover rounded-full pointer" src="/images/no-image.jpg" />
                 </div>
             </div>                  
             <div id="workz-content" class="mt-[132px] max-w-screen-xl px-3 xl:px-0 mx-auto clearfix grid grid-cols-12 gap-6">
-                <div class="col-span-12 md:col-span-8 flex-col grid grid-cols-12 gap-x-6">
+                <div class="col-span-12 md:col-span-9 flex flex-col grid grid-cols-12 gap-x-6">
                     <!-- Coluna da Esquerda (Menu de Navegação) -->
-                    <aside class="w-full flex col-span-4 md:col-span-3 flex flex-col gap-y-6">
-                        <img id="profile-image" class="w-full flex rounded-full shadow-lg" src="/images/no-image.jpg" alt="Foto do Utilizador">                        
-                        <div class="mt-3 bg-white p-3 rounded-3xl shadow-lg grow font-semibold">
+                    <aside class="w-full flex col-span-4 md:col-span-3 flex flex-col gap-y-6">                        
+                        <div class="aspect-square w-full rounded-full shadow-lg overflow-hidden">
+                            <img id="profile-image" class="w-full h-full object-cover" src="/images/no-image.jpg" alt="Imagem da página">
+                        </div>
+                        <div class="bg-white p-3 rounded-3xl font-semibold shadow-lg grow">
                             <nav class="mt-1">
                                 <ul id="custom-menu" class="space-y-3"></ul>
                             </nav>
                             <hr class="mt-3 mb-3">
                             <nav class="mb-1">
                                 <ul class="space-y-3">
-                                    <li>
-                                        <div href="#pessoas" class="rounded-3xl flex items-center gap-2 hover:bg-gray-100 truncate">
-                                            <span class="fa-stack">
-                                                <i class="fas fa-circle fa-stack-2x"></i>
-                                                <i class="fas fa-user-friends fa-stack-1x fa-inverse"></i>					
-                                            </span>
-                                            <a class="truncate">Pessoas</a>
-                                        </div>
-                                    </li>
-                                    <li>
-                                        <div href="#businesses" class="rounded-3xl flex items-center gap-2 hover:bg-gray-100">
-                                            <span class="fa-stack">
-                                                <i class="fas fa-circle fa-stack-2x"></i>
-                                                <i class="fas fa-briefcase fa-stack-1x fa-inverse"></i>					
-                                            </span>
-                                            <a class="truncate">Negócios</a>
-                                        </div>
-                                    </li>
-                                    <li>
-                                        <div href="#" class="rounded-3xl flex items-center gap-2 text-gray-400 cursor-not-allowed truncate">
-                                            <span class="fa-stack">
-                                                <i class="fas fa-circle fa-stack-2x"></i>
-                                                <i class="fas fa-users fa-stack-1x fa-inverse"></i>					
-                                            </span>
-                                            <a class="truncate">Equipes</a>
-                                        </div>
-                                    </li>
-                                    <li>
-                                        <div href="#" id="logout-btn-sidebar" class="rounded-3xl flex items-center gap-2 hover:bg-gray-100 truncate">
-                                            <span class="fa-stack">
-                                                <i class="fas fa-circle fa-stack-2x"></i>
-                                                <i class="fas fa-sign-out-alt fa-stack-1x fa-inverse"></i>	
-                                            </span>
-                                            <a class="truncate">Sair</a>
-                                        </div>
-                                    </li>
+                                    <li><div href="#pessoas" class="rounded-3xl flex items-center gap-2 hover:bg-gray-100 truncate"><span class="fa-stack"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-user-friends fa-stack-1x fa-inverse"></i></span><a class="truncate">Pessoas</a></div></li>
+                                    <li><div href="#businesses" class="rounded-3xl flex items-center gap-2 hover:bg-gray-100"><span class="fa-stack"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-briefcase fa-stack-1x fa-inverse"></i></span><a class="truncate">Negócios</a></div></li>
+                                    <li><div href="#" class="rounded-3xl flex items-center gap-2 text-gray-400 cursor-not-allowed truncate"><span class="fa-stack"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-users fa-stack-1x fa-inverse"></i></span><a class="truncate">Equipes</a></div></li>
+                                    <li><div href="#" id="logout-btn-sidebar" class="rounded-3xl flex items-center gap-2 hover:bg-gray-100 truncate"><span class="fa-stack"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-sign-out-alt fa-stack-1x fa-inverse"></i></span><a class="truncate">Sair</a></div></li>
                                 </ul>
-                            </nav>                                                                                                    
+                            </nav>
                         </div>
                     </aside>
                     <!-- Coluna do Meio (Conteúdo Principal) -->
                     <main class="col-span-8 md:col-span-9 flex-col relative space-y-6">                        
-                        <div id="main-content" class="w-full shadow-xl rounded-3xl bg-white"></div>
+                        <div id="main-content" class="w-full"></div>
                         <div id="editor-trigger" class="shadow-lg w-full bg-white rounded-3xl text-center"></div>
                     </main>
                     <!-- Feed de Publicações -->
-                    <div id="timeline" class="col-span-12 flex flex-col grid grid-cols-12 gap-6"></div>
+                    <div id="timeline" class="col-span-12 flex flex-col grid grid-cols-12 gap-6 pt-6"></div>
+                    <div id="feed-sentinel" class="h-10"></div>
                 </div>
-                <aside class="col-span-4 flex flex-col  gap-y-6">                    
-                    <div id="widget-people" class="bg-white p-3 rounded-3xl shadow-lg"></div>
-                    <div id="widget-teams" class="bg-white p-3 rounded-3xl shadow-lg"></div>
-                    <div id="widget-businesses" class="bg-white p-3 rounded-3xl shadow-lg"></div>                    						
+                <aside class="col-span-12 md:col-span-3 flex flex-col gap-y-6">                    
+                    <div id="widget-people"></div>
+                    <div id="widget-businesses"></div>
+                    <div id="widget-teams"></div>                    
                 </aside>                
             </div>            										
         </div>
@@ -178,9 +152,17 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         mainContent: `
-            <div class="w-full rounded-3xl p-3" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
-                <div class="w-full pb-3 text-white font-bold content-center text-shadow-lg"><div id="wClock" class="text-lg">00:00</div></div>
-                <div id="appContainer" class="rounded-3xl p-3 px-0 bg-white/50 w-full shadow-lg backdrop-blur-sm"></div>
+            <div class="w-full grid grid-cols-12 gap-6 rounded-3xl p-6" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
+                <div class="col-span-12 lg:col-span-8 grid grid-cols-12 gap-4">
+                    <div class="col-span-12 text-white font-bold content-center text-shadow-lg flex items-center justify-between">
+                        <div id="wClock" class="text-md">00:00</div>
+                        <div id="wSearch" class="p-1"><i class="fas fa-search"></i></div>
+                    </div>
+                    <div id="app-library" class="col-span-12"></div> 
+                </div>
+                <div class="shadow-lg rounded-3xl hidden lg:block col-span-4 lg:h-full bg-white/50 backdrop-blur p-3">
+                    <p class="truncate">Terça-feira, 12 de agosto</p>
+                </div>
             </div>
         `,
 
@@ -203,47 +185,8 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `,
 
-        widgetPeople: `        
-            <div class="w-full content-center mb-3 mt-1">
-                <span class="fa-stack">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-user-friends fa-stack-1x fa-inverse"></i>					
-                </span>
-                <a class="font-semibold"> Seguindo</a>
-            </div>
-            <div class="rounded-3xl w-full p-3 truncate flex items-center gap-2" style="background: #F7F8D1;">
-                <i class="fas fa-info-circle cm-mg-5-r"></i><a class="truncate">Nenhuma página de usuário.</a>
-            </div>                                                            
-        `,
-
-        widgetTeams: `
-            <div class="w-full content-center mb-3 mt-1">                            
-                <span class="fa-stack">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-users fa-stack-1x fa-inverse"></i>
-                </span>
-                <a class="font-semibold"> Equipes</a>
-            </div>                    
-            <div class="rounded-3xl w-full p-3 truncate flex items-center gap-2" style="background: #F7F8D1;">
-                <i class="fas fa-info-circle cm-mg-5-r"></i><a class="truncate">Nenhuma página de equipe.</a>
-            </div>        
-        `,
-
-        widgetBusinesses: `
-            <div class="w-full content-center mb-3 mt-1">                            
-                <span class="fa-stack">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-briefcase fa-stack-1x fa-inverse"></i>
-                </span>
-                <a class="font-semibold"> Negócios</a>
-            </div>                    
-            <div class="rounded-3xl w-full p-3 truncate flex items-center gap-2" style="background: #F7F8D1;">
-                <i class="fas fa-info-circle cm-mg-5-r"></i><a class="truncate">Nenhuma página de negócio.</a>
-            </div>        
-        `,
-
         dashboardMain: (currentUserData) => `
-            <div class="bg-white p-4 rounded-3xl shadow-lg mb-6">                
+            <div class="bg-white p-4 rounded-3xl shadow-lg mb-6 ">                
                 <div id="app-launcher-list" class="flex flex-wrap gap-4">
                     <!-- Ícones das Apps serão gerados aqui -->
                 </div>
@@ -421,6 +364,133 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    templates.entityContent = async ({ data }) => {
+        console.log(data);
+        const content = `
+            <div class="rounded-3xl w-full p-4 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1),0_-4px_6px_-2px_rgba(0,0,0,0.05)]">
+                <h2 class="text-2xl font-semibold">${data.tt}</h2>
+                <div class="grid grid-cols-3 flex-wrap gap-4 mt-6 mb-6">
+                    <div class="col-span-1 flex items-center text-center justify-center">
+                        <p><small class="text-gray-500">Publicações</small><br>${data.postsCount}</p>
+                    </div>
+                    <div class="col-span-1 flex items-center text-center justify-center">                        
+				        <p><small class="text-gray-500">Seguidores</small><br>${data.followersCount}</p>
+                    </div>
+                    <div class="col-span-1 flex items-center text-center justify-center">
+                        <p><small class="text-gray-500">Seguindo</small><br>${data.peopleCount}</p>
+                    </div>
+                </div>
+                ${data.cf}
+            </div>
+        `;
+
+        return content;
+    };
+
+    templates.appLibrary = async ({ appsList }) => {
+        const resolved = await fetchByIds(appsList, 'apps'); // cada app: { id, tt, ic } etc.
+        const pageSize = 8; // 4 col x 2 linhas
+
+        const pages = [];
+        for (let i = 0; i < resolved.length; i += pageSize) {
+            pages.push(resolved.slice(i, i + pageSize));
+        }
+
+        const pageSlides = pages.map(page => `
+            <div class="min-w-full grid grid-cols-3 grid-rows-3 sm:grid-cols-4 sm:grid-rows-2 gap-4 p-4">
+            ${page.map(app => `                
+                <button class="flex flex-col items-center gap-1">
+                    <div class="relative rounded-full overflow-hidden bg-gray-300 aspect-square w-full shadow-lg">
+                        <div class="absolute inset-0 bg-center bg-cover" style="background-image:url('${'data:image/png;base64,' + app.im || '/images/app-default.png'}');"></div>
+                    </div>
+                    <span class="text-xs text-white text-shadow-lg truncate w-full text-center">${app.tt || 'App'}</span>
+                </button>
+            `).join('')}
+            </div>
+        `).join('');
+
+        const dots = pages.map((_, i) =>
+            `<button data-idx="${i}" class="w-2 h-2 rounded-full ${i===0?'bg-white':'bg-gray-300'}"></button>`
+        ).join('');
+
+        // container raiz com track deslizante
+        return `
+            <div id="app-library" class="relative select-none">
+                <div class="overflow-hidden rounded-3xl bg-white/50 backdrop-blur">
+                    <div class="flex transition-transform duration-300 will-change-transform" data-role="track" style="transform:translateX(0%)">
+                    ${pageSlides}
+                    </div>
+                    <div class="flex justify-center gap-2 3 mb-4" data-role="dots">
+                        ${dots}
+                    </div>
+                </div>            
+            </div>
+        `;
+    };
+
+    templates.widgetGrid = async ({ type = 'people', gridList, count }) => {
+        // people aqui são IDs; resolvemos antes de tudo
+        const resolved = await fetchByIds(gridList, type);            
+
+        count = Number(count) ?? 0;
+        const visorCount = count > 0 ? ` (${count})` : '';
+        const fontAwesome = type === 'people' ? 'fas fa-user-friends' : type === 'teams' ? 'fas fa-users' : 'fas fa-briefcase';
+        const title = type === 'people' ? 'Seguindo' : type === 'teams' ? 'Equipes' : 'Negócios';
+
+        // monta o grid (ou o vazio) sem ternário com várias linhas
+        let gridHtml = '';
+        if (count > 0) {
+            const cards = resolved.map(p => `
+            <div class="relative rounded-2xl overflow-hidden bg-gray-300 aspect-square">
+                <div class="absolute inset-0 bg-center bg-cover" style="background-image: url('${'data:image/png;base64,' + p.im || '/images/default-avatar.jpg'}');"></div>
+                <div class="absolute h-full inset-x-0 bottom-0 bg-black/20 text-white font-medium px-2 py-1 truncate">
+                    <div class="absolute bottom-0 left-0 right-0 p-2 text-xs text-shadow-lg truncate text-center">${p.tt || 'Usuário'}</div>
+                </div>
+            </div>                                
+            `).join('');
+
+            gridHtml = `
+            <div class="grid grid-cols-3 gap-3 min-w-0">
+                ${cards}
+            </div>
+            `;
+        } else {
+            gridHtml = `
+            <div class="rounded-3xl w-full p-3 truncate flex items-center gap-2" style="background:#F7F8D1;">
+                <i class="fas fa-info-circle cm-mg-5-r"></i>
+                <span class="truncate">Nenhuma página de usuário.</span>
+            </div>
+            `;
+        }
+
+        return `
+        <div class="bg-white p-3 rounded-3xl shadow-lg">
+            <div class="w-full content-center mb-3 mt-1">
+                <span class="fa-stack">
+                    <i class="fas fa-circle fa-stack-2x"></i>
+                    <i class="fas ${fontAwesome} fa-stack-1x fa-inverse"></i>
+                </span>
+                <a class="font-semibold"> ${title}${visorCount}</a>
+            </div>
+            ${gridHtml}
+        </div>
+        `;
+    };
+
+    function appendFeed ( items ) {
+        const timeline = document.querySelector('#timeline');
+        const html = items.map(post => `
+        <article class="col-span-12 sm:col-span-6 lg:col-span-4 flex flex-col bg-white p-4 rounded-3xl shadow-lg aspect-[3/4]">
+            <header class="text-sm text-gray-500 mb-1">
+                <span class="font-medium">${post.us}</span> • <time>${new Date(post.dt).toLocaleString()}</time>
+            </header>
+            ${post.tt ? `<h3 class="font-semibold mb-1">${post.tt}</h3>` : ''}                        
+        </article>
+        `).join('');
+
+        timeline.insertAdjacentHTML('beforeend', html);
+    }
+
     // ===================================================================
     // 😉 ANIMAÇÃO E RENDERIZAÇÃO
     // ===================================================================
@@ -450,19 +520,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function renderTemplate(container, template, data = null, onRendered = null) {
-        await fadeTransition(container, async () => {
-           if (typeof template === 'string' && templates[template]) {
-                container.innerHTML = templates[template];
-            } else if (typeof template === 'function') {
-                container.innerHTML = template(data);
-            } else {
-                console.error('Template inválido.');
-                return; // Sai se o template for inválido
-            }
-            // Executa o callback DEPOIS que o HTML foi inserido no DOM
-            if (onRendered) await onRendered();
-        });
+    await fadeTransition(container, async () => {
+        if (typeof template === 'string' && templates[template]) {
+        container.innerHTML = templates[template];
+        } else if (typeof template === 'function') {
+        const result = template.length >= 1 ? template(data) : template(); // chama
+        container.innerHTML = result instanceof Promise ? await result : result; // aguarda se for Promise
+        } else {
+        console.error('Template inválido.');
+        return;
+        }
+        if (onRendered) await onRendered();
+    });
     }
+
     
     // ===================================================================
     // 🧠 LÓGICA DE INICIALIZAÇÃO
@@ -476,8 +547,7 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem('jwt_token', urlToken);
             window.history.replaceState({}, '', '/');
             
-        }
-        console.log(localStorage);
+        }        
         if (!localStorage.getItem('jwt_token')) {
             renderTemplate(loginWrapper, 'init', null, () => {
                 renderLoginUI();
@@ -489,60 +559,561 @@ document.addEventListener('DOMContentLoaded', () => {
         const isInitialized = await initializeCurrentUserData();
         if (!isInitialized) return;
 
+        // Obtem os dados do usuário logado
+
+        // Pessoas
+        userPeople = await apiClient.post('/search', {
+            db: 'workz_data',
+            table: 'usg',
+            columns: ['s1'],
+            conditions: {
+                s0: currentUserData.id
+            },
+            exists: [{
+                table: 'hus',           // tabela a checar
+                local: 's1',            // coluna da tabela principal (usg.s1)
+                remote: 'id',           // coluna da outra tabela (hus.id)                
+                conditions: { st: 1 }   // filtros extras na tabela hus
+            }],
+            order: { by: 's1', dir: 'DESC' },
+            fetchAll: true
+        });
+        userPeople = userPeople.data.map(o => o.s1);        
+
+        // Negócios
+        userBusinesses = await apiClient.post('/search', {
+            db: 'workz_companies',
+            table: 'employees',
+            columns: ['em'],
+            conditions: {
+                us: currentUserData.id,
+                st: 1
+            },
+            exists: [{
+                table: 'companies',     // tabela a checar
+                local: 'em',            // coluna da tabela principal (employees.em)
+                remote: 'id',           // coluna da outra tabela (companies.id)
+                conditions: { st: 1 }   // filtros extras na tabela companies
+            }],
+            order: { by: 'em', dir: 'DESC' },
+            fetchAll: true         
+        });
+        userBusinesses = userBusinesses.data.map(o => o.em);        
+
+        // Equipes
+        userTeams = await apiClient.post('/search', {
+            db: 'workz_companies',
+            table: 'teams_users',
+            columns: ['cm'],
+            conditions: {
+                us: currentUserData.id,
+                st: 1
+            },
+            exists: [{
+                table: 'teams',         // tabela a checar
+                local: 'cm',            // coluna da tabela principal (user_teams.cm)
+                remote: 'id',           // coluna da outra tabela (teams.id)
+                conditions: { st: 1 }   // filtros extras na tabela teams
+            }],
+            order: { by: 'cm', dir: 'DESC' },
+            fetchAll: true
+        });
+        userTeams = userTeams.data.map(o => o.cm);        
+        
         // Verifica se a URL deve redirecionar a uma página específica
         const path = window.location.pathname;
         const profileMatch = path.match(/^\/profile\/(\d+)$/);
         const businessMatch = path.match(/^\/business\/(\d+)$/);
+        const teamMatch = path.match(/^\/team\/(\d+)$/);
         const peopleListMatch = path.match(/^\/people$/);
-        const businessListMatch = path.match(/^\/businesses$/);
-        
-        console.log(currentUserData);
+        const businessListMatch = path.match(/^\/businesses$/);                
 
         if (peopleListMatch) {
             return;
         } else if (businessListMatch) {
             return;
-        } else {            
-            if (profileMatch) {
-                return;
-            } else if (businessMatch) {                    
-                return;
-            }else{
+        } else {
+            if (profileMatch) {                
                 renderTemplate(mainWrapper, 'dashboard', null, () => {
-                    $('#loading').delay(250).fadeOut();
-                    // Render widgets em paralelo
-                    Promise.all([
-                        renderTemplate(document.querySelector('#custom-menu'), 'customMenu', null),
-                        renderTemplate(document.querySelector('#main-content'), 'mainContent', null, () => {
-                            startClock();
-                        }),
-                        renderTemplate(document.querySelector('#editor-trigger'), templates['editorTrigger'], currentUserData),
-                        renderTemplate(document.querySelector('#widget-people'), 'widgetPeople', null),
-                        renderTemplate(document.querySelector('#widget-teams'), 'widgetTeams', null),
-                        renderTemplate(document.querySelector('#widget-businesses'), 'widgetBusinesses', null)
-                    ]).then(() => {
-                        // Eventos e interações
-                        document.getElementById('logout-btn-sidebar').addEventListener('click', handleLogout);
-                        
-
-                        document.querySelector('#profile-image').src = 'data:image/png;base64,' + currentUserData.im;
-
-                        // Só agora altera a imagem dos thumbs
-                        const pageThumbs = document.getElementsByClassName('page-thumb');
-                        for (let i = 0; i < pageThumbs.length; i++) {
-                            pageThumbs[i].src = 'data:image/png;base64,' + currentUserData.im;
-                        }
-
-                        // Finalizações                        
-                        topBarScroll();
-                        
-                    });             
+                    renderView('profile', parseInt(profileMatch[1], 10));
+                });  
+                return;
+            } else if (businessMatch) {
+                renderTemplate(mainWrapper, 'dashboard', null, () => {
+                    renderView('business', parseInt(businessMatch[1], 10));
+                });  
+                return;                
+            } else if (teamMatch) {
+                renderTemplate(mainWrapper, 'dashboard', null, () => {
+                    renderView('team', parseInt(teamMatch[1], 10));
+                });  
+                return;                
+            } else {
+                renderTemplate(mainWrapper, 'dashboard', null, () => {                    
+                    renderView();
                 });                
-            }         
+            }
+        }        
+    }    
+
+    // mapeia type -> banco/tabela    
+    
+    function uniqueArray(arr) {
+        return Array.isArray(arr) ? [...new Set(arr)] : [];
+    }
+
+    async function renderView(type = 'dashboard', entity = currentUserData) {
+        // Normaliza o ID que vai para a query
+        const entityId = typeof entity === 'object' && entity !== null ? entity.id : entity;
+        let entityData = [];
+
+        // Always-defines
+        let widgetPeople = [];
+        let widgetBusinesses = [];
+        let widgetTeams = [];
+        let widgetPeopleCount = 0;
+        let widgetBusinessesCount = 0;
+        let widgetTeamsCount = 0;
+        let entityImage = '';
+
+        // DASHBOARD: usa caches/globais já carregados
+        if (type === 'dashboard') {            
+
+            const ppl = Array.isArray(userPeople) ? userPeople : [];
+            const biz = Array.isArray(userBusinesses) ? userBusinesses : [];
+            const teams = Array.isArray(userTeams) ? userTeams : [];
+
+            widgetPeople = ppl.slice(0, 6);
+            widgetBusinesses = biz.slice(0, 6);
+            widgetTeams = teams.slice(0, 6);
+            widgetPeopleCount = ppl.length;
+            widgetBusinessesCount = biz.length;
+            widgetTeamsCount = teams.length;
+
+            entityImage = 'data:image/png;base64,' + currentUserData.im;
+
+        // OUTRAS ROTAS: define o que buscar
+        } else {
+            
+            let entityMap = {};
+            let entitiesToFetch = [];
+            if (type === 'profile') {
+                entityMap = {
+                    people:     { db: 'workz_data',      table: 'usg',             target: 's1', conditions: { s0: entityId }, mainDb: 'workz_data', mainTable: 'hus' },
+                    businesses: { db: 'workz_companies', table: 'employees',       target: 'em', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'companies' },
+                    teams:      { db: 'workz_companies', table: 'teams_users',     target: 'cm', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'teams' },
+                }; 
+                entitiesToFetch = ['people', 'businesses', 'teams'];                
+            } else if (type === 'business') {
+                entityMap = {
+                    people:     { db: 'workz_companies', table: 'employees',       target: 'us', conditions: { em: entityId }, mainDb: 'workz_data', mainTable: 'hus' },                    
+                    teams:      { db: 'workz_companies', table: 'teams',           target: 'id', conditions: { em: entityId, st: 1 } },
+                    businesses: { db: 'workz_companies', table: 'employees',       target: 'em', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'companies' },
+                }; 
+                entitiesToFetch = ['people', 'teams'];
+            } else if  (type === 'team') {
+                entityMap = {
+                    people:     { db: 'workz_companies', table: 'teams_users',     target: 'us', conditions: { cm: entityId }, mainDb: 'workz_data', mainTable: 'hus' },
+                    teams:      { db: 'workz_companies', table: 'teams_users',     target: 'cm', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'teams' }
+                }; 
+                entitiesToFetch = ['people'];
+            }
+
+            // Define o tipo de entidade
+            let entityType = (type === 'profile') ? 'people' : (type === 'business')   ? 'businesses' : 'teams';
+
+            // Busca dados da entidade
+            entityData = await apiClient.post('/search', {
+                db: entityMap[entityType].db,
+                table: entityMap[entityType].mainTable,
+                columns: ['*'],
+                conditions: { ['id']: entityId }
+            }); 
+
+            // Verifica se entidade existe
+            if (entityData.data.length === 0) {
+                $('#loading').delay(250).fadeOut();                
+                return;
+            }                        
+
+            if (!entitiesToFetch.length) {
+                // nada a buscar — evita loop vazio
+                // ... render mínimo/placeholder se precisar
+                return;
+            }        
+
+            // Busca tudo em paralelo
+            const resultsArray = await Promise.all(
+                entitiesToFetch.map(async (key) => {
+                    const cfg = entityMap[key];
+                    try {
+                        const [res, num] = await Promise.all([
+                            
+                            // Primeiro: busca os 6 primeiros registros
+                            (async () => {
+                                const payload = {
+                                    db: cfg.db,
+                                    table: cfg.table,
+                                    columns: [cfg.target],       // queremos o alvo (ex.: s1)
+                                    conditions: cfg.conditions,  // filtrando pela conditions (ex.: s0)
+                                    distinct: true,
+                                    order: { by: cfg.target, dir: 'DESC' },
+                                    fetchAll: true,
+                                    limit: 6
+                                };
+
+                                // Só adiciona exists se mainDb e mainTable existirem
+                                if (cfg.mainDb && cfg.mainTable) {
+                                    payload.exists = [{
+                                        db: cfg.mainDb,
+                                        table: cfg.mainTable,       // tabela a checar
+                                        local: cfg.target,          // coluna da tabela principal (usg.s1)
+                                        remote: 'id',               // coluna da outra tabela (hus.id)
+                                        conditions: { st: 1 }       // filtros extras na tabela hus
+                                    }];
+                                }
+
+                                return apiClient.post('/search', payload);
+                            })(),
+
+                            // Segundo: conta todos
+                            (async () => {
+                                const countPayload = {
+                                    db: cfg.db,
+                                    table: cfg.table,
+                                    conditions: cfg.conditions
+                                };
+
+                                if (cfg.mainDb && cfg.mainTable) {
+                                    countPayload.exists = [{
+                                        db: cfg.mainDb,
+                                        table: cfg.mainTable,
+                                        local: cfg.target,
+                                        remote: 'id',
+                                        conditions: { st: 1 }
+                                    }];
+                                }
+
+                                return apiClient.post('/count', countPayload);
+                            })()
+                        ]);
+
+                        const list = Array.isArray(res?.data) ? res.data.map(row => row[cfg.target]) : [];
+                        const count = num?.data?.count ?? num?.count ?? 0;
+                        return [key, list, count];
+
+                    } catch (e) {
+                        // Em caso de erro numa entidade, não derruba as demais
+                        console.error(`Falha buscando ${key}:`, e);
+                        return [key, [], 0];
+                    }
+                })
+            );
+
+            // Monta objeto de saída
+            const results = {};
+            for (const [key, list, count] of resultsArray) {
+                const safeList = Array.isArray(list) ? list : [];
+                results[key] = safeList;
+                results[`${key}Count`] = count;               
+            }                         
+
+            let postConditions = { st: 1 };
+            let followersConditions = {};
+            if (type === 'profile') {
+                postConditions.us = entityId;
+                postConditions.em = 0;
+                postConditions.cm = 0;
+                followersConditions.s1 = entityId;
+            } else if (type === 'business') {
+                postConditions.em = entityId;
+            } else if (type === 'team') {
+                postConditions.cm = entityId;
+            }
+
+            // Obtém o número de publicações
+            let postsCount = await apiClient.post('/count', {
+                db: 'workz_data',
+                table: 'hpl',
+                conditions: postConditions                
+            });
+           
+            results.postsCount = postsCount.count;
+
+            const needFollowers = Object.keys(followersConditions).length > 0;
+            // Só chama a contagem de seguidores se houver condições
+            if (needFollowers) {
+                const followersCount = await apiClient.post('/count', {
+                    db: 'workz_data',
+                    table: 'usg',
+                    conditions: { s1: entityId }, // Ex.: quem segue este perfil
+                    distinct: 's0',               // (mapeie para $distinctCol no backend)
+                    exists: [{
+                        db: 'workz_data',
+                        table: 'hus',
+                        local: 's1',
+                        remote: 'id',
+                        conditions: { st: 1 }
+                    }]
+                });
+                results.followersCount = followersCount.count;
+            };
+
+            Object.assign(entityData.data[0], results);            
+           
+            entityImage = 'data:image/png;base64,' + entityData.data[0].im ?? '/images/no-image.jpg';
+
+            // Atribuições com fallback
+            widgetPeople = results.people ?? [];
+            widgetBusinesses = results.businesses ?? [];
+            widgetTeams = results.teams ?? [];
+            widgetPeopleCount = results.peopleCount ?? 0;
+            widgetBusinessesCount = results.businessesCount ?? 0;
+            widgetTeamsCount = results.teamsCount ?? 0;        }
+        
+        Promise.all([            
+            // Menu customizado
+            renderTemplate(document.querySelector('#custom-menu'), 'customMenu', null),
+            // Gatilhos de criação de conteúdo
+            renderTemplate(document.querySelector('#editor-trigger'), templates['editorTrigger'], currentUserData),
+            
+            // Widgets
+            widgetPeople.length
+                ? renderTemplate(document.querySelector('#widget-people'), templates['widgetGrid'], { gridList: widgetPeople, count: widgetPeopleCount })
+                : Promise.resolve(),
+            widgetBusinesses.length
+                ? renderTemplate(document.querySelector('#widget-businesses'), templates['widgetGrid'], { type: 'businesses', gridList: widgetBusinesses, count: widgetBusinessesCount })
+                : Promise.resolve(),
+            widgetTeams.length
+                ? renderTemplate(document.querySelector('#widget-teams'), templates['widgetGrid'], { type: 'teams', gridList: widgetTeams, count: widgetTeamsCount })
+                : Promise.resolve(),
+
+            (type === 'dashboard')
+                ? 
+                // Conteúdo principal (Dashboard)
+                renderTemplate(document.querySelector('#main-content'), 'mainContent', null, async () => {
+                    startClock();
+                    // Aplicativos
+                    let userApps = await apiClient.post('/search', {
+                        db: 'workz_apps',
+                        table: 'gapp',
+                        columns: ['ap'],
+                        conditions: {
+                            us: currentUserData.id,
+                            st: 1
+                        },
+                        fetchAll: true
+                    });
+                    userApps = userApps.data.map(o => o.ap);                
+                    await renderTemplate(document.querySelector('#app-library'), templates.appLibrary, { appsList: userApps }, () => initAppLibrary('#app-library'));
+                })
+                : Promise.resolve(),
+            
+            (type !== 'dashboard')
+                ?
+                // Conteúdo principal (Perfil, Negócio ou Equipe)
+                renderTemplate(document.querySelector('#main-content'), templates['entityContent'], { data: entityData.data[0] } )
+                : Promise.resolve(),
+
+            // Gatilhos de botões
+            document.getElementById('logout-btn-sidebar').addEventListener('click', handleLogout),
+            // Imagem da página
+            document.querySelector('#profile-image').src = entityImage
+        ]).then(() => {                        
+            const pageThumbs = document.getElementsByClassName('page-thumb');
+            for (let i = 0; i < pageThumbs.length; i++) {
+                pageThumbs[i].src = 'data:image/png;base64,' + currentUserData.im;
+            }
+
+            // Finalizações
+            loadFeed(type, entity);
+            initFeedInfiniteScroll(type, entity);
+            //topBarScroll();      
+            $('#loading').delay(250).fadeOut();                                          
+        });
+    }
+
+    // mapeia type -> banco/tabela
+    const typeMap = {
+        people:      { db: 'workz_data',      table: 'hus',       idCol: 'id' },
+        businesses:  { db: 'workz_companies', table: 'companies', idCol: 'id' },
+        teams:       { db: 'workz_companies', table: 'teams',     idCol: 'id' },
+        apps:        { db: 'workz_apps',      table: 'apps',      idCol: 'id' }
+    };
+
+    async function fetchByIds(ids = [], type = 'people') {
+        const cfg = typeMap[type] || typeMap.people;
+        const uniqueIds = [...new Set(ids)].filter(Boolean);
+        if (uniqueIds.length === 0) return [];
+
+        // 1) Busca em lote usando IN
+        const res = await apiClient.post('/search', {
+            db: cfg.db,
+            table: cfg.table,
+            columns: ['id', 'tt', 'im'],          // ajuste as colunas necessárias
+            conditions: { [cfg.idCol]: { op: 'IN', value: uniqueIds } },
+            order: { by: 'tt', dir: 'ASC' },
+            fetchAll: true,
+            limit: uniqueIds.length
+        });
+
+        // supondo que a API devolva { data: [...] }
+        const list = Array.isArray(res?.data) ? res.data : res;
+
+        // 2) Reordena pra manter a mesma ordem de entrada
+        const byId = new Map(list.map(item => [item.id, item]));
+        return ids.map(id => byId.get(id) || { id, tt: 'Item', im: '/images/default-avatar.jpg' });
+    }
+
+    function initAppLibrary(root = '#app-library') {
+        const el = typeof root === 'string' ? document.querySelector(root) : root;
+        if (!el) return;
+
+        const track = el.querySelector('[data-role="track"]');
+        const dotEls = [...el.querySelectorAll('[data-role="dots"] button')];
+        const prev = el.querySelector('[data-role="prev"]');
+        const next = el.querySelector('[data-role="next"]');
+
+        let page = 0;
+        const total = dotEls.length;
+
+        const go = (idx) => {
+            page = Math.max(0, Math.min(idx, total - 1));
+            track.style.transform = `translateX(-${page * 100}%)`;
+            dotEls.forEach((d, i) => {
+            d.classList.toggle('bg-white', i === page);
+            d.classList.toggle('bg-gray-300', i !== page);
+            });
+        };
+
+        // Dots
+        dotEls.forEach(d => d.addEventListener('click', () => go(+d.dataset.idx)));
+
+        // Setas
+        prev?.addEventListener('click', () => go(page - 1));
+        next?.addEventListener('click', () => go(page + 1));
+
+        // Swipe (touch/drag)
+        let startX = 0, deltaX = 0, isDown = false;
+
+        const onStart = (x) => { isDown = true; startX = x; deltaX = 0; };
+        const onMove = (x) => {
+            if (!isDown) return;
+            deltaX = x - startX;
+            track.style.transitionDuration = '0ms';
+            track.style.transform = `translateX(calc(${-page*100}% + ${deltaX}px))`;
+        };
+        const onEnd = () => {
+            if (!isDown) return;
+            isDown = false;
+            track.style.transitionDuration = '';
+            const threshold = 50; // px
+            if (deltaX > threshold) go(page - 1);
+            else if (deltaX < -threshold) go(page + 1);
+            else go(page); // volta
+        };
+
+        // Touch
+        track.addEventListener('touchstart', e => onStart(e.touches[0].clientX), {passive:true});
+        track.addEventListener('touchmove',  e => onMove(e.touches[0].clientX), {passive:true});
+        track.addEventListener('touchend', onEnd);
+
+        // Mouse (opcional)
+        track.addEventListener('mousedown', e => onStart(e.clientX));
+        window.addEventListener('mousemove', e => onMove(e.clientX));
+        window.addEventListener('mouseup', onEnd);
+
+        // Teclado
+        el.tabIndex = 0;
+        el.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') go(page - 1);
+            if (e.key === 'ArrowRight') go(page + 1);
+        });
+
+        go(0);
+    }
+
+    // Estado do feed
+    let feedOffset = 0;
+    const FEED_PAGE_SIZE = 6;
+    let feedLoading = false;
+    let feedFinished = false;
+
+    async function loadFeed(entityType = 'dashboard', entityId = null) {
+
+        if (feedLoading || feedFinished) return;
+        feedLoading = true;
+        
+        const orBlocks = [];
+        if (entityType === 'dashboard') {
+            const followedIds = userPeople;
+            if (!followedIds.includes(currentUserData.id)) followedIds.push(currentUserData.id);            
+            if (followedIds.length)    orBlocks.push({ us: { op: 'IN', value: followedIds } });
+            if (userBusinesses.length) orBlocks.push({ em: { op: 'IN', value: userBusinesses } });
+            if (userTeams.length)      orBlocks.push({ cm: { op: 'IN', value: userTeams } });            
+        } else if(entityType === 'profile') {            
+            orBlocks.push({ us: entityId, cm: 0, em: 0 })
+        } else if(entityType === 'business') {            
+            orBlocks.push({ em: entityId })
+        } else if(entityType === 'team') {            
+            orBlocks.push({ cm: entityId })
         }
 
-        
+        if (!orBlocks.length) {
+            document.querySelector('#main-feed').innerHTML = `
+            <div class="rounded-3xl w-full p-3 flex items-center gap-2" style="background:#F7F8D1;">
+                <i class="fas fa-info-circle"></i>
+                <span>Você ainda não segue ninguém.</span>
+            </div>`;
+            feedFinished = true;
+            feedLoading = false;
+            return;
+        }
 
+        const res = await apiClient.post('/search', {
+            db: 'workz_data',
+            table: 'hpl',
+            columns: ['id','us','em','cm','tt','ct','dt','im'],
+            conditions: {
+                st: 1,                // AND st = 1
+                _or: orBlocks         // AND ( us IN (...) OR em IN (...) OR cm IN (...) )
+            },
+            order: { by: 'dt', dir: 'DESC' },
+            fetchAll: true,
+            limit: FEED_PAGE_SIZE,
+            offset: feedOffset
+        });
+
+        const items = res?.data || [];
+
+        // se não veio nada, acabou
+        if (!items.length) {
+            feedFinished = true;
+            feedLoading = false;
+            return;
+        }
+
+        // renderizar (append)        
+        appendFeed(items);
+
+        // avançar offset
+        feedOffset += FEED_PAGE_SIZE;
+        feedLoading = false;
+
+    }
+
+    function initFeedInfiniteScroll(entityType = 'dashboard', entityId = null) {
+        const sentinel = document.querySelector('#feed-sentinel');
+        if (!sentinel) return;
+
+        const io = new IntersectionObserver((entries) => {
+            const [entry] = entries;
+            if (entry.isIntersecting) {
+            loadFeed(entityType, entityId);
+            }
+        }, { rootMargin: '200px' }); // começa a carregar antes de encostar
+
+        io.observe(sentinel);
     }
 
     async function initializeCurrentUserData() {

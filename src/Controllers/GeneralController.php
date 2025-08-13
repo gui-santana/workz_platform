@@ -115,8 +115,11 @@ class GeneralController
         // coleta limit/offset, se existirem
         $limit  = isset($input['limit'])  ? (int)$input['limit']  : null;
         $offset = isset($input['offset']) ? (int)$input['offset'] : null;
+        $order  = isset($input['order'])  ? $input['order']  : null;
+        $distinct = isset($input['distinct']) ? $input['distinct'] : null;
+        $exists = isset($input['exists']) ? $input['exists'] : [];
 
-        $results = $this->generalModel->search($db, $table, $columns, $conditions, $fetchAll, $limit, $offset);
+        $results = $this->generalModel->search($db, $table, $columns, $conditions, $fetchAll, $limit, $offset, $order, $distinct, $exists);
 
         if ($results !== false) {
             http_response_code(200); // OK
@@ -136,6 +139,46 @@ class GeneralController
 
         exit();
     }
+
+    public function count(): void
+    {
+        $input = json_decode(file_get_contents('php://input'), true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            http_response_code(400);
+            echo json_encode(['message' => 'Invalid JSON input.', 'status' => 'error']);
+            return;
+        }
+
+        $requiredFields = ['db', 'table', 'conditions'];
+        foreach ($requiredFields as $field) {
+            if (empty($input[$field])) {
+                http_response_code(400);
+                echo json_encode(['message' => ucfirst($field) . ' is required.', 'status' => 'error']);
+                return;
+            }
+        }
+
+        $db = $input['db'];
+        $table = $input['table'];
+        $conditions = $input['conditions'];
+        $distinctCol = isset($input['distinctCol']) ? $input['distinctCol'] : null;
+        $exists = isset($input['exists']) ? $input['exists'] : [];
+
+        $count = $this->generalModel->count($db, $table, $conditions, $distinctCol, $exists);
+
+        if ($count !== false) {
+            http_response_code(200); // OK
+            echo json_encode([
+                'message' => 'Record count retrieved successfully!',
+                'status' => 'success',
+                'count' => $count
+            ]);
+        } else {            
+            http_response_code(500); // Internal Server Error
+            echo json_encode(['message' => 'Failed to retrieve record count.', 'status' => 'error']);
+        }        
+    }
+    
 
     public function delete(): void
     {
