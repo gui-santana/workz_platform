@@ -17,54 +17,9 @@
 		<link href="css/interactive.css" rel="stylesheet"/>
 		<script src="https://www.youtube.com/iframe_api"></script>								
 	</head>
-	<body class="w-full bg-gray-100">
-		
-		<div id="loading" class="w-full bg-gray-100 ">
-			<div class="la-ball-scale-pulse">
-				<div class="w-shadow"></div>
-			</div>
-		</div>
-						
-		<div id="main-wrapper" class="w-full h-screen overflow-y-auto overflow-x-hidden snap-y">			
-			<div class="snap-center relative h-full w-full bg-gray-900">
-				<div class="absolute top-0 left-0 right-0 bottom-0 overflow-hidden looping_zoom z-0" style="opacity: .7; background-image: url(https://bing.biturl.top/?resolution=1366&format=image&index=0&mkt=en-US); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
-				<div class="w-full absolute bottom-0">
-					<svg class="waves z-2" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 24 150 28" preserveAspectRatio="none" shape-rendering="auto">
-						<defs>
-						<path id="gentle-wave" d="M-160 44c30 0 58-18 88-18s 58 18 88 18 58-18 88-18 58 18 88 18 v44h-352z" />
-						</defs>
-						<g class="parallax">
-						<use xlink:href="#gentle-wave" x="48" y="0" fill="rgba(245,245,245,0.7" />
-						<use xlink:href="#gentle-wave" x="48" y="3" fill="rgba(245,245,245,0.5)" />
-						<use xlink:href="#gentle-wave" x="48" y="4" fill="rgba(245,245,245,0.3)" />
-						<use xlink:href="#gentle-wave" x="48" y="4" fill="#F5F5F5" />
-						</g>
-					</svg>
-					<div class="w-full p-8 bg-gray-100 content-center">
-						<div class="text-center">
-							<a  class=""><a>Workz!</a> © 2025</a><a class="gray"> (Stable 1.0.0)</a>
-							<p><small class="" target="_blank">Desenvolvido por <a href="/profile/guisantana" target="_blank" class="font-semibold">Guilherme Santana</a></small></p>
-						</div>
-					</div>
-				</div>
-				<div class="absolute h-full w-full m-0 p-0 z-0">
-					<div class="h-full max-w-screen-xl mx-auto m-0 p-8 grid grid-rows-12 grid-cols-12">
-						<div class="w-full row-span-1 col-span-12 content-center">
-							<img title="Workz!" src="/images/icons/workz_wh/145x60.png"></img>
-						</div>
-						<div id="login" class="px-30 row-span-9 col-span-12 sm:col-span-6 md:col-span-4 content-center  justify-center"></div>
-					</div>
-				</div>
-			</div>
-			<div class="relative w-full bg-gray-100 z-3 clear">
-				<div class="max-w-screen-xl mx-auto grid grid-cols-12">
-					<div class=" px-0 col-span-12 lg:col-span-8 pt-6">
-						<div id="timeline" class="w-full px-5">
-						</div>
-					</div>
-				</div>				
-			</div>			
-		</div>
+	<body class="w-full text-gray-700 bg-gray-100">		
+		<div id="loading" class="w-full bg-gray-100 "><div class="la-ball-scale-pulse"><div class="w-shadow"></div></div></div>		
+		<div id="main-wrapper" class="w-full h-screen overflow-y-auto overflow-x-hidden snap-y"></div>
 		<div id="sidebar-wrapper" class="fixed p-0 m-0 top-0 right-0 z-3 w-0 h-full bg-gray-100 overflow-y-auto transition-width duration-500 ease-in-out"></div>
 		<div class="sidebar fixed p-0 m-0 top-0 z-3 bg-gray-100 h-full overflow-y-auto" id="sidebar"></div>
 
