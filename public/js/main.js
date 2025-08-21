@@ -2,9 +2,11 @@
 
 import { ApiClient } from "./core/ApiClient.js";
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', () => {    
 
     const mainWrapper = document.querySelector("#main-wrapper"); //Main Wrapper
+    const sidebarWrapper = document.querySelector('#sidebar-wrapper');
+
     let workzContent = '';
 
     const apiClient = new ApiClient();    
@@ -155,7 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <a href="/">
                         <!--img class="logo-menu" style="width: 145px; height: 76px;" title="Workz!" src="/images/logos/workz/145x76.png"-->
                     </a>
-                    <img class="page-thumb h-11 w-11 shadow-lg pointer object-cover rounded-full pointer" src="/images/no-image.jpg" />
+                    <button id="sidebarTrigger" data-sidebar-action="settings"><img class="page-thumb h-11 w-11 shadow-lg object-cover rounded-full" src="/images/no-image.jpg" /></button>
                 </div>
             </div>                                         
             <div id="workz-content" class="mt-[132px] max-w-screen-xl px-3 xl:px-0 mx-auto clearfix grid grid-cols-12 gap-6">                               
@@ -176,10 +178,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <hr class="mt-3 mb-3">
                         <nav class="mb-1">
                             <ul id="standard-menu" class="space-y-2">
-                                <li><button href="#people" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-user-friends fa-stack-1x text-gray-700"></i></span><a class="truncate">Pessoas</a></button></li>
-                                <li><button href="#businesses" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-briefcase fa-stack-1x text-gray-700"></i></span><a class="truncate">Negócios</a></button></li>
-                                <li><button href="#teams" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-users fa-stack-1x text-gray-700"></i></span><a class="truncate">Equipes</a></button></li>
-                                <li><button href="#" id="logout-btn-sidebar" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-sign-out-alt fa-stack-1x text-gray-700"></i></span><a class="truncate">Sair</a></button></li>
+                                <li><button href="#people" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-user-friends fa-stack-1x text-gray-700"></i></span><a class="truncate">Pessoas</a></button></li>
+                                <li><button href="#businesses" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-briefcase fa-stack-1x text-gray-700"></i></span><a class="truncate">Negócios</a></button></li>
+                                <li><button href="#teams" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-users fa-stack-1x text-gray-700"></i></span><a class="truncate">Equipes</a></button></li>
+                                <li><button href="#" id="logout-btn-sidebar" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-sign-out-alt fa-stack-1x text-gray-700"></i></span><a class="truncate">Sair</a></button></li>
                             </ul>
                         </nav>
                     </div>
@@ -244,110 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="bg-blue-600 text-white font-semibold py-2 px-5 rounded-md hover:bg-blue-700">Publicar</button>
                 </div>
             </div>
-        `,
-
-        sidebarMain: (currentUserData) => `
-            <div id="fechar-barra-lateral" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
-                <a>Fechar</a>
-                <i class="fas fa-chevron-right"></i>                
-            </div>
-            <div id="settings-view" class="pointer w-full bg-white shadow-lg rounded-3xl p-4 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
-                <div class="grid grid-cols-4 items-center gap-3">
-                    <div class="flex col-span-1 justify-center">
-                        <img id="sidebar-profile-image" class="w-full rounded-full" src="https://placehold.co/100x100/EFEFEF/333?text=${currentUserData.name.charAt(0)}" alt="Foto do Utilizador">
-                    </div>
-                    <div class="flex col-span-3 flex-col gap-1">
-                        <p class="truncate font-bold">${currentUserData.name}</p>
-                        <p class="truncate">${currentUserData.email}</p>
-                        <small class="text-gray-500 truncate" >Perfil Workz!, E-mail, Foto, Endereço</small>
-                    </div>
-                </div>
-                <div class="flex justify-end col-span-1">
-                    <i class="fas fa-chevron-right"></i>
-                </div>
-            </div>                            
-            <div class="bg-white w-full shadow-lg rounded-2xl p-4 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
-                <span class="fa-stack gray-500">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-th fa-stack-1x fa-inverse"></i>					
-                </span>
-                Tela de Início
-            </div>
-            <div class="bg-white w-full shadow-lg rounded-2xl p-4 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
-                <span class="fa-stack gray-500">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-shapes fa-stack-1x fa-inverse"></i>					
-                </span>
-                Aplicativos
-            </div>
-            <div class="w-full shadow-lg rounded-2xl grid grid-cols-1">
-                <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-4 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
-                    <span class="fa-stack gray-500">
-                        <i class="fas fa-circle fa-stack-2x"></i>
-                        <i class="fas fa-user-friends fa-stack-1x fa-inverse"></i>					
-                    </span>
-                    Pessoas
-                </div>
-                <div class="border-b-2 border-black-500 bg-white p-4 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
-                    <span class="fa-stack gray-500">
-                        <i class="fas fa-circle fa-stack-2x"></i>
-                        <i class="fas fa-briefcase fa-stack-1x fa-inverse"></i>					
-                    </span>
-                    Negócios
-                </div>
-                <div class="rounded-b-2xl bg-white p-4 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
-                    <span class="fa-stack gray-500">
-                        <i class="fas fa-circle fa-stack-2x"></i>
-                        <i class="fas fa-users fa-stack-1x fa-inverse"></i>					
-                    </span>
-                    Equipes
-                </div>
-            </div>
-            <div class="bg-white w-full shadow-lg rounded-2xl p-4 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
-                <span class="fa-stack gray-500">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-sign-out-alt fa-stack-1x fa-inverse"></i>					
-                </span>
-                Sair
-            </div>
-            <div class="text-center border-t border-gray-200 grid grid-cols-1 gap-1 pt-4">
-                <img class="mx-auto" src="https://guilhermesantana.com.br/images/50x50.png" style="height: 40px; width: 40px" alt="Logo de Guilherme Santana"></img>
-                <a href="https://guilhermesantana.com.br" target="_blank">Guilherme Santana © 2025</a>
-            </div>
-        
-        `,
-
-        sidebarUserSettings: (currentUserData) => `
-            <div id="voltar-main-menu" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">                
-                <i class="fas fa-chevron-left"></i>
-                <a>Ajustes</a>
-            </div>
-            <h1 class="text-center text-gray-500 text-xl font-bold">${currentUserData.name}</h1>
-            <div class="col-span-1 justify-center">
-                <img id="sidebar-profile-image" class="w-1/2 rounded-full mx-auto" src="https://placehold.co/100x100/EFEFEF/333?text=${currentUserData.name.charAt(0)}" alt="Foto do Utilizador">
-            </div>
-            <form id="settings-form">
-                <div class="w-full shadow-lg rounded-2xl grid grid-cols-1">
-                    <div class="rounded-t-2xl border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
-                        <label for="name" class="col-span-1 p-4 truncate text-gray-500">Nome*</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="name" name="name" value="${currentUserData.name}" required>
-                    </div>
-                    <div class="border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
-                        <label for="email" class="col-span-1 p-4 truncate text-gray-500">E-mail*</label>
-                        <input class="border-none focus:outline-none flex col-span-3 p-4" type="email" id="email" name="email" value="${currentUserData.email}" required>
-                    </div>
-                    <div class="border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
-                        <label for="birth" class="col-span-1 p-4 truncate text-gray-500">Nascimento</label>
-                        <input class="border-none focus:outline-none flex col-span-3 w-full p-4" type="date" id="birth" name="birth" value="">
-                    </div>
-                    <div class="rounded-b-2xl bg-white border-b-1 grid grid-cols-4">
-                        <label for="cpf" class="col-span-1 p-4 truncate text-gray-500">CPF</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="number" id="cpf" name="cpf" value="${currentUserData.name}">
-                    </div>                
-                </div>
-                <button type="submit" class="mt-6 w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
-            </form>                
-        `,
+        `,        
 
         sidebarBusinessSettings: (businessData) => `
             <div id="voltar-main-menu" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">                
@@ -394,7 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         listView: (listItems) => {
-            let html = '<div class="col-span-12 flex flex-col grid grid-cols-12 gap-6">';
+            let html = '<div class="col-span-12 flex flex-col grid grid-cols-12 gap-6">';        
             listItems.forEach(item => {
                 html += `
                 <div class="list-item sm:col-span-12 md:col-span-6 lg:col-span-4 flex flex-col bg-white p-3 rounded-3xl shadow-lg bg-gray hover:bg-gray-100 cursor-pointer" data-item-id="${item.id}">
@@ -444,7 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pageSlides = pages.map(page => `
             <div class="min-w-full grid grid-cols-3 grid-rows-3 sm:grid-cols-4 sm:grid-rows-2 gap-4 p-4">
             ${page.map(app => `                
-                <button class="flex flex-col items-center gap-1">
+                <button data-app-id="${app.id}" class="flex flex-col items-center gap-1">
                     <div class="relative rounded-full overflow-hidden bg-gray-300 aspect-square w-full shadow-lg">
                         <div class="absolute inset-0 bg-center bg-cover" style="background-image:url('${'data:image/png;base64,' + app.im || '/images/app-default.png'}');"></div>
                     </div>
@@ -456,11 +355,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const dots = pages.map((_, i) =>
             `<button data-idx="${i}" class="w-2 h-2 rounded-full ${i===0?'bg-white':'bg-gray-300'}"></button>`
-        ).join('');
-
+        ).join('');        
+        
         // container raiz com track deslizante
         return `
-            <div id="app-library" class="relative select-none">
+            <div id="app-carousel" class="relative select-none">
                 <div class="overflow-hidden rounded-3xl bg-white/50 backdrop-blur">
                     <div class="flex transition-transform duration-300 will-change-transform" data-role="track" style="transform:translateX(0%)">
                     ${pageSlides}
@@ -470,7 +369,211 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>            
             </div>
+        `;        
+    };
+
+    templates.sidebarMain = async ({ data }) => {
+        return `
+        <div id="close" data-sidebar-action="settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
+            <a>Fechar</a>
+            <i class="fas fa-chevron-right"></i>                
+        </div>
+        <div id="current-user" class="pointer w-full bg-white shadow-sm rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
+            <div data-sidebar-action="page-settings" class="grid grid-cols-4 items-center gap-3">
+                <div class="flex col-span-1 justify-center">
+                    <img id="sidebar-profile-image" class="w-full rounded-full" src="https://placehold.co/100x100/EFEFEF/333?text=${data.tt.charAt(0)}" alt="Foto do Utilizador">
+                </div>
+                <div class="flex col-span-3 flex-col gap-1">
+                    <p class="truncate font-bold">${data.tt}</p>
+                    <p class="truncate">${data.ml}</p>
+                    <small class="text-gray-500 truncate" >Perfil Workz!, E-mail, Foto, Endereço</small>
+                </div>
+            </div>
+            <div class="flex justify-end col-span-1">
+                <i class="fas fa-chevron-right"></i>
+            </div>
+        </div>                            
+        <div class="bg-white w-full shadow-sm rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
+            <span class="fa-stack gray-500">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fas fa-th fa-stack-1x fa-inverse"></i>					
+            </span>
+            Tela de Início
+        </div>
+        <div class="bg-white w-full shadow-sm rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
+            <span class="fa-stack gray-500">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fas fa-shapes fa-stack-1x fa-inverse"></i>					
+            </span>
+            Aplicativos
+        </div>
+        <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+            <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                <span class="fa-stack gray-500">
+                    <i class="fas fa-circle fa-stack-2x"></i>
+                    <i class="fas fa-user-friends fa-stack-1x fa-inverse"></i>					
+                </span>
+                Pessoas
+            </div>
+            <div class="border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                <span class="fa-stack gray-500">
+                    <i class="fas fa-circle fa-stack-2x"></i>
+                    <i class="fas fa-briefcase fa-stack-1x fa-inverse"></i>					
+                </span>
+                Negócios
+            </div>
+            <div class="rounded-b-2xl bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                <span class="fa-stack gray-500">
+                    <i class="fas fa-circle fa-stack-2x"></i>
+                    <i class="fas fa-users fa-stack-1x fa-inverse"></i>					
+                </span>
+                Equipes
+            </div>
+        </div>
+        <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+            <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                <span class="fa-stack gray-500">
+                    <i class="fas fa-circle fa-stack-2x"></i>
+                    <i class="fas fa-money-bill fa-stack-1x fa-inverse"></i>					
+                </span>
+                Cobrança e Recebimento
+            </div>
+            <div class="border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                <span class="fa-stack gray-500">
+                    <i class="fas fa-circle fa-stack-2x"></i>
+                    <i class="fas fa-receipt fa-stack-1x fa-inverse"></i>					
+                </span>
+                Transações
+            </div>
+            <div class="rounded-b-2xl border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                <span class="fa-stack gray-500">
+                    <i class="fas fa-circle fa-stack-2x"></i>
+                    <i class="fas fa-satellite-dish fa-stack-1x fa-inverse"></i>					
+                </span>
+                Assinaturas
+            </div>            
+        </div>
+        <div class="bg-white w-full shadow-sm rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
+            <span class="fa-stack gray-500">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fas fa-sign-out-alt fa-stack-1x fa-inverse"></i>					
+            </span>
+            Sair
+        </div>
+        <div class="text-center border-t border-gray-200 grid grid-cols-1 gap-1 pt-4">
+            <img class="mx-auto" src="https://guilhermesantana.com.br/images/50x50.png" style="height: 40px; width: 40px" alt="Logo de Guilherme Santana"></img>
+            <a href="https://guilhermesantana.com.br" target="_blank">Guilherme Santana © 2025</a>
+        </div>
+        `
+    };
+
+    templates.sidebarPageSettings = async ({ view, data }) => {
+        
+        console.log(data);
+
+        let html = `
+            <div data-sidebar-action="settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">                
+                <i class="fas fa-chevron-left"></i>
+                <a>Ajustes</a>
+            </div>
+            <h1 class="text-center text-gray-500 text-xl font-bold">${data.tt}</h1>
+            <div class="col-span-1 justify-center">
+                <img id="sidebar-profile-image" class="w-1/2 rounded-full mx-auto shadow-md" src="https://placehold.co/100x100/EFEFEF/333?text=${data.tt.charAt(0)}" alt="Foto do Utilizador">
+            </div>
         `;
+        
+        if (view === 'profile') {
+            html += `
+            <div id="message" class="w-full"></div>
+            <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
+                <input type="hidden" name="id" value="${data.id}">
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+                    <div class="rounded-t-2xl border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
+                        <label for="name" class="col-span-1 p-4 truncate text-gray-500">Nome*</label>
+                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="name" name="tt" value="${data.tt}" required>
+                    </div>
+                    <div class="rounded-b-2xl border-black-500 bg-white border-b-1 grid grid-cols-4">
+                        <label for="email" class="col-span-1 p-4 truncate text-gray-500">E-mail*</label>
+                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="email" id="email" name="ml" value="${data.ml}" required>
+                    </div>
+                </div>
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+                    <div class="rounded-t-2xl border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
+                        <label for="username" class="col-span-1 p-4 truncate text-gray-500">Usuário</label>
+                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="username" name="un" value="${data.un}">
+                    </div>
+                    <div class="rounded-b-2xl border-black-500 bg-white border-b-1 grid grid-cols-4">
+                        <label for="description" class="col-span-1 p-4 truncate text-gray-500">Descrição</label>
+                        <textarea class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="text" id="description" name="cf">${data.cf}</textarea>
+                    </div>
+                </div>
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+                    <div class="rounded-t-2xl border-b-2 bg-white border-b-1 grid grid-cols-4">
+                        <label for="gender" class="col-span-1 p-4 truncate text-gray-500">Gênero</label>
+                        <select class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="number" id="gender" name="gender" value="">
+                            <option value="" selected disabled>Selecione</option>
+                            <option value="male">Masculino</option>
+                            <option value="female">Feminino</option>
+                        </select>
+                    </div>                    
+                    <div class="border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
+                        <label for="birth" class="col-span-1 p-4 truncate text-gray-500">Nascimento</label>
+                        <input class="border-none focus:outline-none col-span-3 p-4" type="date" id="birth" name="birth" value="">
+                    </div>
+                    <div class="border-b-2 bg-white border-b-1 grid grid-cols-4">
+                        <label for="phone" class="col-span-1 p-4 truncate text-gray-500">Telefone</label>
+                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4"  type="text" placeholder="(99) 99999-9999" id="phone" name="phone" value="">
+                    </div>
+                    <div class="rounded-b-2xl bg-white border-b-1 grid grid-cols-4">
+                        <label for="cpf" class="col-span-1 p-4 truncate text-gray-500">CPF</label>
+                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="text" placeholder="999.999.999-99" id="cpf" name="national_id" value="">
+                    </div>
+                </div>
+                <button type="submit" class="shadow-sm w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
+            </form>
+            <hr>           
+            <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+                <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                    <span class="fa-stack gray-500">
+                        <i class="fas fa-circle fa-stack-2x"></i>
+                        <i class="fas fa-graduation-cap fa-stack-1x fa-inverse"></i>					
+                    </span>
+                    Formação Acadêmica
+                </div>
+                <div class="border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                    <span class="fa-stack gray-500">
+                        <i class="fas fa-circle fa-stack-2x"></i>
+                        <i class="fas fa-user-tie fa-stack-1x fa-inverse"></i>					
+                    </span>
+                    Experiência Profissional
+                </div>
+                <div class="rounded-b-2xl border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                    <span class="fa-stack gray-500">
+                        <i class="fas fa-circle fa-stack-2x"></i>
+                        <i class="fas fa-scroll fa-stack-1x fa-inverse"></i>					
+                    </span>
+                    Depoimentos
+                </div>
+            </div>
+            <div class="bg-white w-full shadow-sm rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
+                <span class="fa-stack gray-500">
+                    <i class="fas fa-circle fa-stack-2x"></i>
+                    <i class="fas fa-key fa-stack-1x fa-inverse"></i>					
+                </span>
+                Alterar Senha
+            </div>
+            `;
+        } else if (view === 'business') {
+            html += `
+            
+            `;
+        } else if (view === 'team') {
+            html += `
+            
+            `;
+        }
+
+        return html;
     };
 
     async function appendWidget(type = 'people', gridList, count) {
@@ -560,6 +663,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button data-action="request-join" class="cursor-pointer text-center rounded-3xl bg-green-400 hover:bg-green-600 text-white transition-colors truncate w-full p-2 mb-1"><a class="truncate">Solicitar Acesso</a></button>
                     `);
                 }                
+            } else {
+                actionContainer.insertAdjacentHTML('beforeend', `
+                    <li><button data-sidebar-action="page-settings" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-cog fa-stack-1x text-gray-700"></i></span><span class="truncate">Ajustes</a></span></li>
+                `);
             }
                         
         } else if (viewType === 'team') {                                    
@@ -582,6 +689,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button data-action="request-join" class="cursor-pointer text-center rounded-3xl bg-green-400 hover:bg-grenn-600 text-white transition-colors truncate w-full p-2 mb-1"><a class="truncate">Solicitar Acesso</a></button>
                     `);
                 }
+            } else {
+                actionContainer.insertAdjacentHTML('beforeend', `
+                    <li><button data-sidebar-action="page-settings" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-cog fa-stack-1x text-gray-700"></i></span><span class="truncate">Ajustes</a></span></li>
+                `);
             }
         }
     }
@@ -591,11 +702,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const standardMenu = document.querySelector('#standard-menu');
 
         if (viewType === 'dashboard') {
-            customMenu.insertAdjacentHTML('beforeend', `<li><button data-action="my-profile" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-address-card fa-stack-1x text-gray-700"></i></span><a class="truncate">Meu Perfil</a></button></li>`);
+            customMenu.insertAdjacentHTML('beforeend', `<li><button data-action="my-profile" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-address-card fa-stack-1x text-gray-700"></i></span><a class="truncate">Meu Perfil</a></button></li>`);
         } else {
             if (viewType === 'profile' && currentUserData.id === viewId) {
                 customMenu.insertAdjacentHTML('beforeend', `
-                    <li><button data-action="open-settings" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-cog fa-stack-1x text-gray-700"></i></span><a class="truncate">Ajustes</a></button></li>                    
+                    <li><button data-sidebar-action="page-settings" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-cog fa-stack-1x text-gray-700"></i></span><span class="truncate">Ajustes</a></span></li>
                 `);
             } else {
                 customMenu.insertAdjacentHTML('beforeend', `
@@ -604,8 +715,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 pageAction();
             }
             customMenu.insertAdjacentHTML('beforeend', `
-                <li><button data-action="dashboard" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-home fa-stack-1x text-gray-700"></i></span><a class="truncate">Início</a></button></li>                
-                <li><button data-action="share-page" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-share fa-stack-1x text-gray-700"></i></span><a class="truncate">Compartilhar</a></button></li>                
+                <li><button data-action="dashboard" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-home fa-stack-1x text-gray-700"></i></span><a class="truncate">Início</a></button></li>                
+                <li><button data-action="share-page" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-share fa-stack-1x text-gray-700"></i></span><a class="truncate">Compartilhar</a></button></li>                
             `);
         } 
         
@@ -644,10 +755,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     history.pushState({}, '', '/');
                     $('#loading').fadeIn();
                     loadPage();
-                    break;
-                case 'open-settings':
-                    //renderSidebarView(e, contextType);
-                    break;
+                    break;                
                 case 'my-profile':
                     history.pushState({}, '', `/profile/${contextId}`);
                     $('#loading').fadeIn(); 
@@ -718,6 +826,38 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     }
 
+    function toggleSidebar(el = null, toggle = true) {
+    // console.log(el);
+
+        if (sidebarWrapper.innerHTML.trim() !== '') {
+            sidebarWrapper.innerHTML = '';
+        }
+
+        if (toggle === true) {
+            sidebarWrapper.classList.toggle('w-0');
+            sidebarWrapper.classList.toggle('lg:w-1/3');
+            sidebarWrapper.classList.toggle('sm:w-1/2');
+            sidebarWrapper.classList.toggle('w-full');
+            sidebarWrapper.classList.toggle('shadow-2xl');
+        }
+
+        if (el) {
+            sidebarWrapper.innerHTML = `<div id="sidebar-content" class="grid grid-cols-1 gap-6 p-4"></div>`;
+            const sidebarContent = document.querySelector('#sidebar-content');
+            const action = el.dataset.sidebarAction;            
+            if (action === 'settings') {
+                renderTemplate(sidebarContent, templates.sidebarMain, { data: currentUserData });
+            } else if (action === 'page-settings') {                
+                renderTemplate(sidebarContent, templates.sidebarPageSettings, {
+                    view: (el.parentNode.id === 'current-user') ? 'profile' : viewType,
+                    data: (el.parentNode.id === 'current-user') ? currentUserData : viewData
+                }, () => {
+                    document.getElementById('settings-form').addEventListener('submit', handleUpdate);
+                    initMasks();
+                });
+            }
+        }
+    }
     
     // ===================================================================
     // 🧠 LÓGICA DE INICIALIZAÇÃO
@@ -848,7 +988,7 @@ document.addEventListener('DOMContentLoaded', () => {
         userTeamsData = filteredTeams;
 
         userTeams = userTeamsData.map(o => o.cm);                                
-        renderTemplate(mainWrapper, 'dashboard', null, () => {
+        renderTemplate(mainWrapper, 'dashboard', null, () => {            
             workzContent = document.querySelector('#workz-content');
             loadPage();            
         });
@@ -1195,7 +1335,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         fetchAll: true
                     });
                     userApps = userApps.data.map(o => o.ap);                
-                    await renderTemplate(document.querySelector('#app-library'), templates.appLibrary, { appsList: userApps }, () => initAppLibrary('#app-library'));
+                    await renderTemplate(document.querySelector('#app-library'), templates.appLibrary, { appsList: userApps }, () => {
+                        initAppLibrary('#app-library');
+                    });
                 })
                 : Promise.resolve(),              
             
@@ -1459,6 +1601,66 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function handleUpdate(e) {
+        e.preventDefault();
+        const view = e.target.dataset.view;
+        const form = new FormData(e.target);
+        const data = Object.fromEntries(form.entries());
+        const messageContainer = document.getElementById('message');
+                
+        if (data.phone) {
+            data.phone = onlyNumbers(data.phone);
+        }
+        if (data.national_id) {
+            data.national_id = onlyNumbers(data.national_id);
+        }
+
+        if (view === 'profile') {
+            // Verifica nome
+            if (!data.tt || data.tt === ''){                
+                console.error('O nome do usuário é expressamente necesário.');
+                return;
+            }
+            // Verifica e-mail
+            if (!data.ml || data.ml === ''){
+                console.error('O e-mail é expressamente necessário.');
+                return;
+            } else {
+                data.ml = data.ml.trim().toLowerCase();
+                const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!regex.test(data.ml)){
+                    console.error('E-mail inválido');
+                    return;
+                }
+            }
+
+        }
+
+        let enitityType = (view === 'profile') ? 'people' : (view === 'business ') ? 'businesses' : 'teams';
+
+        if (data.id && data.id !== null) {            
+            
+            const result = await apiClient.post('/update', {
+                db: typeMap[enitityType].db,
+                table: typeMap[enitityType].table,
+                data: data,
+                conditions: {
+                    id: data.id
+                }
+            });
+            if (result) {
+                console.log('Atualização realizada com sucesso.');
+            } else {
+                console.error('Falha na atualização.');
+            }
+        }
+        
+        
+/*
+        
+*/
+    }
+
     async function handleLogin(event) {
         event.preventDefault();
         const loginForm = event.target;
@@ -1562,41 +1764,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 	function checkTime(i) {
 		return (i < 10 ? "0" : "") + i;
-	}
-    
-    async function renderDashboardUI() {
-        const loginWrapper = document.querySelector('#login');
-        await renderTemplate(loginWrapper, templates.dashboard, null, async () => {
-            const mainContent = document.getElementById('main-content');
-            const customMenu = document.getElementById('custom-menu');
-            const profileImage = document.getElementById('profile-image');
-            const sidebarProfileImage = document.getElementById('sidebar-profile-image');
-            const logoutBtnSidebar = document.getElementById('logout-btn-sidebar');
-
-            // Renderiza o conteúdo principal do dashboard
-            await renderTemplate(mainContent, templates.dashboardMain, currentUserData);
-
-            // Atualiza a imagem de perfil
-            if (profileImage) {
-                profileImage.src = currentUserData.im || `https://placehold.co/100x100/EFEFEF/333?text=${currentUserData.name.charAt(0)}`;
-            }
-
-            // Atualiza a imagem de perfil do sidebar
-            if (sidebarProfileImage) {
-                sidebarProfileImage.src = currentUserData.im || `https://placehold.co/100x100/EFEFEF/333?text=${currentUserData.name.charAt(0)}`;
-            }
-
-            // Adiciona listeners para o menu lateral
-            if (logoutBtnSidebar) {
-                logoutBtnSidebar.addEventListener('click', handleLogout);
-            }
-            
-            // Renderiza os widgets
-            await renderFollowingWidget();
-            await renderBusinessesWidget();
-        });
-           
-    }    
+	}  
 
     function topBarScroll(){
         
@@ -1627,4 +1795,68 @@ document.addEventListener('DOMContentLoaded', () => {
 
     startup();
 
+    document.addEventListener('click', function(event) {
+        const target = event.target;
+        
+        const isSidebarOpen = !sidebarWrapper.classList.contains('w-0');
+        const clickedInsideSidebar = sidebarWrapper.contains(target);
+        const clickedSidebarTrigger = !!target.closest('#sidebarTrigger');
+        
+        const actionBtn = target.closest('[data-sidebar-action]');        
+        if (actionBtn && !isSidebarOpen) {
+            event.preventDefault();
+            toggleSidebar(actionBtn);     
+            return;
+        } else if (actionBtn && isSidebarOpen && actionBtn.id !== 'close') {
+            event.preventDefault();
+            toggleSidebar(actionBtn, false);
+            return;
+        } else if (actionBtn && isSidebarOpen && actionBtn.id === 'close') { 
+            toggleSidebar();
+        }
+
+        if (isSidebarOpen && !clickedInsideSidebar && !clickedSidebarTrigger) {
+            toggleSidebar(); // fecha
+        }
+    });
+
+    // Opções das máscaras
+    const phoneMaskOptions = {
+        // duas máscaras: 8 ou 9 dígitos
+        mask: [
+            { mask: '(00) 0000-0000' },
+            { mask: '(00) 00000-0000' },
+            { mask: '+00 (00) 0000-0000' },
+            { mask: '+00 (00) 00000-0000' },
+        ]
+    };
+
+    const cpfMaskOptions = {
+        mask: [
+            { mask: '000.000.000-00' },
+            { mask: '00.000.000/0000-00' }
+        ]
+    };
+
+    // Função segura para aplicar IMask
+    function applyMask(id, options) {
+        const el = document.getElementById(id);
+        if (!el) {
+            console.warn(`[mask] elemento #${id} não encontrado no DOM no momento da aplicação`);
+            return null;
+        }
+        return IMask(el, options);
+    }
+
+    // Inicializa quando o DOM está pronto
+    function initMasks() {
+        applyMask('phone', phoneMaskOptions);
+        applyMask('cpf', cpfMaskOptions);
+    }
+
+    function onlyNumbers(str) {
+        return str.replace(/\D/g, ''); // remove tudo que não for número
+    }
+
 });
+

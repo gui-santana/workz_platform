@@ -73,6 +73,8 @@ class GeneralController
         $table = $input['table'];
         $data = $input['data'];
         $conditions = $input['conditions'];
+        
+        echo json_encode(['message' => 'Trying.', 'status' => $data]);        
 
         $success = $this->generalModel->update($db, $table, $data, $conditions);
 

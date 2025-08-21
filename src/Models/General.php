@@ -54,30 +54,58 @@ class General
     {
         $this->db = Database::getInstance($db);
 
+        // Remove "id" do SET (use o id no WHERE!)
+        unset($data['id']);
+
+        //Pré-tratamento dos dados vazios
+        foreach ($data as $key => $value) {
+            if ($value === '') {
+                $data[$key] = null;
+            }
+        }
+
+        // Impede updates vazios / sem WHERE
         if (empty($data) || empty($conditions)) {
-            // Impede atualizações vazias ou sem condição (UPDATE sem WHERE).
             return false;
+        }
+
+        // Validação básica de identificadores (tabela/colunas)
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $table)) {
+            throw new \InvalidArgumentException("Nome de tabela inválido: $table");
         }
 
         $setClauses = [];
         $params = [];
+
         foreach ($data as $key => $value) {
-            // Usamos um prefixo para os placeholders do SET para evitar colisões com o WHERE.
+            if (!preg_match('/^[a-zA-Z0-9_]+$/', $key)) {
+                throw new \InvalidArgumentException("Nome de coluna inválido no SET: $key");
+            }
             $setClauses[] = "`$key` = :set_$key";
-            $params["set_$key"] = $value;
+            $params["set_$key"] = $value; // em execute() a chave não leva dois-pontos
+        }
+
+        if (empty($setClauses)) {
+            // Depois do filtro, não sobrou nada para atualizar
+            return false;
         }
 
         $whereClauses = [];
         foreach ($conditions as $key => $value) {
+            if (!preg_match('/^[a-zA-Z0-9_]+$/', $key)) {
+                throw new \InvalidArgumentException("Nome de coluna inválido no WHERE: $key");
+            }
             $whereClauses[] = "`$key` = :where_$key";
             $params["where_$key"] = $value;
         }
 
-        $sql = "UPDATE `$table` SET " . implode(', ', $setClauses) . " WHERE " . implode(' AND ', $whereClauses);
+        $sql = "UPDATE `$table` SET " . implode(', ', $setClauses)
+            . " WHERE " . implode(' AND ', $whereClauses);
 
         $stmt = $this->db->prepare($sql);
         return $stmt->execute($params);
     }
+
 
     /**
      * Conta registros com suporte a DISTINCT e filtros em tabelas relacionadas via EXISTS.
