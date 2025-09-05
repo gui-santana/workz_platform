@@ -20,6 +20,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let userBusinessesData = null; // Condições do usuário nas empresas
     let userTeamsData = null; // Condições do usuário nas equipes
 
+    let businessesJobs = {};
+
     let memberStatus = null; // Status do usuário em páginas de negócio e de equipe
     let memberLevel = null; // Nível do usuário em páginas de negócio e de equipe
 
@@ -101,11 +103,11 @@ document.addEventListener('DOMContentLoaded', () => {
         message: (data) => {
             const { message, type = 'success' } = data;
             if (type === 'success') {
-                return `<div class="bg-green-100 border border-green-400 rounded-3xl p-3 mb-4 text-sm">${message}</div>`;
+                return `<div class="bg-green-100 border border-green-400 rounded-3xl p-3 text-sm text-center">${message}</div>`;
             } else if (type === 'error') {
-                return `<div class="bg-red-100 border border-red-400 rounded-3xl p-3 mb-4 text-sm">${message}</div>`;
+                return `<div class="bg-red-100 border border-red-400 rounded-3xl p-3 text-sm text-center">${message}</div>`;
             }else if (type === 'warning') {
-                return `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 mb-4 text-sm">${message}</div>`;
+                return `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">${message}</div>`;
             }
             return '';
         },
@@ -255,15 +257,15 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <h1 class="text-center text-gray-500 text-xl font-bold">${businessData.name}</h1>
             <div class="col-span-1 justify-center">
-                <img id="sidebar-profile-image" class="sm:w-1/3 md:w-1/4 lg:w-1/5 shadow-lg cursor-pointer rounded-full mx-auto" src="https://placehold.co/100x100/EFEFEF/333?text=${businessData.name.charAt(0)}" alt="Foto do Utilizador">
+                <img id="sidebar-profile-image" class="sm:w-1/4 md:w-1/6 lg:w-1/6 shadow-lg cursor-pointer rounded-full mx-auto" src="https://placehold.co/100x100/EFEFEF/333?text=${businessData.name.charAt(0)}" alt="Foto do Utilizador">
             </div>
             <form id="settings-form">
                 <div class="w-full shadow-lg rounded-2xl grid grid-cols-1">
-                    <div class="rounded-t-2xl border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
+                    <div class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
                         <label for="name" class="col-span-1 p-4 truncate text-gray-500">Nome*</label>
                         <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="name" name="name" value="${businessData.name}" required>
                     </div>
-                    <div class="rounded-b-2xl border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
+                    <div class="rounded-b-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
                         <label for="description" class="col-span-1 p-4 truncate text-gray-500">Descrição</label>
                         <textarea class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="text" id="description" name="description">${businessData.description}</textarea>
                     </div>                                   
@@ -378,7 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <a>Fechar</a>
             <i class="fas fa-chevron-right"></i>                
         </div>
-        <div id="current-user" class="pointer w-full bg-white shadow-sm rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
+        <div data-sidebar-type="current-user" class="pointer w-full bg-white shadow-sm rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
             <div data-sidebar-action="page-settings" class="grid grid-cols-4 items-center gap-3">
                 <div class="flex col-span-1 justify-center">
                     <img id="sidebar-profile-image" class="w-full rounded-full" src="https://placehold.co/100x100/EFEFEF/333?text=${data.tt.charAt(0)}" alt="Foto do Utilizador">
@@ -408,21 +410,21 @@ document.addEventListener('DOMContentLoaded', () => {
             Aplicativos
         </div>
         <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-            <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+            <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
                 <span class="fa-stack gray-500">
                     <i class="fas fa-circle fa-stack-2x"></i>
                     <i class="fas fa-user-friends fa-stack-1x fa-inverse"></i>					
                 </span>
                 Pessoas
             </div>
-            <div class="border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+            <div class="border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
                 <span class="fa-stack gray-500">
                     <i class="fas fa-circle fa-stack-2x"></i>
                     <i class="fas fa-briefcase fa-stack-1x fa-inverse"></i>					
                 </span>
                 Negócios
             </div>
-            <div class="rounded-b-2xl bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+            <div class="rounded-b-2xl bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
                 <span class="fa-stack gray-500">
                     <i class="fas fa-circle fa-stack-2x"></i>
                     <i class="fas fa-users fa-stack-1x fa-inverse"></i>					
@@ -431,21 +433,21 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         </div>
         <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-            <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+            <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
                 <span class="fa-stack gray-500">
                     <i class="fas fa-circle fa-stack-2x"></i>
                     <i class="fas fa-money-bill fa-stack-1x fa-inverse"></i>					
                 </span>
                 Cobrança e Recebimento
             </div>
-            <div class="border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+            <div class="border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
                 <span class="fa-stack gray-500">
                     <i class="fas fa-circle fa-stack-2x"></i>
                     <i class="fas fa-receipt fa-stack-1x fa-inverse"></i>					
                 </span>
                 Transações
             </div>
-            <div class="rounded-b-2xl border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+            <div class="rounded-b-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
                 <span class="fa-stack gray-500">
                     <i class="fas fa-circle fa-stack-2x"></i>
                     <i class="fas fa-satellite-dish fa-stack-1x fa-inverse"></i>					
@@ -461,93 +463,171 @@ document.addEventListener('DOMContentLoaded', () => {
             Sair
         </div>
         <div class="text-center border-t border-gray-200 grid grid-cols-1 gap-1 pt-4">
-            <img class="mx-auto" src="https://guilhermesantana.com.br/images/50x50.png" style="height: 40px; width: 40px" alt="Logo de Guilherme Santana"></img>
-            <a href="https://guilhermesantana.com.br" target="_blank">Guilherme Santana © 2025</a>
+            <img class="mx-auto" src="https://guilhermesantana.com.br/images/50x50.png" style="height: 40px; width: 40px" alt="Logo de uFicial"></img>
+            <a href="https://uficial.com" target="_blank">uFicial Technologies © 2025</a>
         </div>
         `
     };
 
     templates.sidebarPageSettings = async ({ view, data }) => {
-        
-        console.log(data);
 
-        let html = `
-            <div data-sidebar-action="settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">                
-                <i class="fas fa-chevron-left"></i>
-                <a>Ajustes</a>
-            </div>
-            <h1 class="text-center text-gray-500 text-xl font-bold">${data.tt}</h1>
-            <div class="col-span-1 justify-center">
-                <img id="sidebar-profile-image" class="w-1/2 rounded-full mx-auto shadow-md" src="https://placehold.co/100x100/EFEFEF/333?text=${data.tt.charAt(0)}" alt="Foto do Utilizador">
-            </div>
-        `;
+        let sidebarContent = document.querySelector('.sidebar-content');
+
+        let html = '';
+
+        if (view === 'profile' || view === 'business' || view === 'team') {
+            html += `
+                <div data-sidebar-action="settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">                
+                    <i class="fas fa-chevron-left"></i>
+                    <a>Ajustes</a>
+                </div>
+                <h1 class="text-center text-gray-500 text-xl font-bold">${data.tt}</h1>
+                <div class="col-span-1 justify-center">
+                    <img id="sidebar-profile-image" class="w-1/3 shadow-lg cursor-pointer rounded-full mx-auto shadow-md" src="${data?.im ? `data:image/png;base64,${data?.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${data?.tt.charAt(0)}`}" alt="Foto do Utilizador">
+                </div>
+                <div id="message" class="w-full fixed"></div>
+            `;
+        } else if (view === 'user-education' || view === 'user-jobs' || view === 'user-testmonials') {            
+            html += `
+                <div data-sidebar-action="page-settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
+                    <i class="fas fa-chevron-left"></i>
+                    <a>${currentUserData.tt}</a>
+                </div>
+                <div>
+                    <h1 class="text-center text-gray-500 text-xl font-bold">${(view === 'user-education') ? `Formação Acadêmica` : (view === 'user-jobs') ? `Experiência Profissional` : `Depoimentos` }</h1>
+                    <div id="message" class="w-full"></div>
+                </div>
+            `;
+        } else if (view === 'business-shareholding' || view === 'business-employees' || view === 'business-testmonials') {
+            html += `
+                <div data-sidebar-action="page-settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
+                    <i class="fas fa-chevron-left"></i>
+                    <a>${data.tt}</a>
+                </div>
+                <div>
+                    <h1 class="text-center text-gray-500 text-xl font-bold">${(view === 'business-shareholding') ? `Estrutura Societária` : (view === 'business-employees') ? `Colaboradores` : `Depoimentos` }</h1>
+                    <div id="message" class="w-full"></div>
+                </div>
+            `;
+        }
         
         if (view === 'profile') {
-            html += `
-            <div id="message" class="w-full"></div>
+            sidebarContent.dataset.sidebarType = (data.id === currentUserData.id) ? 'current-user' : 'profile';
+            html += `            
             <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
                 <input type="hidden" name="id" value="${data.id}">
                 <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div class="rounded-t-2xl border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
+                    <div class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
                         <label for="name" class="col-span-1 p-4 truncate text-gray-500">Nome*</label>
                         <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="name" name="tt" value="${data.tt}" required>
                     </div>
-                    <div class="rounded-b-2xl border-black-500 bg-white border-b-1 grid grid-cols-4">
+                    <div class="rounded-b-2xl border-black-500 bg-white grid grid-cols-4">
                         <label for="email" class="col-span-1 p-4 truncate text-gray-500">E-mail*</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="email" id="email" name="ml" value="${data.ml}" required>
+                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="email" id="email" name="ml" value="${data.ml}" ${(data.provider === null || data.provider === '') ? 'disabled' : ''} required>
                     </div>
                 </div>
                 <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div class="rounded-t-2xl border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
-                        <label for="username" class="col-span-1 p-4 truncate text-gray-500">Usuário</label>
+                    <div title="Sobre" class="rounded-2xl border-black-500 bg-white grid grid-cols-4">
+                        <label for="description" class="col-span-1 p-4 truncate text-gray-500">Sobre</label>
+                        <textarea class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px] rounded-r-2xl" id="description" name="cf">${data.cf}</textarea>
+                    </div>
+                </div>                
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+                    <div title="Apelido da Página" class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
+                        <label for="username" class="col-span-1 p-4 truncate text-gray-500">Apelido</label>
                         <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="username" name="un" value="${data.un}">
                     </div>
-                    <div class="rounded-b-2xl border-black-500 bg-white border-b-1 grid grid-cols-4">
-                        <label for="description" class="col-span-1 p-4 truncate text-gray-500">Descrição</label>
-                        <textarea class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="text" id="description" name="cf">${data.cf}</textarea>
+                    <div class="border-b-2 bg-white grid grid-cols-4">
+                        <label for="page_privacy" class="col-span-1 p-4 truncate text-gray-500">Priv. da Página</label>
+                        <select class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="number" id="page_privacy" name="page_privacy">
+                            <option value=""  ${(currentUserData.page_privacy === null) ? 'selected' : ''} disabled>Selecione</option>
+                            <option value="0" ${(currentUserData.page_privacy === 0) ? 'selected' : ''}>Usuários logados</option>
+                            <option value="0" ${(currentUserData.page_privacy === 1) ? 'selected' : ''}>Toda a internet</option>                            
+                        </select>
                     </div>
-                </div>
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div class="rounded-t-2xl border-b-2 bg-white border-b-1 grid grid-cols-4">
-                        <label for="gender" class="col-span-1 p-4 truncate text-gray-500">Gênero</label>
-                        <select class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="number" id="gender" name="gender" value="">
-                            <option value="" selected disabled>Selecione</option>
-                            <option value="male">Masculino</option>
-                            <option value="female">Feminino</option>
+                    <div class="rounded-b-2xl border-b-2 bg-white grid grid-cols-4">
+                        <label for="feed_privacy" class="col-span-1 p-4 truncate text-gray-500">Priv. do Feed</label>
+                        <select class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="number" id="feed_privacy" name="feed_privacy">
+                            <option value=""  ${(currentUserData.feed_privacy === null) ? 'selected' : ''} disabled>Selecione</option>
+                            <option value="0" ${(currentUserData.feed_privacy === 0) ? 'selected' : ''}>Moderadores</option>
+                            <option value="1" ${(currentUserData.feed_privacy === 1) ? 'selected' : ''}>Usuários membros</option>
+                            <option value="2" ${(currentUserData.feed_privacy === 2 || (currentUserData.feed_privacy === 3 && currentUserData.page_privacy === 0)) ? 'selected' : ''}>Usuários logados</option>
+                            <option value="3" ${(currentUserData.feed_privacy === 3 && currentUserData.page_privacy > 0) ? 'selected' : '', (currentUserData.page_privacy < 1) ? 'disabled' : ''}>Toda a internet</option>
                         </select>
                     </div>                    
-                    <div class="border-b-2 border-black-500 bg-white border-b-1 grid grid-cols-4">
+                </div>
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+                    <div class="rounded-t-2xl border-b-2 bg-white grid grid-cols-4">
+                        <label for="gender" class="col-span-1 p-4 truncate text-gray-500">Gênero</label>
+                        <select class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="number" id="gender" name="gender" value="">
+                            <option value=""  ${(currentUserData.gender !== 'male' || currentUserData.gender !== 'female') ? 'selected' : ''} disabled>Selecione</option>
+                            <option value="male" ${(currentUserData.gender === 'male') ? 'selected' : ''}>Masculino</option>
+                            <option value="female" ${(currentUserData.gender === 'female') ? 'selected' : ''}>Feminino</option>
+                        </select>
+                    </div>                    
+                    <div class="border-b-2 border-black-500 bg-white grid grid-cols-4">
                         <label for="birth" class="col-span-1 p-4 truncate text-gray-500">Nascimento</label>
-                        <input class="border-none focus:outline-none col-span-3 p-4" type="date" id="birth" name="birth" value="">
-                    </div>
-                    <div class="border-b-2 bg-white border-b-1 grid grid-cols-4">
-                        <label for="phone" class="col-span-1 p-4 truncate text-gray-500">Telefone</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4"  type="text" placeholder="(99) 99999-9999" id="phone" name="phone" value="">
-                    </div>
-                    <div class="rounded-b-2xl bg-white border-b-1 grid grid-cols-4">
+                        <input class="border-none focus:outline-none col-span-3 p-4" type="date" id="birth" name="birth" value="${(currentUserData.birth) ? new Date(currentUserData.birth).toISOString().split('T')[0] : ''}">                        
+                    </div>                    
+                    <div class="rounded-b-2xl bg-white grid grid-cols-4">
                         <label for="cpf" class="col-span-1 p-4 truncate text-gray-500">CPF</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="text" placeholder="999.999.999-99" id="cpf" name="national_id" value="">
+                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="text" placeholder="999.999.999-99" id="cpf" name="national_id" value="${(currentUserData.national_id) ? currentUserData.national_id : ''}">
+                    </div>
+                </div>
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">                    
+                    <div id="input-container" class="rounded-t-2xl w-full">
+                        <div title="Contato" class="rounded-t-2xl bg-white grid grid-cols-6" data-input-id="0">
+                            <select class="rounded-tl-2xl border-none focus:outline-none flex col-span-2 p-4" id="url_type" name="url_type" value="">
+                                <option value="" class="text-gray-500" disabled selected>Contato</option>
+                                <option value="email">E-mail</option>
+                                <option value="phone">Telefone</option>
+                                <option value="site">Site</option>
+                                <option value="behance">Behance</option>
+                                <option value="discord">Discord</option>
+                                <option value="facebook">Facebook</option>
+                                <option value="flickr">Flickr</option>
+                                <option value="instagram">Instagram</option>
+                                <option value="linkedin">LinkedIn</option>
+                                <option value="pinterest">Pinterest</option>
+                                <option value="reddit">Reddit</option>
+                                <option value="snapchat">Snapchat</option>
+                                <option value="tiktok">TikTok</option>
+                                <option value="tumblr">Tumblr</option>
+                                <option value="twitch">Twitch</option>
+                                <option value="twitter">X / Twitter</option>
+                                <option value="vimeo">Vimeo</option>
+                                <option value="wechat">WeChat</option>
+                                <option value="whatsapp">WhatsApp</option>
+                                <option value="youtube">YouTube</option>
+                                <option value="other">Outro</option>
+                            </select>                        
+                            <input class="border-none focus:outline-none flex col-span-4 rounded-tr-2xl p-4" type="text" id="url_value" name="url_value" value="${(data.url) ? data.url : ''}">
+                        </div>
+                    </div>
+                    <div id="addButtonContainer" class="grid grid-cols-2 rounded-b-2xl border-b-2 border-black-500 bg-white">
+                        <div id="add-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-plus centered"></i></div>
+                        <div id="remove-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-minus centered"></i></div>
                     </div>
                 </div>
                 <button type="submit" class="shadow-sm w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
             </form>
             <hr>           
             <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                <div id="user-education" class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
                     <span class="fa-stack gray-500">
                         <i class="fas fa-circle fa-stack-2x"></i>
                         <i class="fas fa-graduation-cap fa-stack-1x fa-inverse"></i>					
                     </span>
                     Formação Acadêmica
                 </div>
-                <div class="border-b-2 border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                <div id="user-jobs" class="border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
                     <span class="fa-stack gray-500">
                         <i class="fas fa-circle fa-stack-2x"></i>
                         <i class="fas fa-user-tie fa-stack-1x fa-inverse"></i>					
                     </span>
                     Experiência Profissional
                 </div>
-                <div class="rounded-b-2xl border-black-500 bg-white p-3 border-b-1 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
+                <div id="user-testmonials" class="rounded-b-2xl border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
                     <span class="fa-stack gray-500">
                         <i class="fas fa-circle fa-stack-2x"></i>
                         <i class="fas fa-scroll fa-stack-1x fa-inverse"></i>					
@@ -555,7 +635,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     Depoimentos
                 </div>
             </div>
-            <div class="bg-white w-full shadow-sm rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
+            <div class="bg-white w-full shadow-sm rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
                 <span class="fa-stack gray-500">
                     <i class="fas fa-circle fa-stack-2x"></i>
                     <i class="fas fa-key fa-stack-1x fa-inverse"></i>					
@@ -564,17 +644,273 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             `;
         } else if (view === 'business') {
+            sidebarContent.id = 'business';
             html += `
-            
+            <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
+                <input type="hidden" name="id" value="${data.id}">
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+                    <div title="Nome Empresarial" class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
+                        <label for="name" class="col-span-1 p-4 truncate text-gray-500">Nome*</label>
+                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="name" name="tt" value="${data.tt}" required>
+                    </div>
+                    <div title="CNPJ" class="rounded-b-2xl bg-white grid grid-cols-4">
+                        <label for="cnpj" class="col-span-1 p-4 truncate text-gray-500">CNPJ</label>
+                        <input class="border-none focus:outline-none flex col-span-3 p-4 rounded-br-2xl" type="text" placeholder="99.999.999/9999-99" id="cnpj" name="cnpj" value="${(data.national_id) ? data.national_id : ''}">
+                    </div>                                                           
+                </div>
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+                    <div title="Sobre" class="rounded-2xl border-black-500 bg-white grid grid-cols-4">
+                        <label for="description" class="col-span-1 p-4 truncate text-gray-500">Sobre</label>
+                        <textarea class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px] rounded-r-2xl" id="description" name="cf">${data.cf}</textarea>
+                    </div>
+                </div>
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+                    <div title="Apelido da Página" class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
+                        <label for="username" class="col-span-1 p-4 truncate text-gray-500">Apelido</label>
+                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="username" name="un" value="${data.un}">
+                    </div>
+                    <div class="border-b-2 bg-white grid grid-cols-4">
+                        <label for="page_privacy" class="col-span-1 p-4 truncate text-gray-500">Priv. da Página</label>
+                        <select class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="number" id="page_privacy" name="page_privacy">
+                            <option value=""  ${(data.pg === null) ? 'selected' : ''} disabled>Selecione</option>
+                            <option value="0" ${(data.pg === 0) ? 'selected' : ''}>Usuários logados</option>
+                            <option value="0" ${(data.pg === 1) ? 'selected' : ''}>Toda a internet</option>                            
+                        </select>
+                    </div>
+                    <div class="rounded-b-2xl bg-white grid grid-cols-4">
+                        <label for="feed_privacy" class="col-span-1 p-4 truncate text-gray-500">Priv. do Feed</label>
+                        <select class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="number" id="feed_privacy" name="feed_privacy">
+                            <option value=""  ${(data.pc === null) ? 'selected' : ''} disabled>Selecione</option>
+                            <option value="0" ${(data.pc === 0) ? 'selected' : ''}>Moderadores</option>
+                            <option value="1" ${(data.pc === 1) ? 'selected' : ''}>Usuários membros</option>
+                            <option value="2" ${(data.pc === 2 || (data.pg === 3 && data.pg === 0)) ? 'selected' : ''}>Usuários logados</option>
+                            <option value="3" ${(data.pc === 3 && data.pg > 0) ? 'selected' : '', (currentUserData.page_privacy < 1) ? 'disabled' : ''}>Toda a internet</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+                    <div title="CEP" class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
+                        <label for="zip_code" class="col-span-1 p-4 truncate text-gray-500">CEP</label>
+                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" placeholder="99999-999" id="zip_code" name="zip_code" value="${data?.zip_code}">
+                    </div>
+                    <div title="País" class="border-b-2 bg-white grid grid-cols-4">
+                        <label for="country" class="col-span-1 p-4 truncate text-gray-500">País</label>
+                        <select class="border-none focus:outline-none flex col-span-3 p-4" id="country" name="country" value="${data?.country}">
+                            <option value="" disabled>Selecione</option>                            
+                        </select>
+                    </div> 
+                    <div title="Estado" class="border-b-2 border-black-500 bg-white grid grid-cols-4">
+                        <label for="state" class="col-span-1 p-4 truncate text-gray-500">Estado</label>
+                        <input class="border-none focus:outline-none flex col-span-3 p-4" type="text" id="state" name="state" value="${data?.state}">
+                    </div>
+                    <div title="Cidade" class="border-b-2 border-black-500 bg-white grid grid-cols-4">
+                        <label for="city" class="col-span-1 p-4 truncate text-gray-500">Cidade</label>
+                        <input class="border-none focus:outline-none flex col-span-3 p-4" type="text" id="city" name="city" value="${data?.city}">
+                    </div>
+                    <div title="Bairro" class="border-b-2 border-black-500 bg-white grid grid-cols-4">
+                        <label for="district" class="col-span-1 p-4 truncate text-gray-500">Bairro</label>
+                        <input class="border-none focus:outline-none flex col-span-3 p-4" type="text" id="district" name="district" value="${data?.district}">
+                    </div>
+                    <div title="Endereço" class="border-b-2 border-black-500 bg-white grid grid-cols-4">
+                        <label for="address" class="col-span-1 p-4 truncate text-gray-500">Endereço</label>
+                        <input class="border-none focus:outline-none flex col-span-3 p-4" type="text" id="address" name="address" value="${data?.address}">
+                    </div>
+                    <div title="Complemento" class="rounded-b-2xl border-black-500 bg-white grid grid-cols-4">
+                        <label for="complement" class="col-span-1 p-4 truncate text-gray-500">Complemento</label>
+                        <input class="border-none focus:outline-none flex col-span-3 p-4 rounded-br-2xl" type="text" id="complement" name="complement" value="${data?.complement}">
+                    </div>                    
+                </div>
+                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">                    
+                    <div id="input-container" class="rounded-t-2xl w-full">
+                        <div title="Contato" class="rounded-t-2xl bg-white grid grid-cols-6" data-input-id="0">
+                            <select class="rounded-tl-2xl border-none focus:outline-none flex col-span-2 p-4" id="url_type" name="url_type" value="">
+                                <option value="" class="text-gray-500" disabled selected>Contato</option>
+                                <option value="email">E-mail</option>
+                                <option value="phone">Telefone</option>
+                                <option value="site">Site</option>
+                                <option value="behance">Behance</option>
+                                <option value="discord">Discord</option>
+                                <option value="facebook">Facebook</option>
+                                <option value="flickr">Flickr</option>
+                                <option value="instagram">Instagram</option>
+                                <option value="linkedin">LinkedIn</option>
+                                <option value="pinterest">Pinterest</option>
+                                <option value="reddit">Reddit</option>
+                                <option value="snapchat">Snapchat</option>
+                                <option value="tiktok">TikTok</option>
+                                <option value="tumblr">Tumblr</option>
+                                <option value="twitch">Twitch</option>
+                                <option value="twitter">X / Twitter</option>
+                                <option value="vimeo">Vimeo</option>
+                                <option value="wechat">WeChat</option>
+                                <option value="whatsapp">WhatsApp</option>
+                                <option value="youtube">YouTube</option>
+                                <option value="other">Outro</option>
+                            </select>                        
+                            <input class="border-none focus:outline-none flex col-span-4 rounded-tr-2xl p-4" type="text" id="url_value" name="url_value" value="${(data.url) ? data.url : ''}">
+                        </div>
+                    </div>
+                    <div id="addButtonContainer" class="grid grid-cols-2 rounded-b-2xl border-black-500 bg-white">
+                        <div id="add-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-plus centered"></i></div>
+                        <div id="remove-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-minus centered"></i></div>
+                    </div>
+                </div>
+                <button type="submit" class="shadow-sm w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
+            </form>
+            <hr>           
+            <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">                               
+                <div id="business-shareholding" class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
+                    <span class="fa-stack gray-500">
+                        <i class="fas fa-circle fa-stack-2x"></i>
+                        <i class="fas fa-sitemap fa-stack-1x fa-inverse"></i>					
+                    </span>
+                    Estrutura Societária
+                </div>
+                <div id="business-jobs" class="border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
+                    <span class="fa-stack gray-500">
+                        <i class="fas fa-circle fa-stack-2x"></i>
+                        <i class="fas fa-id-badge fa-stack-1x fa-inverse"></i>					
+                    </span>
+                    Colaboradores
+                </div>
+                <div id="business-testmonials" class="rounded-b-2xl border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
+                    <span class="fa-stack gray-500">
+                        <i class="fas fa-circle fa-stack-2x"></i>
+                        <i class="fas fa-scroll fa-stack-1x fa-inverse"></i>					
+                    </span>
+                    Depoimentos
+                </div>
+            </div>
             `;
         } else if (view === 'team') {
             html += `
             
             `;
+        } else if (view === 'user-education') {
+            html += `
+                Education content
+            `;
+        } else if (view === 'user-jobs') {
+
+            const userJobs = await apiClient.post('/search', {
+                db: 'workz_companies',
+                table: 'employees',
+                columns: ['*'],
+                conditions: { us: currentUserData.id },
+                order: { by: 'start_date', dir: 'DESC' },
+                fetchAll: true
+            });
+
+            const list = Array.isArray(userJobs?.data) ? userJobs.data : [];
+            
+            const jobs = (await Promise.all(
+                list.map(async (job) => {
+                    const readonlyMode = job.nv < 3 && job.st === 1;
+                    const businessName = (job?.em != null) ? (await getBusinessName(job.em)) ?? '' : (job?.business_name ?? '');
+                    businessesJobs[job.em] = businessName;
+                    const jobForm = `
+                        <form class="job-form grid grid-cols-1 gap-6" data-job-id="${job.id ?? ''}" data-job-type="${job?.type ?? ''}" data-third-party="${job?.third_party ?? ''}" data-readonly="${readonlyMode ? '1' : '0'}">
+                            <div class="w-full shadow-sm rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
+                                <div class="grid grid-cols-4 border-b border-gray-200">
+                                    <label class="col-span-1 p-4 truncate text-gray-500">Negócio*</label>
+                                    <input class="border-0 focus:outline-none col-span-3 p-4" type="text" name="business_name" value="${businessName}" ${(job?.em ? 'disabled' : '')}>
+                                </div>
+                                <div class="grid grid-cols-4 border-b border-gray-200">
+                                    <label class="col-span-1 p-4 truncate text-gray-500">Cargo</label>
+                                    <input class="border-0 focus:outline-none col-span-3 p-4" type="text" name="job_title" value="${job?.job_title ?? ''}">
+                                </div>
+                                <div class="grid grid-cols-4 border-b border-gray-200">
+                                    <label class="col-span-1 p-4 truncate text-gray-500">Início*</label>
+                                    <input class="border-0 focus:outline-none col-span-3 p-4" type="date" name="start_date" value="${toInputDate(job?.start_date)}">
+                                </div>
+                                <div class="grid grid-cols-4 border-b border-gray-200">
+                                    <label class="col-span-1 p-4 truncate text-gray-500">Fim</label>
+                                    <input class="border-0 focus:outline-none col-span-3 p-4" type="date" name="end_date" value="${toInputDate(job?.end_date)}">
+                                </div>
+                                <div class="grid grid-cols-4 border-b border-gray-200">
+                                    <label class="col-span-1 p-4 truncate text-gray-500">Tipo de Emprego</label>
+                                    <select class="border-0 focus:outline-none col-span-3 p-4" id="type" name="type">
+                                        <option value="" ${!job?.type ? 'selected' : ''} disabled>Selecione</option>
+                                        <option value="fulltime"      ${job?.type === 'fulltime' ? 'selected' : ''}>Full-time</option>
+                                        <option value="parttime"      ${job?.type === 'parttime' ? 'selected' : ''}>Part-time</option>
+                                        <option value="selfemployed"  ${job?.type === 'selfemployed' ? 'selected' : ''}>Self-employed</option>
+                                        <option value="freelance"     ${job?.type === 'freelance' ? 'selected' : ''}>Freelance</option>
+                                        <option value="outsourced"    ${job?.type === 'outsourced' ? 'selected' : ''}>Outsourced / Third-party Contract</option>
+                                        <option value="contract"      ${job?.type === 'contract' ? 'selected' : ''}>Contract</option>
+                                        <option value="internship"    ${job?.type === 'internship' ? 'selected' : ''}>Internship</option>
+                                        <option value="apprenticeship"${job?.type === 'apprenticeship' ? 'selected' : ''}>Apprenticeship</option>
+                                        <option value="leadership"    ${job?.type === 'leadership' ? 'selected' : ''}>Leadership Program</option>
+                                        <option value="indirect"      ${job?.type === 'indirect' ? 'selected' : ''}>Indirect Contract</option>
+                                    </select>
+                                </div>                                
+                                <div class="grid grid-cols-4 border-b border-gray-200">
+                                    <label class="col-span-1 p-4 truncate text-gray-500">Tipo de Jornada</label>
+                                    <select class="border-0 focus:outline-none col-span-3 p-4" name="mode">
+                                        <option value="" ${!job?.mode ? 'selected' : ''} disabled>Selecione</option>
+                                        <option value="onsite" ${job?.mode === 'onsite' ? 'selected' : ''}>On site</option>
+                                        <option value="hybrid" ${job?.mode === 'hybrid' ? 'selected' : ''}>Hybrid</option>
+                                        <option value="remote" ${job?.mode === 'remote' ? 'selected' : ''}>Remote</option>
+                                    </select>
+                                </div>
+                                <div class="grid grid-cols-4 border-b border-gray-200">
+                                    <label class="col-span-1 p-4 truncate text-gray-500">Habilidades</label>
+                                    <input class="border-0 focus:outline-none col-span-3 p-4" type="text" name="skills" value="${job?.skills ?? ''}">
+                                </div>
+                                <div class="grid grid-cols-4 border-b border-gray-200">
+                                    <label class="col-span-1 p-4 truncate text-gray-500">Descrição</label>
+                                    <textarea class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px]" name="description">${job?.description ?? ''}</textarea>
+                                </div>
+                                <div class="w-full p-4 border-b border-gray-200 flex items-center">
+                                    <input id="visibility_${job.id ?? ''}"  name="visibility" value="1" type="checkbox" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded-sm focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500"  ${Number(job?.visibility) === 1 ? 'checked' : ''}>
+                                    <label for="visibility_${job.id ?? ''}" class="w-full ms-4 truncate text-gray-500">Mostrar no perfil</label>
+                                </div>
+                                <div class="w-full p-4 border-b border-gray-200 flex items-center">
+                                    <input id="current_${job.id ?? ''}" name="st" value="1" type="checkbox" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded-sm focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500"  ${Number(job?.st) > 0 ? 'checked' : ''} ${readonlyMode ? 'disabled' : ''}>
+                                    <label for="current_${job.id ?? ''}" class="w-full ms-4 truncate text-gray-500">Emprego atual</label>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button type="submit" id="save-job-changes" class="flex-1 shadow-sm py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
+                                <button type="button" class="${readonlyMode ? 'bg-gray-400' : 'job-remove bg-red-600 hover:bg-red-700 transition-colors'} flex-0 shadow-sm py-2 px-4 text-white font-semibold rounded-3xl">Remover</button>
+                            </div>
+                        </form>
+                        <hr class="my-3">
+                    `;
+                    return jobForm;
+                })
+            )).join('');
+            html += jobs;
+            html += `<button type="button" data-action="add-job" class="shadow-sm w-full py-2 px-4 bg-green-600 text-white font-semibold rounded-3xl hover:bg-green-700 transition-colors">Adicionar</button>`;           
+
+        } else if (view === 'user-testmonials') {
+            html += `
+                Testmonials content
+            `;
+        } else if (view === 'business-shareholding') {
+            html += `
+            <div class="w-full shadow rounded-2xl">
+                <div id="tree" class="bg-white rounded-t-2xl divide-y divide-gray-100"></div>
+                <button id="add-root" class="w-full p-4 rounded-b-2xl bg-gray-100 hover:bg-gray-200 text-center">
+                    <i class="fas fa-plus centered"></i> Adicionar Acionista
+                </button>
+            </div>
+            <button id="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700">
+                Gerar JSON
+            </button>
+            <div class="mt-6">
+                <label class="block text-sm font-medium text-gray-600 mb-2">JSON gerado</label>
+                <textarea id="output" rows="10" class="w-full p-3 rounded-xl border border-gray-200 bg-white font-mono text-sm" readonly></textarea>
+            </div>
+            `
+        } else if (view === 'business-employees') {
+
+        } else if (view === 'business-testmonials') {
+
         }
 
         return html;
     };
+
 
     async function appendWidget(type = 'people', gridList, count) {
         
@@ -826,6 +1162,64 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     }
 
+    // Helpers de animação (com fallback para quem prefere menos movimento)
+    const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+    function enterRow(row) {
+        if (prefersReduced) return;
+
+            row.style.overflow = 'hidden';
+            row.style.opacity = '0';
+            row.style.transform = 'scale(0.98)';
+            row.style.height = '0px';
+
+            // força reflow
+            row.getBoundingClientRect();
+
+            row.style.transition = 'height 160ms ease, opacity 160ms ease, transform 160ms ease';
+            row.style.height = row.scrollHeight + 'px';
+            row.style.opacity = '1';
+            row.style.transform = 'scale(1)';
+
+            row.addEventListener('transitionend', () => {
+            row.style.transition = '';
+            row.style.height = '';
+            row.style.overflow = '';
+            row.style.transform = '';
+            row.style.opacity = '';
+            }, { once: true });
+    }
+
+    function leaveRow(row, done) {
+        if (prefersReduced) { done?.(); return; }
+
+        row.style.overflow = 'hidden';
+        row.style.height = row.scrollHeight + 'px';
+        row.style.opacity = '1';
+        row.style.transform = 'scale(1)';
+
+        // força reflow
+        row.getBoundingClientRect();
+
+        row.style.transition = 'height 160ms ease, opacity 160ms ease, transform 160ms ease';
+        row.style.height = '0px';
+        row.style.opacity = '0';
+        row.style.transform = 'scale(0.98)';
+
+        row.addEventListener('transitionend', () => {
+        done?.();
+        }, { once: true });
+    }
+
+    // Opcional: manter os cantos arredondados só na 1ª e última linhas
+    function fixRoundings(container) {
+    [...container.children].forEach((row, i, arr) => {
+        row.classList.remove('rounded-t-2xl', 'rounded-b-2xl');
+        if (i === 0) row.classList.add('rounded-t-2xl');
+        if (i === arr.length - 1) row.classList.add('rounded-b-2xl');
+    });
+    }
+
     function toggleSidebar(el = null, toggle = true) {
     // console.log(el);
 
@@ -842,23 +1236,404 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (el) {
-            sidebarWrapper.innerHTML = `<div id="sidebar-content" class="grid grid-cols-1 gap-6 p-4"></div>`;
-            const sidebarContent = document.querySelector('#sidebar-content');
+            sidebarWrapper.innerHTML = `<div class="sidebar-content grid grid-cols-1 gap-6 p-4"></div>`;
+            const sidebarContent = document.querySelector('.sidebar-content');
             const action = el.dataset.sidebarAction;            
             if (action === 'settings') {
                 renderTemplate(sidebarContent, templates.sidebarMain, { data: currentUserData });
-            } else if (action === 'page-settings') {                
-                renderTemplate(sidebarContent, templates.sidebarPageSettings, {
-                    view: (el.parentNode.id === 'current-user') ? 'profile' : viewType,
-                    data: (el.parentNode.id === 'current-user') ? currentUserData : viewData
+            } else if (action === 'page-settings') {
+                renderTemplate(sidebarContent, templates.sidebarPageSettings, {                    
+                    view: (el.parentNode.dataset.sidebarType === 'current-user') ? 'profile' : viewType,
+                    data: (el.parentNode.dataset.sidebarType === 'current-user') ? currentUserData : viewData
                 }, () => {
-                    document.getElementById('settings-form').addEventListener('submit', handleUpdate);
+                    const settingsForm = document.querySelector('#settings-form');
+                    if (!settingsForm) return;
+                    settingsForm?.addEventListener('click', (e) => {
+                        const addBtn = e.target.closest('#add-input-button');
+                        const rmBtn  = e.target.closest('#remove-input-button');
+                        if (!addBtn && !rmBtn) return;
+                        e.preventDefault();
+                        const container = settingsForm.querySelector('#input-container');
+                        if (!container) return;
+                        if (addBtn) {
+                            const last = container.lastElementChild;
+                            const lastId = last ? parseInt(last.dataset.inputId || '-1', 10) : -1;
+                            const newId = Number.isFinite(lastId) ? lastId + 1 : 0;
+                            let newRow;
+                            if (last) {
+                                newRow = last.cloneNode(true);
+                                newRow.dataset.inputId = String(newId);
+                                newRow.querySelectorAll('input, select, textarea').forEach((el) => {
+                                    if (el.tagName === 'SELECT') el.selectedIndex = 0;
+                                    else el.value = '';
+                                    if (el.id) {
+                                        const base = el.id.replace(/-\d+$/, '');
+                                        el.id = `${base}-${newId}`;
+                                    }
+                                });
+                                newRow.querySelectorAll('label[for]').forEach((lab) => {
+                                    const base = lab.htmlFor?.replace(/-\d+$/, '') ?? '';
+                                    if (base) lab.htmlFor = `${base}-${newId}`;
+                                });
+                            } else {
+                                return;
+                            }                            
+                            newRow.style.willChange = 'height, opacity, transform';
+                            container.appendChild(newRow);
+                            enterRow(newRow);
+                            fixRoundings(container);
+                        }
+                        if (rmBtn) {
+                            if (container.children.length > 1) {
+                                const row = container.lastElementChild;
+                                row.style.willChange = 'height, opacity, transform';
+                                leaveRow(row, () => {
+                                    row.remove();
+                                    fixRoundings(container);
+                                });
+                            }
+                        }
+                    });
+                    document?.querySelector("#business-shareholding")?.addEventListener('click', (e) => {
+                        renderTemplate(sidebarContent, templates.sidebarPageSettings, {
+                            view: 'business-shareholding',
+                            data: ''
+                        }, () => {
+                             // ---------- Estado ----------
+                            let nextId = 1;
+                            /** Estrutura: [{ id, cnpj, children: [...] }] */
+                            let roots = [];
+
+                            // ---------- Helpers ----------
+                            const onlyDigits = (s) => (s || '').replace(/\D/g, '');
+                            const formatCNPJ = (digits) => {
+                            const d = onlyDigits(digits).slice(0,14);
+                            if (!d) return '';
+                            const p = [
+                                d.slice(0,2),
+                                d.slice(2,5),
+                                d.slice(5,8),
+                                d.slice(8,12),
+                                d.slice(12,14)
+                            ];
+                            let out = '';
+                            if (p[0]) out = p[0];
+                            if (p[1]) out += '.' + p[1];
+                            if (p[2]) out += '.' + p[2];
+                            if (p[3]) out += '/' + p[3];
+                            if (p[4]) out += '-' + p[4];
+                            return out;
+                            };
+                            const isValidCNPJLen = (digits) => onlyDigits(digits).length === 14;
+
+                            const newNode = (cnpj='') => ({ id: nextId++, cnpj, children: [] });
+
+                            // Busca e operações na árvore
+                            function findParentAndIndex(id, nodes=roots, parent=null) {
+                            for (let i=0;i<nodes.length;i++){
+                                const n = nodes[i];
+                                if (n.id === id) return { parent, nodes, index:i, node:n };
+                                const deep = findParentAndIndex(id, n.children, n);
+                                if (deep) return deep;
+                            }
+                            return null;
+                            }
+
+                            function addChild(id){
+                                const info = findParentAndIndex(id);
+                                if (!info) return;
+                                info.node.children.push(newNode(''));
+                                render();
+                            }
+                            function removeNode(id){
+                                const info = findParentAndIndex(id);
+                                if (!info) return;
+                                info.nodes.splice(info.index, 1);
+                                render();
+                            }
+                            function updateCNPJ(id, value){
+                                const info = findParentAndIndex(id);
+                                if (!info) return;
+                                info.node.cnpj = formatCNPJ(value);
+                                // não re-renderiza a cada tecla pra não perder o foco; apenas ajusta classe
+                            }
+
+                            // ---------- Render ----------
+                            const treeEl = document.getElementById('tree');
+
+                            function render(){
+                                treeEl.innerHTML = '';
+                                roots.forEach(node => {
+                                    treeEl.appendChild(renderNode(node, 0));
+                                });
+                            }
+
+                            function renderNode(node, depth){
+                                const wrapper = document.createElement('div');
+                                wrapper.className = (depth === 0) ? "ml-0" : "ml-3";
+
+                                const row = document.createElement('div');
+                                row.className = "flex items-center gap-2";
+
+                                const input = document.createElement('input');
+                                input.type = "text";
+                                input.value = node.cnpj || '';
+                                input.placeholder = "00.000.000/0000-00";
+                                input.dataset.id = node.id;
+                                input.className = "flex-1 rounded-2xl p-4 focus:outline-none";
+                                input.addEventListener('input', e => {
+                                    updateCNPJ(node.id, e.target.value);
+                                    e.target.value = formatCNPJ(e.target.value);
+                                });
+
+                                const addBtn = document.createElement('button');
+                                addBtn.textContent = '+';
+                                addBtn.className = "w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-2xl font-bold";
+                                addBtn.addEventListener('click', (e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    addChild(node.id)
+                                });
+
+                                const rmBtn = document.createElement('button');
+                                rmBtn.textContent = '-';
+                                rmBtn.className = "w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-2xl font-bold";
+                                rmBtn.addEventListener('click', (e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    removeNode(node.id)
+                                });
+
+                                row.appendChild(input);
+                                row.appendChild(rmBtn);
+                                row.appendChild(addBtn);
+                                row.appendChild(document.createElement('div')); // spacer
+                                wrapper.appendChild(row);
+
+                                // 🔑 Agora os filhos ficam ANINHADOS dentro do pai
+                                if(node.children?.length){
+                                    const childrenWrap = document.createElement('div');
+                                    childrenWrap.className = "ml-3 border-l border-gray-200";
+                                    node.children.forEach(ch=>{
+                                    childrenWrap.appendChild(renderNode(ch, depth+1));
+                                    });
+                                    wrapper.appendChild(childrenWrap);
+                                }
+
+                                return wrapper;
+                            }
+
+
+                            // ---------- Inicialização ----------
+                            // Exemplo inicial (opcional): uma raiz vazia para começar
+                            roots.push(newNode(''));
+                            render();
+
+                            // ---------- Controles globais ----------
+                            document.getElementById('add-root').addEventListener('click', ()=>{
+                            roots.push(newNode(''));
+                            render();
+                            });
+
+                            document.getElementById('submit').addEventListener('click', ()=>{
+                            // Validação básica (opcional): todos preenchidos e 14 dígitos
+                            const allNodes = [];
+                            (function collect(nodes){
+                                nodes.forEach(n=>{
+                                allNodes.push(n);
+                                collect(n.children);
+                                });
+                            })(roots);
+
+                            const invalid = allNodes.filter(n=> !isValidCNPJLen(n.cnpj));
+                            if (invalid.length){
+                                alert('Há CNPJ(s) incompletos. Preencha com 14 dígitos (ex.: 12.345.678/0001-90).');
+                                return;
+                            }
+
+                            // Serializa removendo ids internos
+                            const serialize = (nodes)=> nodes.map(n=> ({
+                                cnpj: onlyDigits(n.cnpj).replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5"),
+                                children: serialize(n.children)
+                            }));
+
+                            const json = JSON.stringify(serialize(roots), null, 2);
+                            document.getElementById('output').value = json;
+                            // Scroll suave até a saída
+                            document.getElementById('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            });
+                        });
+                    });                    
+                    document?.querySelector("#user-jobs")?.addEventListener('click', (e) => {
+                        renderTemplate(sidebarContent, templates.sidebarPageSettings, {
+                            view: 'user-jobs',
+                            data: viewData
+                        }, () => {
+                        
+                            sidebarContent.addEventListener('change', (e) => {
+                                e.preventDefault();
+                                const sel = e.target.closest('select[name="type"]');
+                                if (!sel) return;
+                                const form = sel.closest('.job-form');
+                                const disabled = sel.disabled || form?.dataset.readonlyMode === '1';
+                                const currentExtraValue = form?.querySelector('[name="third_party"]')?.value || form?.dataset.thirdParty || '';
+                                renderOutsourcedRow(sel, { selected: currentExtraValue, disabled });
+                            });                            
+
+                            sidebarContent.addEventListener('submit', async (e) => {
+                                if (e.target.classList.contains('job-form')) {
+                                    e.preventDefault();
+                                    const messageContainer = document.getElementById('message');
+                                    const form = new FormData(e.target);
+                                    const data = Object.fromEntries(form.entries());                                      
+                                    data.visibility = e.target.querySelector(`[name="visibility"]`).checked ? 1 : 0;
+                                    data.st = e.target.querySelector(`[name="st"]`).checked ? 1 : 0;                                
+                                    if (data) {
+                                        const result = await apiClient.post('/update', {
+                                            db: 'workz_companies',
+                                            table: 'employees',
+                                            data: data,
+                                            conditions: {
+                                                id: e.target.dataset.jobId
+                                            }
+                                        });
+                                        if (result) {
+                                            renderTemplate(messageContainer, templates.message, { message: 'Experiência profissional atualizada com sucesso!', type: 'success' });
+                                        } else {
+                                            renderTemplate(messageContainer, templates.message, { message: 'Falha na atualização', type: 'error' });                                            
+                                        }
+                                    }                                    
+                                }
+                            });
+
+                            initOutsourcedUI(document.querySelector('.sidebar-content'));
+                        });
+                    });
+                    document?.getElementById('settings-form')?.addEventListener('submit', handleUpdate);
                     initMasks();
                 });
             }
         }
     }
     
+    // OUTRAS FUNÇÕES
+
+    function renderOutsourcedRow(typeSelectEl, { selected = '', disabled = false } = {}) {
+        const rowEl = typeSelectEl.closest('.grid');
+        if (!rowEl) return;
+
+        // remove linha antiga se existir
+        const existing = rowEl.nextElementSibling;
+        if (existing && existing.dataset.role === 'outsourced-extra') {
+            existing.remove();
+        }
+
+        if (typeSelectEl.value !== 'outsourced') return;
+
+        let html = `
+        <div data-role="outsourced-extra" class="grid grid-cols-4 border-b border-gray-200">
+            <label class="col-span-1 p-4 truncate text-gray-500">Terceirizada</label>
+            <select name="third_party" ${disabled ? 'disabled' : ''} class="border-0 focus:outline-none col-span-3 p-4" required>
+            <option value="" disabled ${!selected ? 'selected' : ''}>Selecione</option>
+            `;
+            const optionsHtml = Object.entries(businessesJobs).sort(([,a],[,b]) => a.localeCompare(b, 'pt-BR')).map(([id, nome]) => `
+            <option value="${id}" ${String(selected) === String(id) ? 'selected' : ''}>${nome}</option>
+            `).join('');
+            html += optionsHtml + `
+            </select>
+        </div>
+        `;
+
+        rowEl.insertAdjacentHTML('afterend', html);
+    }
+
+    function addStep(e) {
+        const inputs = e.target.parentNode.parentNode.children[0].children;
+
+        console.log();
+        /*
+        var inputContainer = document.getElementById('inputContainer');
+        var containers = inputContainer.getElementsByClassName('fieldsContainer');
+        var n = containers.length;
+
+        // Criando o container da nova tarefa
+        var newStep = document.createElement("div");
+        newStep.id = "taskStep_" + n;
+        newStep.className = "fieldsContainer large-12 medium-12 small-12 text-ellipsis display-center-general-container background-white border-t-input";
+        
+        // Criando o label da nova tarefa
+        var label = document.createElement("div");
+        label.className = "float-left large-2 medium-2 small-4 text-ellipsis cm-pad-15-l";
+        label.innerText = "Tarefa " + (n + 1);
+        
+        // Criando o input de texto
+        var textInput = document.createElement("input");
+        textInput.name = "step_" + n;
+        textInput.type = "text";
+        textInput.className = "float-left border-none large-7 medium-7 small-5 cm-pad-5-l required";
+        textInput.style.height = "45px";
+        
+        // Criando o input de data/hora
+        var dateInput = document.createElement("input");
+        dateInput.name = "step_dt_" + n;
+        dateInput.type = "datetime-local";
+        dateInput.className = "float-left border-none large-3 medium-3 small-3 cm-pad-5-l border-l-input";
+        dateInput.style.height = "45px";
+        dateInput.setAttribute("onchange", "checkDate(this)");
+
+        // Adicionando os elementos ao novo step
+        newStep.appendChild(label);
+        newStep.appendChild(textInput);
+        newStep.appendChild(dateInput);
+
+        // Adicionando o novo step ao container sem apagar os anteriores
+        inputContainer.appendChild(newStep);
+        */
+    }
+
+    // 2) Inicializa (útil no carregamento da página/templating)
+    function initOutsourcedUI(scope = document) {
+        let allTypeSelectors = scope.querySelectorAll('.job-form select[name="type"]');
+        allTypeSelectors.forEach(sel => {            
+            const form = sel.closest('.job-form');
+            const disabled = sel.disabled || form?.dataset.readonlyMode === '1';            
+            const currentExtraValue = form?.querySelector('[name="third_party"]')?.value || form?.dataset.thirdParty || '';
+            renderOutsourcedRow(sel, { selected: currentExtraValue, disabled });
+        });        
+    }
+
+
+    // ===================================================================
+    // BUSCAS BÁSICAS DE DADOS
+    // ===================================================================
+
+    const toInputDate = (d) => {
+        if (!d) return '';
+        const dt = new Date(d);
+        if (Number.isNaN(dt.getTime())) return '';
+        const y = dt.getFullYear();
+        const m = String(dt.getMonth() + 1).padStart(2, '0');
+        const day = String(dt.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+    
+    async function getBusinessName(em = null) {
+        if (em == null) return '';
+        const res = await apiClient.post('/search', {
+            db: 'workz_companies',
+            table: 'companies',
+            columns: ['tt'],
+            conditions: { id: em },
+            fetchAll: false
+        });
+
+        // Se o seu backend retorna { data: { tt: '...' } }:
+        return res?.data?.tt ?? '';
+
+        // Se retorna { data: [ { tt: '...' } ] }:
+        //return Array.isArray(res?.data) ? (res.data[0]?.tt ?? '') : (res?.data?.tt ?? '');
+    }
+
     // ===================================================================
     // 🧠 LÓGICA DE INICIALIZAÇÃO
     // ===================================================================
@@ -1601,13 +2376,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function handleMultipleUpdates(e) {
+        e.preventDefault();
+        const messageContainer = document.getElementById('message');
+
+    }
+
     async function handleUpdate(e) {
         e.preventDefault();
         const view = e.target.dataset.view;
         const form = new FormData(e.target);
         const data = Object.fromEntries(form.entries());
         const messageContainer = document.getElementById('message');
-                
+
         if (data.phone) {
             data.phone = onlyNumbers(data.phone);
         }
@@ -1615,50 +2396,68 @@ document.addEventListener('DOMContentLoaded', () => {
             data.national_id = onlyNumbers(data.national_id);
         }
 
-        if (view === 'profile') {
-            // Verifica nome
-            if (!data.tt || data.tt === ''){                
-                console.error('O nome do usuário é expressamente necesário.');
-                return;
-            }
-            // Verifica e-mail
-            if (!data.ml || data.ml === ''){
-                console.error('O e-mail é expressamente necessário.');
-                return;
-            } else {
-                data.ml = data.ml.trim().toLowerCase();
-                const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                if (!regex.test(data.ml)){
-                    console.error('E-mail inválido');
-                    return;
-                }
-            }
+        const changedData = getChangedFields(data, currentUserData);
 
+        if (Object.keys(changedData).length === 0) {
+            renderTemplate(messageContainer, templates.message, { message: 'Nenhuma alteração detectada.', type: 'warning' });
+            return;
         }
 
-        let enitityType = (view === 'profile') ? 'people' : (view === 'business ') ? 'businesses' : 'teams';
+        if (changedData.tt !== undefined && changedData.tt.trim() === '') { renderTemplate(messageContainer, templates.message, { message: 'Nome é obrigatório.', type: 'error' }); return; }
+        if (changedData.ml !== undefined && changedData.ml.trim() === '') { 
+            renderTemplate(messageContainer, templates.message, { message: 'E-mail é obrigatório.', type: 'error' });
+            return; 
+        } else if (changedData.ml !== undefined) {
+            const result = await apiClient.post('/change-email', {
+                userId: currentUserData.id,
+                newEmail: changedData.ml
+            });
+            if (result) {
+                if (result.status === 'success') {
+                    renderTemplate(messageContainer, templates.message, { message: 'Um pedido de confirmação foi encaminhado ao novo endereço de e-mail.', type: 'warning' });
+                } else {
+                    renderTemplate(messageContainer, templates.message, { message: result.message || 'Ocorreu um erro.', type: 'error' });
+                }                
+            } else {
+                renderTemplate(messageContainer, templates.message, { message: 'Ocorreu um erro ao alterar o e-mail.', type: 'error' });
+            }
+            return;
+        }
 
-        if (data.id && data.id !== null) {            
-            
+        let enitityType = (view === 'profile') ? 'people' 
+                        : (view === 'business ') ? 'businesses' 
+                        : 'teams';
+
+        if (data.id) {            
             const result = await apiClient.post('/update', {
                 db: typeMap[enitityType].db,
                 table: typeMap[enitityType].table,
-                data: data,
+                data: changedData,
                 conditions: {
                     id: data.id
                 }
             });
             if (result) {
-                console.log('Atualização realizada com sucesso.');
+                await initializeCurrentUserData();                
+                renderTemplate(messageContainer, templates.message, { message: 'Dados atualizados com sucesso!', type: 'success' });
+                if (viewType === view) {
+                    loadPage();
+                }                
             } else {
                 console.error('Falha na atualização.');
             }
+        }                            
+    }
+
+    function getChangedFields(newData, oldData) {
+        const changed = {};
+        for (const [key, value] of Object.entries(newData)) {
+            const oldValue = oldData[key] ?? null;
+            if (value !== oldValue && key !== 'id') {
+                changed[key] = value;
+            }
         }
-        
-        
-/*
-        
-*/
+        return changed;
     }
 
     async function handleLogin(event) {

@@ -68,6 +68,12 @@ $router->add('POST', '/api/search', [GeneralController::class, 'search']);
 $router->add('POST', '/api/count', [GeneralController::class, 'count']);
 $router->add('POST', '/api/delete', [GeneralController::class, 'delete']);
 
+// Rota para alterar o e-mail
+$router->add('POST', '/api/change-email', [GeneralController::class, 'changeEmail']);
+// Rota para alterar a senha
+$router->add('POST', '/api/change-password', [GeneralController::class, 'changePassword']);
+
+
 // ==================================================
 // DESPACHO DA REQUISIÇÃO
 // ==================================================
