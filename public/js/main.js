@@ -218,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         editorTrigger: (currentUserData) => `
             <div class="w-full p-3 border-b-2 border-gray-100 flex items-center gap-3">
-                <img class="page-thumb w-11 h-11 rounded-full pointer" src="/images/no-image.jpg" />                
+                <img class="page-thumb w-11 h-11 rounded-full pointer" src="/images/no-image.jpg" />
                 <div id="pageConfig" class="flex-1 rounded-3xl h-11 pointer text-gray-500 px-4 text-left bg-gray-100 hover:bg-gray-200 flex items-center overflow-hidden whitespace-nowrap truncate">
                     <a class="block w-full overflow-hidden whitespace-nowrap truncate">O que você está pensando, ${currentUserData.tt.split(' ')[0]}?</a>
                 </div>
@@ -469,7 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `
     };
 
-    templates.sidebarPageSettings = async ({ view, data }) => {
+    templates.sidebarPageSettings = async ({ view, data, type = null }) => {
 
         let sidebarContent = document.querySelector('.sidebar-content');
 
@@ -498,7 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div id="message" class="w-full"></div>
                 </div>
             `;
-        } else if (view === 'business-shareholding' || view === 'business-employees' || view === 'business-testmonials') {
+        } else if (view === 'business-shareholding' || view === 'business-employees' ) {
             html += `
                 <div data-sidebar-action="page-settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
                     <i class="fas fa-chevron-left"></i>
@@ -506,6 +506,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div>
                     <h1 class="text-center text-gray-500 text-xl font-bold">${(view === 'business-shareholding') ? `Estrutura Societária` : (view === 'business-employees') ? `Colaboradores` : `Depoimentos` }</h1>
+                    <div id="message" class="w-full"></div>
+                </div>
+            `;
+        } else if (view === 'testmonials') {
+            html += `
+                <div data-sidebar-action="page-settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
+                    <i class="fas fa-chevron-left"></i>
+                    <a>${data.tt}</a>
+                </div>
+                <div>
+                    <h1 class="text-center text-gray-500 text-xl font-bold">Depoimentos</h1>
                     <div id="message" class="w-full"></div>
                 </div>
             `;
@@ -627,7 +638,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </span>
                     Experiência Profissional
                 </div>
-                <div id="user-testmonials" class="rounded-b-2xl border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
+                <div id="testmonials" class="rounded-b-2xl border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
                     <span class="fa-stack gray-500">
                         <i class="fas fa-circle fa-stack-2x"></i>
                         <i class="fas fa-scroll fa-stack-1x fa-inverse"></i>					
@@ -766,14 +777,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     </span>
                     Estrutura Societária
                 </div>
-                <div id="business-jobs" class="border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
+                <div id="business-employees" class="border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
                     <span class="fa-stack gray-500">
                         <i class="fas fa-circle fa-stack-2x"></i>
                         <i class="fas fa-id-badge fa-stack-1x fa-inverse"></i>					
                     </span>
                     Colaboradores
                 </div>
-                <div id="business-testmonials" class="rounded-b-2xl border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
+                <div id="testmonials" class="rounded-b-2xl border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
                     <span class="fa-stack gray-500">
                         <i class="fas fa-circle fa-stack-2x"></i>
                         <i class="fas fa-scroll fa-stack-1x fa-inverse"></i>					
@@ -882,13 +893,9 @@ document.addEventListener('DOMContentLoaded', () => {
             html += jobs;
             html += `<button type="button" data-action="add-job" class="shadow-sm w-full py-2 px-4 bg-green-600 text-white font-semibold rounded-3xl hover:bg-green-700 transition-colors">Adicionar</button>`;           
 
-        } else if (view === 'user-testmonials') {
-            html += `
-                Testmonials content
-            `;
         } else if (view === 'business-shareholding') {
             html += `
-            <div class="w-full shadow rounded-2xl">
+            <div class="w-full shadow-md rounded-2xl">
                 <div id="tree" class="bg-white rounded-t-2xl divide-y divide-gray-100"></div>
                 <button id="add-root" class="w-full p-4 rounded-b-2xl bg-gray-100 hover:bg-gray-200 text-center">
                     <i class="fas fa-plus centered"></i> Adicionar Acionista
@@ -902,10 +909,47 @@ document.addEventListener('DOMContentLoaded', () => {
                 <textarea id="output" rows="10" class="w-full p-3 rounded-xl border border-gray-200 bg-white font-mono text-sm" readonly></textarea>
             </div>
             `
-        } else if (view === 'business-employees') {
+        } else if (view === 'business-employees') {    
+            let businessEmployees = await apiClient.post('/search', {db: 'workz_companies', table: 'employees', columns: ['us', 'nv', 'st'], conditions: {em: data.id}, fetchAll: true});
+            let businessPeople = await fetchByIds(businessEmployees?.data.map(o => o.us), 'people');
+            html += `<div class="w-full shadow-sm rounded-2xl grid grid-cols-1">`;
+            html += businessPeople.map(employees => `
+            <div title="Sobre" class="rounded-2xl border-black-500 bg-white grid grid-cols-4">
+                <label for="employee" class="col-span-1 p-4 truncate text-gray-500">${employees.tt}</label>
+                <input class="border-0 focus:outline-none col-span-3 p-4 rounded-r-2xl" id="employee" name="employee"></input>
+            </div>
+            `).join('');
+            html += '</div>';
 
-        } else if (view === 'business-testmonials') {
-
+        } else if (view === 'testmonials') {
+            let newTestmonials = await apiClient.post('/search', {db: 'workz_data', table: 'testmonials', columns: ['*'], conditions: {recipient: data.id, recipient_type: type}, fetchAll: true});            
+            if (newTestmonials.data.length > 0) {
+                let mapped = await Promise.all(newTestmonials.data.map(async (testmonial) => {
+                    let author = await fetchByIds(testmonial.author, 'people');                    
+                    return `
+                    <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
+                        <div class="grid grid-cols-4">
+                            <div class="pt-4 px-4 col-span-4 flex items-center truncate">
+                                <img class="w-7 h-7 mr-2 rounded-full pointer" src="${ (author.im !== null) ? 'data:image/png;base64,' + author.im : `https://placehold.co/100x100/EFEFEF/333?text=${author.tt.charAt(0)}` }" />
+                                <a class="font-semibold">${author.tt}</a>
+                            </div>                                                                        
+                        </div>                        
+                        <div class="col-span-4 px-4">${testmonial.content}</div>
+                        <div id="" class="grid grid-cols-2 rounded-b-2xl border-black-500 bg-white">
+                            ${(testmonial.status === 0) ? 
+                            `<button id="" title="Aceitar" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-check centered"></i></button>` : 
+                            `<button id="" title="Reverter" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-eye-slash centered"></i></button>`}
+                            <button id="" title="Rejeitar" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-ban centered"></i></button>
+                        </div>
+                    </div>                
+                    `;
+                }));
+                html += mapped.join('');
+            } else {
+                html += `
+                <div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Não há depoimentos.</div>
+                `;
+            }
         }
 
         return html;
@@ -1221,11 +1265,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function toggleSidebar(el = null, toggle = true) {
-    // console.log(el);
 
         if (sidebarWrapper.innerHTML.trim() !== '') {
             sidebarWrapper.innerHTML = '';
         }
+
+        console.log(el);
 
         if (toggle === true) {
             sidebarWrapper.classList.toggle('w-0');
@@ -1242,12 +1287,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (action === 'settings') {
                 renderTemplate(sidebarContent, templates.sidebarMain, { data: currentUserData });
             } else if (action === 'page-settings') {
+                const pageSettingsView = (el.parentNode.dataset.sidebarType === 'current-user') ? 'profile' : viewType;
+                const pageSettingsData = (el.parentNode.dataset.sidebarType === 'current-user') ? currentUserData : viewData;
+
                 renderTemplate(sidebarContent, templates.sidebarPageSettings, {                    
-                    view: (el.parentNode.dataset.sidebarType === 'current-user') ? 'profile' : viewType,
-                    data: (el.parentNode.dataset.sidebarType === 'current-user') ? currentUserData : viewData
+                    view: pageSettingsView,
+                    data: pageSettingsData
                 }, () => {
                     const settingsForm = document.querySelector('#settings-form');
                     if (!settingsForm) return;
+                    //Botões de Adição / Remoção
                     settingsForm?.addEventListener('click', (e) => {
                         const addBtn = e.target.closest('#add-input-button');
                         const rmBtn  = e.target.closest('#remove-input-button');
@@ -1293,11 +1342,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                 });
                             }
                         }
-                    });
+                    });                    
                     document?.querySelector("#business-shareholding")?.addEventListener('click', (e) => {
                         renderTemplate(sidebarContent, templates.sidebarPageSettings, {
                             view: 'business-shareholding',
-                            data: ''
+                            data: pageSettingsData
                         }, () => {
                              // ---------- Estado ----------
                             let nextId = 1;
@@ -1328,17 +1377,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             const newNode = (cnpj='') => ({ id: nextId++, cnpj, children: [] });
 
-                            // Busca e operações na árvore
                             function findParentAndIndex(id, nodes=roots, parent=null) {
-                            for (let i=0;i<nodes.length;i++){
-                                const n = nodes[i];
-                                if (n.id === id) return { parent, nodes, index:i, node:n };
-                                const deep = findParentAndIndex(id, n.children, n);
-                                if (deep) return deep;
+                                for (let i=0;i<nodes.length;i++){
+                                    const n = nodes[i];
+                                    if (n.id === id) return { parent, nodes, index:i, node:n };
+                                    const deep = findParentAndIndex(id, n.children, n);
+                                    if (deep) return deep;
+                                }
+                                return null;
                             }
-                            return null;
-                            }
-
                             function addChild(id){
                                 const info = findParentAndIndex(id);
                                 if (!info) return;
@@ -1354,11 +1401,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             function updateCNPJ(id, value){
                                 const info = findParentAndIndex(id);
                                 if (!info) return;
-                                info.node.cnpj = formatCNPJ(value);
-                                // não re-renderiza a cada tecla pra não perder o foco; apenas ajusta classe
+                                info.node.cnpj = formatCNPJ(value);                                
                             }
-
-                            // ---------- Render ----------
+            
                             const treeEl = document.getElementById('tree');
 
                             function render(){
@@ -1371,10 +1416,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             function renderNode(node, depth){
                                 const wrapper = document.createElement('div');
                                 wrapper.className = (depth === 0) ? "ml-0" : "ml-3";
-
                                 const row = document.createElement('div');
                                 row.className = "flex items-center gap-2";
-
                                 const input = document.createElement('input');
                                 input.type = "text";
                                 input.value = node.cnpj || '';
@@ -1385,7 +1428,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                     updateCNPJ(node.id, e.target.value);
                                     e.target.value = formatCNPJ(e.target.value);
                                 });
-
                                 const addBtn = document.createElement('button');
                                 addBtn.textContent = '+';
                                 addBtn.className = "w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-2xl font-bold";
@@ -1394,7 +1436,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                     e.stopPropagation();
                                     addChild(node.id)
                                 });
-
                                 const rmBtn = document.createElement('button');
                                 rmBtn.textContent = '-';
                                 rmBtn.className = "w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-2xl font-bold";
@@ -1403,14 +1444,11 @@ document.addEventListener('DOMContentLoaded', () => {
                                     e.stopPropagation();
                                     removeNode(node.id)
                                 });
-
                                 row.appendChild(input);
                                 row.appendChild(rmBtn);
                                 row.appendChild(addBtn);
                                 row.appendChild(document.createElement('div')); // spacer
                                 wrapper.appendChild(row);
-
-                                // 🔑 Agora os filhos ficam ANINHADOS dentro do pai
                                 if(node.children?.length){
                                     const childrenWrap = document.createElement('div');
                                     childrenWrap.className = "ml-3 border-l border-gray-200";
@@ -1419,7 +1457,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                     });
                                     wrapper.appendChild(childrenWrap);
                                 }
-
                                 return wrapper;
                             }
 
@@ -1431,43 +1468,51 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             // ---------- Controles globais ----------
                             document.getElementById('add-root').addEventListener('click', ()=>{
-                            roots.push(newNode(''));
-                            render();
+                                roots.push(newNode(''));
+                                render();
                             });
 
                             document.getElementById('submit').addEventListener('click', ()=>{
-                            // Validação básica (opcional): todos preenchidos e 14 dígitos
-                            const allNodes = [];
-                            (function collect(nodes){
-                                nodes.forEach(n=>{
-                                allNodes.push(n);
-                                collect(n.children);
-                                });
-                            })(roots);
+                                // Validação básica (opcional): todos preenchidos e 14 dígitos
+                                const allNodes = [];
+                                (function collect(nodes){
+                                    nodes.forEach(n=>{
+                                    allNodes.push(n);
+                                    collect(n.children);
+                                    });
+                                })(roots);
 
-                            const invalid = allNodes.filter(n=> !isValidCNPJLen(n.cnpj));
-                            if (invalid.length){
-                                alert('Há CNPJ(s) incompletos. Preencha com 14 dígitos (ex.: 12.345.678/0001-90).');
-                                return;
-                            }
+                                const invalid = allNodes.filter(n=> !isValidCNPJLen(n.cnpj));
+                                if (invalid.length){
+                                    alert('Há CNPJ(s) incompletos. Preencha com 14 dígitos (ex.: 12.345.678/0001-90).');
+                                    return;
+                                }
 
-                            // Serializa removendo ids internos
-                            const serialize = (nodes)=> nodes.map(n=> ({
-                                cnpj: onlyDigits(n.cnpj).replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5"),
-                                children: serialize(n.children)
-                            }));
+                                // Serializa removendo ids internos
+                                const serialize = (nodes)=> nodes.map(n=> ({
+                                    cnpj: onlyDigits(n.cnpj).replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5"),
+                                    children: serialize(n.children)
+                                }));
 
-                            const json = JSON.stringify(serialize(roots), null, 2);
-                            document.getElementById('output').value = json;
-                            // Scroll suave até a saída
-                            document.getElementById('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                const json = JSON.stringify(serialize(roots), null, 2);
+                                document.getElementById('output').value = json;
+                                // Scroll suave até a saída
+                                document.getElementById('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
                             });
                         });
-                    });                    
+                    });
+                    document?.querySelector("#business-employees")?.addEventListener('click', (e) => {
+                        renderTemplate(sidebarContent, templates.sidebarPageSettings, {
+                            view: 'business-employees',
+                            data: pageSettingsData
+                        }, () => {
+
+                        });
+                    });
                     document?.querySelector("#user-jobs")?.addEventListener('click', (e) => {
                         renderTemplate(sidebarContent, templates.sidebarPageSettings, {
                             view: 'user-jobs',
-                            data: viewData
+                            data: pageSettingsData
                         }, () => {
                         
                             sidebarContent.addEventListener('change', (e) => {
@@ -1509,6 +1554,14 @@ document.addEventListener('DOMContentLoaded', () => {
                             initOutsourcedUI(document.querySelector('.sidebar-content'));
                         });
                     });
+                    document?.querySelector("#testmonials")?.addEventListener('click', (e) => {
+                        renderTemplate(sidebarContent, templates.sidebarPageSettings, {
+                            view: 'testmonials',                            
+                            data: pageSettingsData,
+                            type: pageSettingsView
+                        }, () => {                          
+                        });
+                    });
                     document?.getElementById('settings-form')?.addEventListener('submit', handleUpdate);
                     initMasks();
                 });
@@ -1545,50 +1598,6 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
 
         rowEl.insertAdjacentHTML('afterend', html);
-    }
-
-    function addStep(e) {
-        const inputs = e.target.parentNode.parentNode.children[0].children;
-
-        console.log();
-        /*
-        var inputContainer = document.getElementById('inputContainer');
-        var containers = inputContainer.getElementsByClassName('fieldsContainer');
-        var n = containers.length;
-
-        // Criando o container da nova tarefa
-        var newStep = document.createElement("div");
-        newStep.id = "taskStep_" + n;
-        newStep.className = "fieldsContainer large-12 medium-12 small-12 text-ellipsis display-center-general-container background-white border-t-input";
-        
-        // Criando o label da nova tarefa
-        var label = document.createElement("div");
-        label.className = "float-left large-2 medium-2 small-4 text-ellipsis cm-pad-15-l";
-        label.innerText = "Tarefa " + (n + 1);
-        
-        // Criando o input de texto
-        var textInput = document.createElement("input");
-        textInput.name = "step_" + n;
-        textInput.type = "text";
-        textInput.className = "float-left border-none large-7 medium-7 small-5 cm-pad-5-l required";
-        textInput.style.height = "45px";
-        
-        // Criando o input de data/hora
-        var dateInput = document.createElement("input");
-        dateInput.name = "step_dt_" + n;
-        dateInput.type = "datetime-local";
-        dateInput.className = "float-left border-none large-3 medium-3 small-3 cm-pad-5-l border-l-input";
-        dateInput.style.height = "45px";
-        dateInput.setAttribute("onchange", "checkDate(this)");
-
-        // Adicionando os elementos ao novo step
-        newStep.appendChild(label);
-        newStep.appendChild(textInput);
-        newStep.appendChild(dateInput);
-
-        // Adicionando o novo step ao container sem apagar os anteriores
-        inputContainer.appendChild(newStep);
-        */
     }
 
     // 2) Inicializa (útil no carregamento da página/templating)
@@ -2181,27 +2190,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchByIds(ids = [], type = 'people') {
         const cfg = typeMap[type] || typeMap.people;
+
+        // Normaliza: se for único valor, transforma em array
+        if (!Array.isArray(ids)) {
+            ids = [ids];
+        }
+
         const uniqueIds = [...new Set(ids)].filter(Boolean);
-        if (uniqueIds.length === 0) return [];
+        if (uniqueIds.length === 0) return Array.isArray(ids) ? [] : null;
 
         // 1) Busca em lote usando IN
         const res = await apiClient.post('/search', {
             db: cfg.db,
             table: cfg.table,
-            columns: ['id', 'tt', 'im'],          // ajuste as colunas necessárias
+            columns: ['id', 'tt', 'im'], // ajuste as colunas necessárias
             conditions: { [cfg.idCol]: { op: 'IN', value: uniqueIds } },
             order: { by: 'tt', dir: 'ASC' },
             fetchAll: true,
             limit: uniqueIds.length
         });
 
-        // supondo que a API devolva { data: [...] }
         const list = Array.isArray(res?.data) ? res.data : res;
 
         // 2) Reordena pra manter a mesma ordem de entrada
         const byId = new Map(list.map(item => [item.id, item]));
-        return ids.map(id => byId.get(id) || { id, tt: 'Item', im: '/images/default-avatar.jpg' });
+        const results = ids.map(id => byId.get(id) || { id, tt: 'Item', im: '/images/default-avatar.jpg' });
+
+        // Se o input original era único, devolve único
+        return ids.length === 1 ? results[0] : results;
     }
+
 
     function initAppLibrary(root = '#app-library') {
         const el = typeof root === 'string' ? document.querySelector(root) : root;
