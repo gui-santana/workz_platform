@@ -380,7 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <a>Fechar</a>
             <i class="fas fa-chevron-right"></i>                
         </div>
-        <div data-sidebar-type="current-user" class="pointer w-full bg-white shadow-sm rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
+        <div data-sidebar-type="current-user" class="pointer w-full bg-white shadow-md rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
             <div data-sidebar-action="page-settings" class="grid grid-cols-4 items-center gap-3">
                 <div class="flex col-span-1 justify-center">
                     <img id="sidebar-profile-image" class="w-full rounded-full" src="https://placehold.co/100x100/EFEFEF/333?text=${data.tt.charAt(0)}" alt="Foto do Utilizador">
@@ -395,21 +395,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 <i class="fas fa-chevron-right"></i>
             </div>
         </div>                            
-        <div class="bg-white w-full shadow-sm rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
+        <div class="bg-white w-full shadow-md rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
             <span class="fa-stack gray-500">
                 <i class="fas fa-circle fa-stack-2x"></i>
                 <i class="fas fa-th fa-stack-1x fa-inverse"></i>					
             </span>
             Tela de Início
         </div>
-        <div class="bg-white w-full shadow-sm rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
+        <div class="bg-white w-full shadow-md rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
             <span class="fa-stack gray-500">
                 <i class="fas fa-circle fa-stack-2x"></i>
                 <i class="fas fa-shapes fa-stack-1x fa-inverse"></i>					
             </span>
             Aplicativos
         </div>
-        <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+        <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
             <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
                 <span class="fa-stack gray-500">
                     <i class="fas fa-circle fa-stack-2x"></i>
@@ -432,7 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 Equipes
             </div>
         </div>
-        <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
+        <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
             <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
                 <span class="fa-stack gray-500">
                     <i class="fas fa-circle fa-stack-2x"></i>
@@ -455,7 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 Assinaturas
             </div>            
         </div>
-        <div class="bg-white w-full shadow-sm rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
+        <div class="bg-white w-full shadow-md rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
             <span class="fa-stack gray-500">
                 <i class="fas fa-circle fa-stack-2x"></i>
                 <i class="fas fa-sign-out-alt fa-stack-1x fa-inverse"></i>					
@@ -469,491 +469,416 @@ document.addEventListener('DOMContentLoaded', () => {
         `
     };
 
+    const UI = {
+        renderHeader: ({ backAction = 'page-settings', backLabel, title }) => `
+        <div data-sidebar-action="${backAction}" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
+            <i class="fas fa-chevron-left"></i>
+            <a>${backLabel ?? 'Voltar'}</a>
+        </div>
+        <h1 class="text-center text-gray-500 text-xl font-bold">${title}</h1>
+        <div id="message" class="w-full absolute"></div>
+        `,
+
+        renderHero: ({ tt, im }) => `
+        <div class="col-span-1 justify-center">
+            <img id="sidebar-profile-image" class="w-1/3 shadow-lg cursor-pointer rounded-full mx-auto" src="${im ? `data:image/png;base64,${im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(tt||'?').charAt(0)}`}" alt="${tt ?? 'Imagem'}">
+        </div>
+        `,
+
+        sectionCard: (content, { roundedTop=true, roundedBottom=true } = {}) => `
+        <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
+            ${content}
+        </div>
+        `,
+
+        row: (id, label, inputHtml, { top=false, bottom=false } = {}) => `
+        <div class="grid grid-cols-4 border-b border-gray-200 ${top ? 'rounded-t-2xl' : ''} ${bottom ? 'rounded-b-2xl' : ''}">
+            <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
+            <div class="col-span-3 p-4">
+            ${inputHtml}
+            </div>
+        </div>
+        `,
+
+        rowTextarea: (id, label, value='') => `
+        <div class="grid grid-cols-4">
+            <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
+            <textarea id="${id}" name="${id}" class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px] rounded-r-2xl">${value ?? ''}</textarea>
+        </div>
+        `,
+
+        rowSelect: (id, label, optionsHtml, { top=false, bottom=false } = {}) => `
+        <div class="grid grid-cols-4 border-b border-gray-200 ${top ? 'rounded-t-2xl' : ''} ${bottom ? 'rounded-b-2xl' : ''}">
+            <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
+            <select id="${id}" name="${id}" class="border-0 focus:outline-none col-span-3 p-4">
+            ${optionsHtml}
+            </select>
+        </div>
+        `,
+
+        contactOptions: () => `
+        <option value="" class="text-gray-500" disabled selected>Contato</option>
+        <option value="email">E-mail</option>
+        <option value="phone">Telefone</option>
+        <option value="site">Site</option>
+        <option value="behance">Behance</option>
+        <option value="discord">Discord</option>
+        <option value="facebook">Facebook</option>
+        <option value="flickr">Flickr</option>
+        <option value="instagram">Instagram</option>
+        <option value="linkedin">LinkedIn</option>
+        <option value="pinterest">Pinterest</option>
+        <option value="reddit">Reddit</option>
+        <option value="snapchat">Snapchat</option>
+        <option value="tiktok">TikTok</option>
+        <option value="tumblr">Tumblr</option>
+        <option value="twitch">Twitch</option>
+        <option value="twitter">X / Twitter</option>
+        <option value="vimeo">Vimeo</option>
+        <option value="wechat">WeChat</option>
+        <option value="whatsapp">WhatsApp</option>
+        <option value="youtube">YouTube</option>
+        <option value="other">Outro</option>
+        `,
+
+        contactBlock: (value='') => `
+        <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
+            <div id="input-container" class="rounded-t-2xl w-full">
+                <div title="Contato" class="rounded-t-2xl bg-white grid grid-cols-6" data-input-id="0">
+                    <select class="rounded-tl-2xl border-0 focus:outline-none col-span-2 p-4" id="url_type" name="url_type">
+                        ${UI.contactOptions()}
+                    </select>
+                    <input class="border-0 focus:outline-none col-span-4 rounded-tr-2xl p-4" type="text" id="url_value" name="url_value" value="${value ?? ''}">
+                </div>
+            </div>
+            <div id="addButtonContainer" class="grid grid-cols-2 rounded-b-2xl border-t border-gray-200 bg-white">
+                <div id="add-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-plus centered"></i></div>
+                <div id="remove-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-minus centered"></i></div>
+            </div>
+        </div>
+        `,
+
+        privacyRowsProfile: ({ page_privacy, feed_privacy }) => {
+            const pageOpts = `
+            <option value="" ${page_privacy==null?'selected':''} disabled>Selecione</option>
+            <option value="0" ${page_privacy===0?'selected':''}>Usuários logados</option>
+            <option value="1" ${page_privacy===1?'selected':''}>Toda a internet</option>
+            `;
+            const feedOpts = `
+            <option value="" ${feed_privacy==null?'selected':''} disabled>Selecione</option>
+            <option value="0" ${feed_privacy===0?'selected':''}>Moderadores</option>
+            <option value="1" ${feed_privacy===1?'selected':''}>Usuários membros</option>
+            <option value="2" ${feed_privacy===2?'selected':''}>Usuários logados</option>
+            <option value="3" ${feed_privacy===3?'selected':''}>Toda a internet</option>
+            `;
+            return UI.sectionCard(
+                UI.rowSelect('page_privacy', 'Página', pageOpts, { top:true }) +
+                UI.rowSelect('feed_privacy', 'Conteúdo', feedOpts, { bottom:true })
+            );
+        },
+
+        shortcutItem: (id, icon, label, { roundedTop=false, roundedBottom=false } = {}) => `
+        <div id="${id}" class="${roundedTop?'rounded-t-2xl':''} ${roundedBottom?'rounded-b-2xl':''} border-b border-gray-200 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
+            <span class="fa-stack gray-500">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fas ${icon} fa-stack-1x fa-inverse"></i>
+            </span>
+            ${label}
+        </div>
+        `,
+
+        shortcutList: (items=[]) => `
+        <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
+            ${items.map((it, i) => UI.shortcutItem(it.id, it.icon, it.label, {
+            roundedTop: i===0,
+            roundedBottom: i===items.length-1
+            })).join('')}
+        </div>
+        `
+    };
+
     templates.sidebarPageSettings = async ({ view, data, type = null }) => {
-
-        let sidebarContent = document.querySelector('.sidebar-content');
-
+        const sidebarContent = document.querySelector('.sidebar-content');
         let html = '';
 
-        if (view === 'profile' || view === 'business' || view === 'team') {
+        // Cabeçalhos unificados
+        const titles = {
+        'profile': data.tt,
+        'business': data.tt,
+        'team': data.tt,
+        'user-education': 'Formação Acadêmica',
+        'user-jobs': 'Experiência Profissional',
+        'user-testmonials': 'Depoimentos',
+        'business-shareholding': 'Estrutura Societária',
+        'employees': 'Colaboradores',
+        'testmonials': 'Depoimentos',
+        };
+
+        const headerBackLabel = (['profile','business','team'].includes(view)) ? 'Ajustes' : (view.startsWith('user-') ? currentUserData.tt : data.tt);
+
+        // Hero quando for página “principal”
+        if (['profile','business','team'].includes(view)) {
             html += `
-                <div data-sidebar-action="settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">                
-                    <i class="fas fa-chevron-left"></i>
-                    <a>Ajustes</a>
-                </div>
-                <h1 class="text-center text-gray-500 text-xl font-bold">${data.tt}</h1>
-                <div class="col-span-1 justify-center">
-                    <img id="sidebar-profile-image" class="w-1/3 shadow-lg cursor-pointer rounded-full mx-auto shadow-md" src="${data?.im ? `data:image/png;base64,${data?.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${data?.tt.charAt(0)}`}" alt="Foto do Utilizador">
-                </div>
+                ${UI.renderHeader({ backAction: 'settings', backLabel: 'Ajustes', title: data.tt })}
+                ${UI.renderHero({ tt: data.tt, im: data?.im })}
                 <div id="message" class="w-full fixed"></div>
             `;
-        } else if (view === 'user-education' || view === 'user-jobs' || view === 'user-testmonials') {            
-            html += `
-                <div data-sidebar-action="page-settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
-                    <i class="fas fa-chevron-left"></i>
-                    <a>${currentUserData.tt}</a>
-                </div>
-                <div>
-                    <h1 class="text-center text-gray-500 text-xl font-bold">${(view === 'user-education') ? `Formação Acadêmica` : (view === 'user-jobs') ? `Experiência Profissional` : `Depoimentos` }</h1>
-                    <div id="message" class="w-full"></div>
-                </div>
-            `;
-        } else if (view === 'business-shareholding' || view === 'business-employees' ) {
-            html += `
-                <div data-sidebar-action="page-settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
-                    <i class="fas fa-chevron-left"></i>
-                    <a>${data.tt}</a>
-                </div>
-                <div>
-                    <h1 class="text-center text-gray-500 text-xl font-bold">${(view === 'business-shareholding') ? `Estrutura Societária` : (view === 'business-employees') ? `Colaboradores` : `Depoimentos` }</h1>
-                    <div id="message" class="w-full"></div>
-                </div>
-            `;
-        } else if (view === 'testmonials') {
-            html += `
-                <div data-sidebar-action="page-settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
-                    <i class="fas fa-chevron-left"></i>
-                    <a>${data.tt}</a>
-                </div>
-                <div>
-                    <h1 class="text-center text-gray-500 text-xl font-bold">Depoimentos</h1>
-                    <div id="message" class="w-full"></div>
-                </div>
-            `;
+        } else {
+            html += UI.renderHeader({ backAction: 'page-settings', backLabel: headerBackLabel, title: titles[view] ?? '' });
         }
-        
+
+        // VIEWS
         if (view === 'profile') {
-            sidebarContent.dataset.sidebarType = (data.id === currentUserData.id) ? 'current-user' : 'profile';
-            html += `            
+        sidebarContent.dataset.sidebarType = (data.id === currentUserData.id) ? 'current-user' : 'profile';
+
+        const card1 = UI.sectionCard(
+            UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
+            UI.row('email','E-mail*', `<input class="w-full border-0 focus:outline-none" type="email" id="email" name="ml" value="${data.ml}" ${(data.provider ? '' : 'disabled')} required>`, {bottom:true})
+        );
+
+        const cardAbout = UI.sectionCard(UI.rowTextarea('cf', 'Sobre', data.cf));
+
+        const cardUserMeta = UI.sectionCard(
+            UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}) +
+            UI.rowSelect('page_privacy', 'Página', `
+            <option value="" ${currentUserData.page_privacy==null?'selected':''} disabled>Selecione</option>
+            <option value="0" ${currentUserData.page_privacy===0?'selected':''}>Usuários logados</option>
+            <option value="1" ${currentUserData.page_privacy===1?'selected':''}>Toda a internet</option>
+            `) +
+            UI.rowSelect('feed_privacy', 'Conteúdo', `
+            <option value="" ${currentUserData.feed_privacy==null?'selected':''} disabled>Selecione</option>
+            <option value="0" ${currentUserData.feed_privacy===0?'selected':''}>Moderadores</option>
+            <option value="1" ${currentUserData.feed_privacy===1?'selected':''}>Usuários membros</option>
+            <option value="2" ${currentUserData.feed_privacy===2?'selected':''}>Usuários logados</option>
+            <option value="3" ${currentUserData.feed_privacy===3 && currentUserData.page_privacy>0?'selected':''} ${currentUserData.page_privacy<1?'disabled':''}>Toda a internet</option>
+            `, {bottom:true})
+        );
+
+        const cardPersonal = UI.sectionCard(
+            UI.rowSelect('gender','Gênero', `
+            <option value="" ${(!['male','female'].includes(currentUserData.gender))?'selected':''} disabled>Selecione</option>
+            <option value="male" ${currentUserData.gender==='male'?'selected':''}>Masculino</option>
+            <option value="female" ${currentUserData.gender==='female'?'selected':''}>Feminino</option>
+            `, {top:true}) +
+            UI.row('birth','Nascimento', `<input class="w-full border-0 focus:outline-none" type="date" id="birth" name="birth" value="${(currentUserData.birth)? new Date(currentUserData.birth).toISOString().split('T')[0] : ''}">`) +
+            UI.row('cpf','CPF', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="999.999.999-99" id="cpf" name="national_id" value="${currentUserData.national_id ?? ''}">`, {bottom:true})
+        );
+
+        const contacts = UI.contactBlock(data.url ?? '');
+
+        const shortcuts = UI.shortcutList([
+            { id:'user-education', icon:'fa-graduation-cap', label:'Formação Acadêmica' },
+            { id:'user-jobs', icon:'fa-user-tie', label:'Experiência Profissional' },
+            { id:'testmonials', icon:'fa-scroll', label:'Depoimentos' },
+        ]) + `
+            <div class="bg-white w-full shadow-md rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
+            <span class="fa-stack gray-500">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fas fa-key fa-stack-1x fa-inverse"></i>
+            </span>
+            Alterar Senha
+            </div>
+        `;
+
+        html += `
             <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
-                <input type="hidden" name="id" value="${data.id}">
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
-                        <label for="name" class="col-span-1 p-4 truncate text-gray-500">Nome*</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="name" name="tt" value="${data.tt}" required>
-                    </div>
-                    <div class="rounded-b-2xl border-black-500 bg-white grid grid-cols-4">
-                        <label for="email" class="col-span-1 p-4 truncate text-gray-500">E-mail*</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="email" id="email" name="ml" value="${data.ml}" ${(data.provider === null || data.provider === '') ? 'disabled' : ''} required>
-                    </div>
-                </div>
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div title="Sobre" class="rounded-2xl border-black-500 bg-white grid grid-cols-4">
-                        <label for="description" class="col-span-1 p-4 truncate text-gray-500">Sobre</label>
-                        <textarea class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px] rounded-r-2xl" id="description" name="cf">${data.cf}</textarea>
-                    </div>
-                </div>                
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div title="Apelido da Página" class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
-                        <label for="username" class="col-span-1 p-4 truncate text-gray-500">Apelido</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="username" name="un" value="${data.un}">
-                    </div>
-                    <div class="border-b-2 bg-white grid grid-cols-4">
-                        <label for="page_privacy" class="col-span-1 p-4 truncate text-gray-500">Priv. da Página</label>
-                        <select class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="number" id="page_privacy" name="page_privacy">
-                            <option value=""  ${(currentUserData.page_privacy === null) ? 'selected' : ''} disabled>Selecione</option>
-                            <option value="0" ${(currentUserData.page_privacy === 0) ? 'selected' : ''}>Usuários logados</option>
-                            <option value="0" ${(currentUserData.page_privacy === 1) ? 'selected' : ''}>Toda a internet</option>                            
-                        </select>
-                    </div>
-                    <div class="rounded-b-2xl border-b-2 bg-white grid grid-cols-4">
-                        <label for="feed_privacy" class="col-span-1 p-4 truncate text-gray-500">Priv. do Feed</label>
-                        <select class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="number" id="feed_privacy" name="feed_privacy">
-                            <option value=""  ${(currentUserData.feed_privacy === null) ? 'selected' : ''} disabled>Selecione</option>
-                            <option value="0" ${(currentUserData.feed_privacy === 0) ? 'selected' : ''}>Moderadores</option>
-                            <option value="1" ${(currentUserData.feed_privacy === 1) ? 'selected' : ''}>Usuários membros</option>
-                            <option value="2" ${(currentUserData.feed_privacy === 2 || (currentUserData.feed_privacy === 3 && currentUserData.page_privacy === 0)) ? 'selected' : ''}>Usuários logados</option>
-                            <option value="3" ${(currentUserData.feed_privacy === 3 && currentUserData.page_privacy > 0) ? 'selected' : '', (currentUserData.page_privacy < 1) ? 'disabled' : ''}>Toda a internet</option>
-                        </select>
-                    </div>                    
-                </div>
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div class="rounded-t-2xl border-b-2 bg-white grid grid-cols-4">
-                        <label for="gender" class="col-span-1 p-4 truncate text-gray-500">Gênero</label>
-                        <select class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="number" id="gender" name="gender" value="">
-                            <option value=""  ${(currentUserData.gender !== 'male' || currentUserData.gender !== 'female') ? 'selected' : ''} disabled>Selecione</option>
-                            <option value="male" ${(currentUserData.gender === 'male') ? 'selected' : ''}>Masculino</option>
-                            <option value="female" ${(currentUserData.gender === 'female') ? 'selected' : ''}>Feminino</option>
-                        </select>
-                    </div>                    
-                    <div class="border-b-2 border-black-500 bg-white grid grid-cols-4">
-                        <label for="birth" class="col-span-1 p-4 truncate text-gray-500">Nascimento</label>
-                        <input class="border-none focus:outline-none col-span-3 p-4" type="date" id="birth" name="birth" value="${(currentUserData.birth) ? new Date(currentUserData.birth).toISOString().split('T')[0] : ''}">                        
-                    </div>                    
-                    <div class="rounded-b-2xl bg-white grid grid-cols-4">
-                        <label for="cpf" class="col-span-1 p-4 truncate text-gray-500">CPF</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="text" placeholder="999.999.999-99" id="cpf" name="national_id" value="${(currentUserData.national_id) ? currentUserData.national_id : ''}">
-                    </div>
-                </div>
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">                    
-                    <div id="input-container" class="rounded-t-2xl w-full">
-                        <div title="Contato" class="rounded-t-2xl bg-white grid grid-cols-6" data-input-id="0">
-                            <select class="rounded-tl-2xl border-none focus:outline-none flex col-span-2 p-4" id="url_type" name="url_type" value="">
-                                <option value="" class="text-gray-500" disabled selected>Contato</option>
-                                <option value="email">E-mail</option>
-                                <option value="phone">Telefone</option>
-                                <option value="site">Site</option>
-                                <option value="behance">Behance</option>
-                                <option value="discord">Discord</option>
-                                <option value="facebook">Facebook</option>
-                                <option value="flickr">Flickr</option>
-                                <option value="instagram">Instagram</option>
-                                <option value="linkedin">LinkedIn</option>
-                                <option value="pinterest">Pinterest</option>
-                                <option value="reddit">Reddit</option>
-                                <option value="snapchat">Snapchat</option>
-                                <option value="tiktok">TikTok</option>
-                                <option value="tumblr">Tumblr</option>
-                                <option value="twitch">Twitch</option>
-                                <option value="twitter">X / Twitter</option>
-                                <option value="vimeo">Vimeo</option>
-                                <option value="wechat">WeChat</option>
-                                <option value="whatsapp">WhatsApp</option>
-                                <option value="youtube">YouTube</option>
-                                <option value="other">Outro</option>
-                            </select>                        
-                            <input class="border-none focus:outline-none flex col-span-4 rounded-tr-2xl p-4" type="text" id="url_value" name="url_value" value="${(data.url) ? data.url : ''}">
-                        </div>
-                    </div>
-                    <div id="addButtonContainer" class="grid grid-cols-2 rounded-b-2xl border-b-2 border-black-500 bg-white">
-                        <div id="add-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-plus centered"></i></div>
-                        <div id="remove-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-minus centered"></i></div>
-                    </div>
-                </div>
-                <button type="submit" class="shadow-sm w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
+            <input type="hidden" name="id" value="${data.id}">
+            ${card1}
+            ${cardAbout}
+            ${cardUserMeta}
+            ${cardPersonal}
+            ${contacts}
+            <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
             </form>
-            <hr>           
-            <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                <div id="user-education" class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
-                    <span class="fa-stack gray-500">
-                        <i class="fas fa-circle fa-stack-2x"></i>
-                        <i class="fas fa-graduation-cap fa-stack-1x fa-inverse"></i>					
-                    </span>
-                    Formação Acadêmica
-                </div>
-                <div id="user-jobs" class="border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
-                    <span class="fa-stack gray-500">
-                        <i class="fas fa-circle fa-stack-2x"></i>
-                        <i class="fas fa-user-tie fa-stack-1x fa-inverse"></i>					
-                    </span>
-                    Experiência Profissional
-                </div>
-                <div id="testmonials" class="rounded-b-2xl border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
-                    <span class="fa-stack gray-500">
-                        <i class="fas fa-circle fa-stack-2x"></i>
-                        <i class="fas fa-scroll fa-stack-1x fa-inverse"></i>					
-                    </span>
-                    Depoimentos
-                </div>
-            </div>
-            <div class="bg-white w-full shadow-sm rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
-                <span class="fa-stack gray-500">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-key fa-stack-1x fa-inverse"></i>					
-                </span>
-                Alterar Senha
-            </div>
-            `;
+            <hr>
+            ${shortcuts}
+        `;
         } else if (view === 'business') {
-            sidebarContent.id = 'business';
-            html += `
+        sidebarContent.id = 'business';
+
+        const basics = UI.sectionCard(
+            UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
+            UI.row('cnpj','CNPJ', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99.999.999/9999-99" id="cnpj" name="cnpj" value="${data.national_id ?? ''}">`, {bottom:true})
+        );
+
+        const about = UI.sectionCard(UI.rowTextarea('cf','Sobre', data.cf));
+
+        const privacy = UI.sectionCard(
+            UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}) +
+            UI.rowSelect('page_privacy','Página', `
+            <option value="" ${data.pg==null?'selected':''} disabled>Selecione</option>
+            <option value="0" ${data.pg===0?'selected':''}>Usuários logados</option>
+            <option value="1" ${data.pg===1?'selected':''}>Toda a internet</option>
+            `) +
+            UI.rowSelect('feed_privacy','Conteúdo', `
+            <option value="" ${data.pc==null?'selected':''} disabled>Selecione</option>
+            <option value="0" ${data.pc===0?'selected':''}>Moderadores</option>
+            <option value="1" ${data.pc===1?'selected':''}>Usuários membros</option>
+            <option value="2" ${data.pc===2?'selected':''}>Usuários logados</option>
+            <option value="3" ${data.pc===3 && (data.pg>0)?'selected':''} ${data.pg<1?'disabled':''}>Toda a internet</option>
+            `, {bottom:true})
+        );
+
+        const address = UI.sectionCard(
+            UI.row('zip_code','CEP', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99999-999" id="zip_code" name="zip_code" value="${data?.zip_code ?? ''}">`, {top:true}) +
+            UI.rowSelect('country','País', `<option value="" disabled ${!data?.country?'selected':''}>Selecione</option>`) +
+            UI.row('state','Estado', `<input class="w-full border-0 focus:outline-none" type="text" id="state" name="state" value="${data?.state ?? ''}">`) +
+            UI.row('city','Cidade', `<input class="w-full border-0 focus:outline-none" type="text" id="city" name="city" value="${data?.city ?? ''}">`) +
+            UI.row('district','Bairro', `<input class="w-full border-0 focus:outline-none" type="text" id="district" name="district" value="${data?.district ?? ''}">`) +
+            UI.row('address','Endereço', `<input class="w-full border-0 focus:outline-none" type="text" id="address" name="address" value="${data?.address ?? ''}">`) +
+            UI.row('complement','Complemento', `<input class="w-full border-0 focus:outline-none" type="text" id="complement" name="complement" value="${data?.complement ?? ''}">`, {bottom:true})
+        );
+
+        const contacts = UI.contactBlock(data.url ?? '');
+
+        const shortcuts = UI.shortcutList([
+            { id:'business-shareholding', icon:'fa-sitemap', label:'Estrutura Societária' },
+            { id:'employees', icon:'fa-id-badge', label:'Colaboradores' },
+            { id:'testmonials', icon:'fa-scroll', label:'Depoimentos' },
+        ]);
+
+        html += `
             <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
-                <input type="hidden" name="id" value="${data.id}">
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div title="Nome Empresarial" class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
-                        <label for="name" class="col-span-1 p-4 truncate text-gray-500">Nome*</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="name" name="tt" value="${data.tt}" required>
-                    </div>
-                    <div title="CNPJ" class="rounded-b-2xl bg-white grid grid-cols-4">
-                        <label for="cnpj" class="col-span-1 p-4 truncate text-gray-500">CNPJ</label>
-                        <input class="border-none focus:outline-none flex col-span-3 p-4 rounded-br-2xl" type="text" placeholder="99.999.999/9999-99" id="cnpj" name="cnpj" value="${(data.national_id) ? data.national_id : ''}">
-                    </div>                                                           
-                </div>
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div title="Sobre" class="rounded-2xl border-black-500 bg-white grid grid-cols-4">
-                        <label for="description" class="col-span-1 p-4 truncate text-gray-500">Sobre</label>
-                        <textarea class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px] rounded-r-2xl" id="description" name="cf">${data.cf}</textarea>
-                    </div>
-                </div>
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div title="Apelido da Página" class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
-                        <label for="username" class="col-span-1 p-4 truncate text-gray-500">Apelido</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" id="username" name="un" value="${data.un}">
-                    </div>
-                    <div class="border-b-2 bg-white grid grid-cols-4">
-                        <label for="page_privacy" class="col-span-1 p-4 truncate text-gray-500">Priv. da Página</label>
-                        <select class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="number" id="page_privacy" name="page_privacy">
-                            <option value=""  ${(data.pg === null) ? 'selected' : ''} disabled>Selecione</option>
-                            <option value="0" ${(data.pg === 0) ? 'selected' : ''}>Usuários logados</option>
-                            <option value="0" ${(data.pg === 1) ? 'selected' : ''}>Toda a internet</option>                            
-                        </select>
-                    </div>
-                    <div class="rounded-b-2xl bg-white grid grid-cols-4">
-                        <label for="feed_privacy" class="col-span-1 p-4 truncate text-gray-500">Priv. do Feed</label>
-                        <select class="border-none focus:outline-none flex col-span-3 rounded-br-2xl p-4" type="number" id="feed_privacy" name="feed_privacy">
-                            <option value=""  ${(data.pc === null) ? 'selected' : ''} disabled>Selecione</option>
-                            <option value="0" ${(data.pc === 0) ? 'selected' : ''}>Moderadores</option>
-                            <option value="1" ${(data.pc === 1) ? 'selected' : ''}>Usuários membros</option>
-                            <option value="2" ${(data.pc === 2 || (data.pg === 3 && data.pg === 0)) ? 'selected' : ''}>Usuários logados</option>
-                            <option value="3" ${(data.pc === 3 && data.pg > 0) ? 'selected' : '', (currentUserData.page_privacy < 1) ? 'disabled' : ''}>Toda a internet</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">
-                    <div title="CEP" class="rounded-t-2xl border-b-2 border-black-500 bg-white grid grid-cols-4">
-                        <label for="zip_code" class="col-span-1 p-4 truncate text-gray-500">CEP</label>
-                        <input class="border-none focus:outline-none flex col-span-3 rounded-tr-2xl p-4" type="text" placeholder="99999-999" id="zip_code" name="zip_code" value="${data?.zip_code}">
-                    </div>
-                    <div title="País" class="border-b-2 bg-white grid grid-cols-4">
-                        <label for="country" class="col-span-1 p-4 truncate text-gray-500">País</label>
-                        <select class="border-none focus:outline-none flex col-span-3 p-4" id="country" name="country" value="${data?.country}">
-                            <option value="" disabled>Selecione</option>                            
-                        </select>
-                    </div> 
-                    <div title="Estado" class="border-b-2 border-black-500 bg-white grid grid-cols-4">
-                        <label for="state" class="col-span-1 p-4 truncate text-gray-500">Estado</label>
-                        <input class="border-none focus:outline-none flex col-span-3 p-4" type="text" id="state" name="state" value="${data?.state}">
-                    </div>
-                    <div title="Cidade" class="border-b-2 border-black-500 bg-white grid grid-cols-4">
-                        <label for="city" class="col-span-1 p-4 truncate text-gray-500">Cidade</label>
-                        <input class="border-none focus:outline-none flex col-span-3 p-4" type="text" id="city" name="city" value="${data?.city}">
-                    </div>
-                    <div title="Bairro" class="border-b-2 border-black-500 bg-white grid grid-cols-4">
-                        <label for="district" class="col-span-1 p-4 truncate text-gray-500">Bairro</label>
-                        <input class="border-none focus:outline-none flex col-span-3 p-4" type="text" id="district" name="district" value="${data?.district}">
-                    </div>
-                    <div title="Endereço" class="border-b-2 border-black-500 bg-white grid grid-cols-4">
-                        <label for="address" class="col-span-1 p-4 truncate text-gray-500">Endereço</label>
-                        <input class="border-none focus:outline-none flex col-span-3 p-4" type="text" id="address" name="address" value="${data?.address}">
-                    </div>
-                    <div title="Complemento" class="rounded-b-2xl border-black-500 bg-white grid grid-cols-4">
-                        <label for="complement" class="col-span-1 p-4 truncate text-gray-500">Complemento</label>
-                        <input class="border-none focus:outline-none flex col-span-3 p-4 rounded-br-2xl" type="text" id="complement" name="complement" value="${data?.complement}">
-                    </div>                    
-                </div>
-                <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">                    
-                    <div id="input-container" class="rounded-t-2xl w-full">
-                        <div title="Contato" class="rounded-t-2xl bg-white grid grid-cols-6" data-input-id="0">
-                            <select class="rounded-tl-2xl border-none focus:outline-none flex col-span-2 p-4" id="url_type" name="url_type" value="">
-                                <option value="" class="text-gray-500" disabled selected>Contato</option>
-                                <option value="email">E-mail</option>
-                                <option value="phone">Telefone</option>
-                                <option value="site">Site</option>
-                                <option value="behance">Behance</option>
-                                <option value="discord">Discord</option>
-                                <option value="facebook">Facebook</option>
-                                <option value="flickr">Flickr</option>
-                                <option value="instagram">Instagram</option>
-                                <option value="linkedin">LinkedIn</option>
-                                <option value="pinterest">Pinterest</option>
-                                <option value="reddit">Reddit</option>
-                                <option value="snapchat">Snapchat</option>
-                                <option value="tiktok">TikTok</option>
-                                <option value="tumblr">Tumblr</option>
-                                <option value="twitch">Twitch</option>
-                                <option value="twitter">X / Twitter</option>
-                                <option value="vimeo">Vimeo</option>
-                                <option value="wechat">WeChat</option>
-                                <option value="whatsapp">WhatsApp</option>
-                                <option value="youtube">YouTube</option>
-                                <option value="other">Outro</option>
-                            </select>                        
-                            <input class="border-none focus:outline-none flex col-span-4 rounded-tr-2xl p-4" type="text" id="url_value" name="url_value" value="${(data.url) ? data.url : ''}">
-                        </div>
-                    </div>
-                    <div id="addButtonContainer" class="grid grid-cols-2 rounded-b-2xl border-black-500 bg-white">
-                        <div id="add-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-plus centered"></i></div>
-                        <div id="remove-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-minus centered"></i></div>
-                    </div>
-                </div>
-                <button type="submit" class="shadow-sm w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
+            <input type="hidden" name="id" value="${data.id}">
+            ${basics}
+            ${about}
+            ${privacy}
+            ${address}
+            ${contacts}
+            <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
             </form>
-            <hr>           
-            <div class="w-full shadow-sm rounded-2xl grid grid-cols-1">                               
-                <div id="business-shareholding" class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
-                    <span class="fa-stack gray-500">
-                        <i class="fas fa-circle fa-stack-2x"></i>
-                        <i class="fas fa-sitemap fa-stack-1x fa-inverse"></i>					
-                    </span>
-                    Estrutura Societária
-                </div>
-                <div id="business-employees" class="border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
-                    <span class="fa-stack gray-500">
-                        <i class="fas fa-circle fa-stack-2x"></i>
-                        <i class="fas fa-id-badge fa-stack-1x fa-inverse"></i>					
-                    </span>
-                    Colaboradores
-                </div>
-                <div id="testmonials" class="rounded-b-2xl border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
-                    <span class="fa-stack gray-500">
-                        <i class="fas fa-circle fa-stack-2x"></i>
-                        <i class="fas fa-scroll fa-stack-1x fa-inverse"></i>					
-                    </span>
-                    Depoimentos
-                </div>
-            </div>
-            `;
+            <hr>
+            ${shortcuts}
+        `;
         } else if (view === 'team') {
-            html += `
-            
-            `;
-        } else if (view === 'user-education') {
-            html += `
-                Education content
-            `;
-        } else if (view === 'user-jobs') {
+        // exemplo: reuso igual ao business/profile para campos
+        // (mantém tua lógica de buscar businesses; só exibindo com os helpers)
+        let mappedBusinesses = await Promise.all(userBusinesses.map(async (business) => {
+            const b = await fetchByIds(business, 'businesses');
+            return `<option value="${business}" ${(data.em===business)?'selected':''}>${b.tt}</option>`;
+        }));
 
-            const userJobs = await apiClient.post('/search', {
-                db: 'workz_companies',
-                table: 'employees',
-                columns: ['*'],
-                conditions: { us: currentUserData.id },
-                order: { by: 'start_date', dir: 'DESC' },
-                fetchAll: true
-            });
+        const basics = UI.sectionCard(
+            UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
+            UI.rowSelect('business','Negócio', `
+            <option value="" ${data.em==null?'selected':''} disabled>Selecione</option>
+            ${mappedBusinesses.join('')}
+            `, {bottom:true})
+        );
 
-            const list = Array.isArray(userJobs?.data) ? userJobs.data : [];
-            
-            const jobs = (await Promise.all(
-                list.map(async (job) => {
-                    const readonlyMode = job.nv < 3 && job.st === 1;
-                    const businessName = (job?.em != null) ? (await getBusinessName(job.em)) ?? '' : (job?.business_name ?? '');
-                    businessesJobs[job.em] = businessName;
-                    const jobForm = `
-                        <form class="job-form grid grid-cols-1 gap-6" data-job-id="${job.id ?? ''}" data-job-type="${job?.type ?? ''}" data-third-party="${job?.third_party ?? ''}" data-readonly="${readonlyMode ? '1' : '0'}">
-                            <div class="w-full shadow-sm rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
-                                <div class="grid grid-cols-4 border-b border-gray-200">
-                                    <label class="col-span-1 p-4 truncate text-gray-500">Negócio*</label>
-                                    <input class="border-0 focus:outline-none col-span-3 p-4" type="text" name="business_name" value="${businessName}" ${(job?.em ? 'disabled' : '')}>
-                                </div>
-                                <div class="grid grid-cols-4 border-b border-gray-200">
-                                    <label class="col-span-1 p-4 truncate text-gray-500">Cargo</label>
-                                    <input class="border-0 focus:outline-none col-span-3 p-4" type="text" name="job_title" value="${job?.job_title ?? ''}">
-                                </div>
-                                <div class="grid grid-cols-4 border-b border-gray-200">
-                                    <label class="col-span-1 p-4 truncate text-gray-500">Início*</label>
-                                    <input class="border-0 focus:outline-none col-span-3 p-4" type="date" name="start_date" value="${toInputDate(job?.start_date)}">
-                                </div>
-                                <div class="grid grid-cols-4 border-b border-gray-200">
-                                    <label class="col-span-1 p-4 truncate text-gray-500">Fim</label>
-                                    <input class="border-0 focus:outline-none col-span-3 p-4" type="date" name="end_date" value="${toInputDate(job?.end_date)}">
-                                </div>
-                                <div class="grid grid-cols-4 border-b border-gray-200">
-                                    <label class="col-span-1 p-4 truncate text-gray-500">Tipo de Emprego</label>
-                                    <select class="border-0 focus:outline-none col-span-3 p-4" id="type" name="type">
-                                        <option value="" ${!job?.type ? 'selected' : ''} disabled>Selecione</option>
-                                        <option value="fulltime"      ${job?.type === 'fulltime' ? 'selected' : ''}>Full-time</option>
-                                        <option value="parttime"      ${job?.type === 'parttime' ? 'selected' : ''}>Part-time</option>
-                                        <option value="selfemployed"  ${job?.type === 'selfemployed' ? 'selected' : ''}>Self-employed</option>
-                                        <option value="freelance"     ${job?.type === 'freelance' ? 'selected' : ''}>Freelance</option>
-                                        <option value="outsourced"    ${job?.type === 'outsourced' ? 'selected' : ''}>Outsourced / Third-party Contract</option>
-                                        <option value="contract"      ${job?.type === 'contract' ? 'selected' : ''}>Contract</option>
-                                        <option value="internship"    ${job?.type === 'internship' ? 'selected' : ''}>Internship</option>
-                                        <option value="apprenticeship"${job?.type === 'apprenticeship' ? 'selected' : ''}>Apprenticeship</option>
-                                        <option value="leadership"    ${job?.type === 'leadership' ? 'selected' : ''}>Leadership Program</option>
-                                        <option value="indirect"      ${job?.type === 'indirect' ? 'selected' : ''}>Indirect Contract</option>
-                                    </select>
-                                </div>                                
-                                <div class="grid grid-cols-4 border-b border-gray-200">
-                                    <label class="col-span-1 p-4 truncate text-gray-500">Tipo de Jornada</label>
-                                    <select class="border-0 focus:outline-none col-span-3 p-4" name="mode">
-                                        <option value="" ${!job?.mode ? 'selected' : ''} disabled>Selecione</option>
-                                        <option value="onsite" ${job?.mode === 'onsite' ? 'selected' : ''}>On site</option>
-                                        <option value="hybrid" ${job?.mode === 'hybrid' ? 'selected' : ''}>Hybrid</option>
-                                        <option value="remote" ${job?.mode === 'remote' ? 'selected' : ''}>Remote</option>
-                                    </select>
-                                </div>
-                                <div class="grid grid-cols-4 border-b border-gray-200">
-                                    <label class="col-span-1 p-4 truncate text-gray-500">Habilidades</label>
-                                    <input class="border-0 focus:outline-none col-span-3 p-4" type="text" name="skills" value="${job?.skills ?? ''}">
-                                </div>
-                                <div class="grid grid-cols-4 border-b border-gray-200">
-                                    <label class="col-span-1 p-4 truncate text-gray-500">Descrição</label>
-                                    <textarea class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px]" name="description">${job?.description ?? ''}</textarea>
-                                </div>
-                                <div class="w-full p-4 border-b border-gray-200 flex items-center">
-                                    <input id="visibility_${job.id ?? ''}"  name="visibility" value="1" type="checkbox" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded-sm focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500"  ${Number(job?.visibility) === 1 ? 'checked' : ''}>
-                                    <label for="visibility_${job.id ?? ''}" class="w-full ms-4 truncate text-gray-500">Mostrar no perfil</label>
-                                </div>
-                                <div class="w-full p-4 border-b border-gray-200 flex items-center">
-                                    <input id="current_${job.id ?? ''}" name="st" value="1" type="checkbox" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded-sm focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-700 dark:focus:ring-offset-gray-700 focus:ring-2 dark:bg-gray-600 dark:border-gray-500"  ${Number(job?.st) > 0 ? 'checked' : ''} ${readonlyMode ? 'disabled' : ''}>
-                                    <label for="current_${job.id ?? ''}" class="w-full ms-4 truncate text-gray-500">Emprego atual</label>
-                                </div>
-                            </div>
-                            <div class="flex gap-2">
-                                <button type="submit" id="save-job-changes" class="flex-1 shadow-sm py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
-                                <button type="button" class="${readonlyMode ? 'bg-gray-400' : 'job-remove bg-red-600 hover:bg-red-700 transition-colors'} flex-0 shadow-sm py-2 px-4 text-white font-semibold rounded-3xl">Remover</button>
-                            </div>
-                        </form>
-                        <hr class="my-3">
-                    `;
-                    return jobForm;
-                })
-            )).join('');
-            html += jobs;
-            html += `<button type="button" data-action="add-job" class="shadow-sm w-full py-2 px-4 bg-green-600 text-white font-semibold rounded-3xl hover:bg-green-700 transition-colors">Adicionar</button>`;           
+        const about = UI.sectionCard(UI.rowTextarea('cf','Sobre', data.cf));
 
+        const feedPrivacy = UI.sectionCard(
+            UI.rowSelect('feed_privacy','Conteúdo', `
+            <option value="" ${data.pc==null?'selected':''} disabled>Selecione</option>
+            <option value="0" ${data.pc===0?'selected':''}>Moderadores</option>
+            <option value="1" ${data.pc===1?'selected':''}>Membros da equipe</option>
+            <option value="2" ${data.pc===2?'selected':''}>Todos do negócio</option>
+            `, {bottom:true})
+        );
+
+        const contacts = UI.contactBlock(data.url ?? '');
+
+        const shortcuts = UI.shortcutList([
+            { id:'employees', icon:'fa-id-badge', label:'Colaboradores' },
+        ]);
+
+        html += `
+            <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
+            <input type="hidden" name="id" value="${data.id}">
+            ${basics}
+            ${about}
+            ${UI.sectionCard(UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}))}
+            ${feedPrivacy}
+            ${contacts}
+            <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
+            </form>
+            ${shortcuts}
+        `;
+        } else if (view === 'employees') {
+            const table = (type === 'business') ? 'employees' : 'teams_users';
+            const conditions = (type === 'business') ? { em: data.id } : { cm: data.id };
+            const employees = await apiClient.post('/search', { db:'workz_companies', table, columns:['us','nv','st'], conditions, fetchAll:true });
+            const people = await fetchByIds(employees?.data?.map(o => o.us), 'people');
+
+            html += UI.sectionCard(
+                (people||[]).map(p => UI.row(`employee-${p.id}`, p.tt, `<input class="w-full border-0 focus:outline-none" name="employee" id="employee-${p.id}">`)).join('')
+            );
         } else if (view === 'business-shareholding') {
-            html += `
+        html += `
             <div class="w-full shadow-md rounded-2xl">
-                <div id="tree" class="bg-white rounded-t-2xl divide-y divide-gray-100"></div>
-                <button id="add-root" class="w-full p-4 rounded-b-2xl bg-gray-100 hover:bg-gray-200 text-center">
-                    <i class="fas fa-plus centered"></i> Adicionar Acionista
-                </button>
-            </div>
-            <button id="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700">
-                Gerar JSON
+            <div id="tree" class="bg-white rounded-t-2xl divide-y divide-gray-100"></div>
+            <button id="add-root" class="w-full p-4 rounded-b-2xl bg-gray-100 hover:bg-gray-200 text-center">
+                <i class="fas fa-plus centered"></i> Adicionar Acionista
             </button>
+            </div>
+            <button id="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700">Gerar JSON</button>
             <div class="mt-6">
-                <label class="block text-sm font-medium text-gray-600 mb-2">JSON gerado</label>
-                <textarea id="output" rows="10" class="w-full p-3 rounded-xl border border-gray-200 bg-white font-mono text-sm" readonly></textarea>
+            <label class="block text-sm font-medium text-gray-600 mb-2">JSON gerado</label>
+            <textarea id="output" rows="10" class="w-full p-3 rounded-xl border border-gray-200 bg-white font-mono text-sm" readonly></textarea>
             </div>
-            `
-        } else if (view === 'business-employees') {    
-            let businessEmployees = await apiClient.post('/search', {db: 'workz_companies', table: 'employees', columns: ['us', 'nv', 'st'], conditions: {em: data.id}, fetchAll: true});
-            let businessPeople = await fetchByIds(businessEmployees?.data.map(o => o.us), 'people');
-            html += `<div class="w-full shadow-sm rounded-2xl grid grid-cols-1">`;
-            html += businessPeople.map(employees => `
-            <div title="Sobre" class="rounded-2xl border-black-500 bg-white grid grid-cols-4">
-                <label for="employee" class="col-span-1 p-4 truncate text-gray-500">${employees.tt}</label>
-                <input class="border-0 focus:outline-none col-span-3 p-4 rounded-r-2xl" id="employee" name="employee"></input>
-            </div>
-            `).join('');
-            html += '</div>';
-
+        `;
         } else if (view === 'testmonials') {
-            let newTestmonials = await apiClient.post('/search', {db: 'workz_data', table: 'testmonials', columns: ['*'], conditions: {recipient: data.id, recipient_type: type}, fetchAll: true});            
-            if (newTestmonials.data.length > 0) {
-                let mapped = await Promise.all(newTestmonials.data.map(async (testmonial) => {
-                    let author = await fetchByIds(testmonial.author, 'people');                    
+            const res = await apiClient.post('/search', { db:'workz_data', table:'testmonials', columns:['*'], conditions: { recipient: data.id, recipient_type: type }, fetchAll:true });
+            const list = Array.isArray(res?.data) ? res.data : [];
+            if (!list.length) {
+                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Não há depoimentos.</div>`;
+            } else {
+                const cards = await Promise.all(list.map(async t => {
+                    const author = await fetchByIds(t.author, 'people');
+                    const avatar = author?.im ? `data:image/png;base64,${author.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(author?.tt||'?').charAt(0)}`;
+                    const primaryBtn = (t.status===0)
+                        ? `<button title="Aceitar" data-action="accept-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-bl-2xl"><i class="fas fa-check"></i></button>`
+                        : `<button title="Reverter" data-action="revert-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-bl-2xl"><i class="fas fa-undo"></i></button>`;
+                    const rejectBtn = `<button title="Rejeitar" data-action="reject-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-br-2xl"><i class="fas fa-ban"></i></button>`;
+
                     return `
-                    <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
-                        <div class="grid grid-cols-4">
-                            <div class="pt-4 px-4 col-span-4 flex items-center truncate">
-                                <img class="w-7 h-7 mr-2 rounded-full pointer" src="${ (author.im !== null) ? 'data:image/png;base64,' + author.im : `https://placehold.co/100x100/EFEFEF/333?text=${author.tt.charAt(0)}` }" />
-                                <a class="font-semibold">${author.tt}</a>
-                            </div>                                                                        
-                        </div>                        
-                        <div class="col-span-4 px-4">${testmonial.content}</div>
-                        <div id="" class="grid grid-cols-2 rounded-b-2xl border-black-500 bg-white">
-                            ${(testmonial.status === 0) ? 
-                            `<button id="" title="Aceitar" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-check centered"></i></button>` : 
-                            `<button id="" title="Reverter" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-eye-slash centered"></i></button>`}
-                            <button id="" title="Rejeitar" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-ban centered"></i></button>
+                        <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
+                        <div class="pt-4 px-4 col-span-4 flex items-center truncate">
+                            <img class="w-7 h-7 mr-2 rounded-full pointer" src="${avatar}" />
+                            <a class="font-semibold">${author?.tt ?? 'Autor'}</a>
                         </div>
-                    </div>                
+                        <div class="col-span-4 px-4">${t.content ?? ''}</div>
+                        <div class="grid grid-cols-2 rounded-b-2xl border-t border-gray-200 bg-white">
+                            ${primaryBtn}
+                            ${rejectBtn}
+                        </div>
+                        </div>
                     `;
                 }));
-                html += mapped.join('');
-            } else {
-                html += `
-                <div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Não há depoimentos.</div>
-                `;
+                html += cards.join('');
             }
+        } else if (view === 'user-education') {
+        html += `<div class="bg-white rounded-2xl shadow-md p-4">Education content</div>`;
+        } else if (view === 'user-jobs') {
+            const userJobs = await apiClient.post('/search', { db: 'workz_companies', table: 'employees', columns: ['*'], conditions: { us: currentUserData.id }, order: { by: 'start_date', dir: 'DESC' }, fetchAll: true });
+            const cards = await Promise.all(userJobs?.data?.map(async j => {
+                const business = await fetchByIds(j.em, 'businesses');
+                return `
+                    <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
+                        <div class="pt-4 px-4 col-span-4 flex items-center truncate">
+                            <img class="w-7 h-7 mr-2 rounded-full pointer" src="${business?.im ? `data:image/png;base64,${business.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(business?.tt||'?').charAt(0)}`}" />
+                            <a class="font-semibold">${business?.tt ?? 'Empresa'}</a>
+                        </div>
+                        <div class="col-span-4 px-4">
+                            <p class="font-semibold">${j.job_title}</p>
+                            <p class="text-sm text-gray-600">${new Date(j.start_date).toLocaleDateString()} - ${j.end_date ? new Date(j.end_date).toLocaleDateString() : 'Atual'}</p>
+                            <p class="text-sm mt-2">${j.description ?? ''}</p>
+                        </div>
+                        <div class="grid grid-cols-2 rounded-b-2xl border-t border-gray-200 bg-white">
+                            <button title="Editar" data-action="edit-job" data-id="${j.id}" class="col-span-1 p-3 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-bl-2xl"><i class="fas fa-edit"></i></button>
+                            <button title="Excluir" data-action="delete-job" data-id="${j.id}" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-br-2xl"><i class="fas fa-trash"></i></button>
+                        </div>
+                    </div>
+                    
+                `;
+            }));
+            html += cards.join('');
+            html += `<button id="add-job-btn" class="w-full py-2 px-4 bg-green-500 text-white font-semibold rounded-3xl hover:bg-green-700 transition-colors mt-4">Adicionar Experiência Profissional</button>`;
         }
-
         return html;
     };
+
 
 
     async function appendWidget(type = 'people', gridList, count) {
@@ -1501,10 +1426,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             });
                         });
                     });
-                    document?.querySelector("#business-employees")?.addEventListener('click', (e) => {
+                    document?.querySelector("#employees")?.addEventListener('click', (e) => {
                         renderTemplate(sidebarContent, templates.sidebarPageSettings, {
-                            view: 'business-employees',
-                            data: pageSettingsData
+                            view: 'employees',
+                            data: pageSettingsData,
+                            type: pageSettingsView
                         }, () => {
 
                         });
@@ -2676,4 +2602,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
-
