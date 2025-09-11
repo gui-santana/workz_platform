@@ -36,6 +36,104 @@ document.addEventListener('DOMContentLoaded', () => {
     let feedLoading = false;
     let feedFinished = false;
 
+    // Navegação estilo iOS para o sidebar (stack)
+    const SidebarNav = {
+        stack: [],
+        mount: null,
+        setMount(el){ this.mount = el; },
+        current(){ return this.stack[this.stack.length-1]; },
+        prev(){ return this.stack[this.stack.length-2]; },
+        resetRoot(data){ this.stack = [{ view: 'root', title: 'Ajustes', payload: { data }, type: 'root' }]; this.render(); },
+        push(state){ this.stack.push(state); this.render(); },
+        back(){ if (this.stack.length>1){ this.stack.pop(); this.render(); } else { this.resetRoot(currentUserData); } },
+        async render(){
+            if (!this.mount) return;
+            const st = this.current();
+            const isRoot = (st.view === 'root');
+            const payload = { ...(st.payload||{}), view: (isRoot ? null : st.view), origin: 'stack', navTitle: st.title, prevTitle: (this.prev()?.title || 'Ajustes') };
+            this.mount.dataset.navMode = 'stack';
+            this.mount.dataset.currentView = st.view || 'root';
+            await renderTemplate(this.mount, templates.sidebarPageSettings, payload, () => {
+                // Root: handler único para main menu
+                if (isRoot) {
+                    if (this.mount._rootHandler) this.mount.removeEventListener('click', this.mount._rootHandler);
+                    const rootHandler = (e) => {
+                        const it = e.target.closest('#people,#businesses,#teams,#desktop,#apps,#logout');
+                        if (!it || !this.mount.contains(it)) return;
+                        const id = it.id;
+                        if (id === 'desktop') { navigateTo('/'); return; }
+                        if (id === 'logout') { handleLogout(); return; }
+                        const titleMap = { people:'Pessoas', businesses:'Negócios', teams:'Equipes', apps:'Aplicativos' };
+                        this.push({ view: id, title: titleMap[id] || 'Ajustes', payload: { data: currentUserData } });
+                    };
+                    this.mount.addEventListener('click', rootHandler);
+                    this.mount._rootHandler = rootHandler;
+                }
+
+                // Delegação para abrir itens de listas (negócios/equipes)
+                if (this.mount._listHandler) this.mount.removeEventListener('click', this.mount._listHandler);
+                const listHandler = async (e) => {
+                    const row = e.target.closest('[data-id]');
+                    if (!row || !this.mount.contains(row)) return;
+                    const id = row.dataset.id;
+                    if (!id) return;
+                    if (this.mount.dataset.currentView === 'businesses') {
+                        const res = await apiClient.post('/search', { db:'workz_companies', table:'companies', columns:['*'], conditions:{ id } });
+                        const data = Array.isArray(res?.data) ? res.data[0] : res?.data || null;
+                        if (data) this.push({ view: ENTITY.BUSINESS, title: data.tt || 'Negócio', payload: { data, type:'business' } });
+                    } else if (this.mount.dataset.currentView === 'teams') {
+                        const res = await apiClient.post('/search', { db:'workz_companies', table:'teams', columns:['*'], conditions:{ id } });
+                        const data = Array.isArray(res?.data) ? res.data[0] : res?.data || null;
+                        if (data) this.push({ view: ENTITY.TEAM, title: data.tt || 'Equipe', payload: { data, type:'team' } });
+                    } else if (this.mount.dataset.currentView === 'people') {
+                        // opcional: abrir perfil
+                    }
+                };
+                this.mount.addEventListener('click', listHandler);
+                this.mount._listHandler = listHandler;
+
+                // Se estiver em view de entidade, conecte os atalhos internos
+                if ([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(st.view)) {
+                    wireSidebarPageActions(this.mount, payload.data, st.view);
+                }
+
+                // Hooks específicos de subviews
+                if (st.view === 'user-jobs') {
+                    this.mount.addEventListener('change', (e2) => {
+                        const sel = e2.target.closest('select[name="type"]'); if (!sel) return;
+                        const form = sel.closest('.job-form');
+                        const disabled = sel.disabled || form?.dataset.readonlyMode === '1';
+                        const currentExtraValue = form?.querySelector('[name="third_party"]')?.value || form?.dataset.thirdParty || '';
+                        renderOutsourcedRow(sel, { selected: currentExtraValue, disabled });
+                    });
+                    this.mount.addEventListener('submit', async (e3) => {
+                        if (e3.target.classList.contains('job-form')) {
+                            e3.preventDefault();
+                            const messageContainer = document.getElementById('message');
+                            const form = new FormData(e3.target);
+                            const data = Object.fromEntries(form.entries());
+                            data.visibility = e3.target.querySelector(`[name="visibility"]`).checked ? 1 : 0;
+                            data.st = e3.target.querySelector(`[name="st"]`).checked ? 1 : 0;
+                            if (data) {
+                                const result = await apiClient.post('/update', { db: 'workz_companies', table: 'employees', data, conditions: { id: e3.target.dataset.jobId } });
+                                if (result) renderTemplate(messageContainer, templates.message, { message: 'Experiência profissional atualizada com sucesso!', type: 'success' });
+                                else renderTemplate(messageContainer, templates.message, { message: 'Falha na atualização', type: 'error' });
+                            }
+                        }
+                    });
+                    initOutsourcedUI(this.mount);
+                }
+            });
+        }
+    };
+
+    // Constantes de entidade para padronização
+    const ENTITY = Object.freeze({
+        PROFILE: 'profile',
+        BUSINESS: 'business',
+        TEAM: 'team'
+    });
+
    // ===================================================================
     // 🏳️ TEMPLATES - Partes do HTML a ser renderizado
     // ===================================================================
@@ -180,10 +278,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <hr class="mt-3 mb-3">
                         <nav class="mb-1">
                             <ul id="standard-menu" class="space-y-2">
-                                <li><button href="#people" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-user-friends fa-stack-1x text-gray-700"></i></span><a class="truncate">Pessoas</a></button></li>
-                                <li><button href="#businesses" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-briefcase fa-stack-1x text-gray-700"></i></span><a class="truncate">Negócios</a></button></li>
-                                <li><button href="#teams" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-users fa-stack-1x text-gray-700"></i></span><a class="truncate">Equipes</a></button></li>
-                                <li><button href="#" id="logout-btn-sidebar" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-sign-out-alt fa-stack-1x text-gray-700"></i></span><a class="truncate">Sair</a></button></li>
+                                <li><button data-action="list-people" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-user-friends fa-stack-1x text-gray-700"></i></span><span class="truncate">Pessoas</span></button></li>
+                                <li><button data-action="list-businesses" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-briefcase fa-stack-1x text-gray-700"></i></span><span class="truncate">Negócios</span></button></li>
+                                <li><button data-action="list-teams" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-users fa-stack-1x text-gray-700"></i></span><span class="truncate">Equipes</span></button></li>
+                                <li><button data-action="logout" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-sign-out-alt fa-stack-1x text-gray-700"></i></span><span class="truncate">Sair</span></button></li>
                             </ul>
                         </nav>
                     </div>
@@ -311,6 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Removido: lógica antiga baseada em sidebarHistory/sidebar-back
     templates.entityContent = async ({ data }) => {        
         const content = `
             <div class="rounded-3xl w-full p-4 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1),0_-4px_6px_-2px_rgba(0,0,0,0.05)]">
@@ -374,173 +473,103 @@ document.addEventListener('DOMContentLoaded', () => {
         `;        
     };
 
-    templates.sidebarMain = async ({ data }) => {
-        return `
-        <div id="close" data-sidebar-action="settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
-            <a>Fechar</a>
-            <i class="fas fa-chevron-right"></i>                
-        </div>
-        <div data-sidebar-type="current-user" class="pointer w-full bg-white shadow-md rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
-            <div data-sidebar-action="page-settings" class="grid grid-cols-4 items-center gap-3">
-                <div class="flex col-span-1 justify-center">
-                    <img id="sidebar-profile-image" class="w-full rounded-full" src="https://placehold.co/100x100/EFEFEF/333?text=${data.tt.charAt(0)}" alt="Foto do Utilizador">
-                </div>
-                <div class="flex col-span-3 flex-col gap-1">
-                    <p class="truncate font-bold">${data.tt}</p>
-                    <p class="truncate">${data.ml}</p>
-                    <small class="text-gray-500 truncate" >Perfil Workz!, E-mail, Foto, Endereço</small>
-                </div>
-            </div>
-            <div class="flex justify-end col-span-1">
-                <i class="fas fa-chevron-right"></i>
-            </div>
-        </div>                            
-        <div class="bg-white w-full shadow-md rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
-            <span class="fa-stack gray-500">
-                <i class="fas fa-circle fa-stack-2x"></i>
-                <i class="fas fa-th fa-stack-1x fa-inverse"></i>					
-            </span>
-            Tela de Início
-        </div>
-        <div class="bg-white w-full shadow-md rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
-            <span class="fa-stack gray-500">
-                <i class="fas fa-circle fa-stack-2x"></i>
-                <i class="fas fa-shapes fa-stack-1x fa-inverse"></i>					
-            </span>
-            Aplicativos
-        </div>
-        <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
-            <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
-                <span class="fa-stack gray-500">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-user-friends fa-stack-1x fa-inverse"></i>					
-                </span>
-                Pessoas
-            </div>
-            <div class="border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
-                <span class="fa-stack gray-500">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-briefcase fa-stack-1x fa-inverse"></i>					
-                </span>
-                Negócios
-            </div>
-            <div class="rounded-b-2xl bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
-                <span class="fa-stack gray-500">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-users fa-stack-1x fa-inverse"></i>					
-                </span>
-                Equipes
-            </div>
-        </div>
-        <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
-            <div class="rounded-t-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
-                <span class="fa-stack gray-500">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-money-bill fa-stack-1x fa-inverse"></i>					
-                </span>
-                Cobrança e Recebimento
-            </div>
-            <div class="border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
-                <span class="fa-stack gray-500">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-receipt fa-stack-1x fa-inverse"></i>					
-                </span>
-                Transações
-            </div>
-            <div class="rounded-b-2xl border-b-2 border-black-500 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">
-                <span class="fa-stack gray-500">
-                    <i class="fas fa-circle fa-stack-2x"></i>
-                    <i class="fas fa-satellite-dish fa-stack-1x fa-inverse"></i>					
-                </span>
-                Assinaturas
-            </div>            
-        </div>
-        <div class="bg-white w-full shadow-md rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-dashboard-link">                            
-            <span class="fa-stack gray-500">
-                <i class="fas fa-circle fa-stack-2x"></i>
-                <i class="fas fa-sign-out-alt fa-stack-1x fa-inverse"></i>					
-            </span>
-            Sair
-        </div>
-        <div class="text-center border-t border-gray-200 grid grid-cols-1 gap-1 pt-4">
-            <img class="mx-auto" src="https://guilhermesantana.com.br/images/50x50.png" style="height: 40px; width: 40px" alt="Logo de uFicial"></img>
-            <a href="https://uficial.com" target="_blank">uFicial Technologies © 2025</a>
-        </div>
-        `
+    // Classes padronizadas para itens de menu/botões
+    const CLASSNAMES = {
+        menuItem: 'cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center',
+        actionBtn: 'cursor-pointer text-center rounded-3xl text-white transition-colors truncate w-full p-2 mb-1'
     };
 
     const UI = {
         renderHeader: ({ backAction = 'page-settings', backLabel, title }) => `
-        <div data-sidebar-action="${backAction}" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
-            <i class="fas fa-chevron-left"></i>
-            <a>${backLabel ?? 'Voltar'}</a>
-        </div>
-        <h1 class="text-center text-gray-500 text-xl font-bold">${title}</h1>
-        <div id="message" class="w-full absolute"></div>
-        `,
-
-        renderHero: ({ tt, im }) => `
-        <div class="col-span-1 justify-center">
-            <img id="sidebar-profile-image" class="w-1/3 shadow-lg cursor-pointer rounded-full mx-auto" src="${im ? `data:image/png;base64,${im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(tt||'?').charAt(0)}`}" alt="${tt ?? 'Imagem'}">
-        </div>
-        `,
-
-        sectionCard: (content, { roundedTop=true, roundedBottom=true } = {}) => `
-        <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
-            ${content}
-        </div>
-        `,
-
-        row: (id, label, inputHtml, { top=false, bottom=false } = {}) => `
-        <div class="grid grid-cols-4 border-b border-gray-200 ${top ? 'rounded-t-2xl' : ''} ${bottom ? 'rounded-b-2xl' : ''}">
-            <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
-            <div class="col-span-3 p-4">
-            ${inputHtml}
+            <div data-sidebar-action="${backAction}" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
+                <i class="fas fa-chevron-left"></i>
+                <a>${backLabel ?? 'Voltar'}</a>
             </div>
-        </div>
+            <h1 class="text-center text-gray-500 text-xl font-bold">${title}</h1>
+            <div id="message" class="w-full absolute"></div>
         `,
-
+        renderCloseHeader: () => `
+            <div id="close" data-sidebar-action="settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
+                <a>Fechar</a>
+                <i class="fas fa-chevron-right"></i>                
+            </div>
+        `,
+        renderHero: ({ tt, im }) => `
+            <div class="col-span-1 justify-center">
+                <img id="sidebar-profile-image" class="w-1/3 shadow-lg cursor-pointer rounded-full mx-auto" src="${im ? `data:image/png;base64,${im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(tt||'?').charAt(0)}`}" alt="${tt ?? 'Imagem'}">
+            </div>
+        `,
+        sectionCard: (content, { roundedTop=true, roundedBottom=true } = {}) => `
+            <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
+                ${content}
+            </div>
+        `,
+        // Ícone FontAwesome em pilha padronizado
+        fa: (icon) => `
+            <span class="fa-stack text-gray-200 mr-1">
+                <i class="fas fa-circle fa-stack-2x"></i>
+                <i class="fas ${icon} fa-stack-1x text-gray-700"></i>
+            </span>
+        `,
+        // Item de menu padronizado
+        menuItem: ({ action, icon, label }) => `
+            <li>
+                <button data-action="${action}" class="${CLASSNAMES.menuItem}">
+                    ${UI.fa(icon)}
+                    <span class="truncate">${label}</span>
+                </button>
+            </li>
+        `,
+        // Botão de ação padronizado (para sidebar/actions)
+        actionButton: ({ action, label, color='blue', extra='' }) => `
+            <button data-action="${action}" class="${CLASSNAMES.actionBtn} bg-${color}-400 hover:bg-${color}-600 ${extra}"><a class="truncate">${label}</a></button>
+        `,
+        row: (id, label, inputHtml, { top=false, bottom=false } = {}) => `
+            <div class="grid grid-cols-4 border-b border-gray-200 ${top ? 'rounded-t-2xl' : ''} ${bottom ? 'rounded-b-2xl' : ''}">
+                <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
+                <div class="col-span-3 p-4">
+                ${inputHtml}
+                </div>
+            </div>
+        `,
         rowTextarea: (id, label, value='') => `
-        <div class="grid grid-cols-4">
-            <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
-            <textarea id="${id}" name="${id}" class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px] rounded-r-2xl">${value ?? ''}</textarea>
-        </div>
+            <div class="grid grid-cols-4">
+                <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
+                <textarea id="${id}" name="${id}" class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px] rounded-r-2xl">${value ?? ''}</textarea>
+            </div>
         `,
-
         rowSelect: (id, label, optionsHtml, { top=false, bottom=false } = {}) => `
-        <div class="grid grid-cols-4 border-b border-gray-200 ${top ? 'rounded-t-2xl' : ''} ${bottom ? 'rounded-b-2xl' : ''}">
-            <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
-            <select id="${id}" name="${id}" class="border-0 focus:outline-none col-span-3 p-4">
-            ${optionsHtml}
-            </select>
-        </div>
+            <div class="grid grid-cols-4 border-b border-gray-200 ${top ? 'rounded-t-2xl' : ''} ${bottom ? 'rounded-b-2xl' : ''}">
+                <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
+                <select id="${id}" name="${id}" class="border-0 focus:outline-none col-span-3 p-4">
+                ${optionsHtml}
+                </select>
+            </div>
         `,
-
         contactOptions: () => `
-        <option value="" class="text-gray-500" disabled selected>Contato</option>
-        <option value="email">E-mail</option>
-        <option value="phone">Telefone</option>
-        <option value="site">Site</option>
-        <option value="behance">Behance</option>
-        <option value="discord">Discord</option>
-        <option value="facebook">Facebook</option>
-        <option value="flickr">Flickr</option>
-        <option value="instagram">Instagram</option>
-        <option value="linkedin">LinkedIn</option>
-        <option value="pinterest">Pinterest</option>
-        <option value="reddit">Reddit</option>
-        <option value="snapchat">Snapchat</option>
-        <option value="tiktok">TikTok</option>
-        <option value="tumblr">Tumblr</option>
-        <option value="twitch">Twitch</option>
-        <option value="twitter">X / Twitter</option>
-        <option value="vimeo">Vimeo</option>
-        <option value="wechat">WeChat</option>
-        <option value="whatsapp">WhatsApp</option>
-        <option value="youtube">YouTube</option>
-        <option value="other">Outro</option>
+            <option value="" class="text-gray-500" disabled selected>Contato</option>
+            <option value="email">E-mail</option>
+            <option value="phone">Telefone</option>
+            <option value="site">Site</option>
+            <option value="behance">Behance</option>
+            <option value="discord">Discord</option>
+            <option value="facebook">Facebook</option>
+            <option value="flickr">Flickr</option>
+            <option value="instagram">Instagram</option>
+            <option value="linkedin">LinkedIn</option>
+            <option value="pinterest">Pinterest</option>
+            <option value="reddit">Reddit</option>
+            <option value="snapchat">Snapchat</option>
+            <option value="tiktok">TikTok</option>
+            <option value="tumblr">Tumblr</option>
+            <option value="twitch">Twitch</option>
+            <option value="twitter">X / Twitter</option>
+            <option value="vimeo">Vimeo</option>
+            <option value="wechat">WeChat</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="youtube">YouTube</option>
+            <option value="other">Outro</option>
         `,
-
         contactBlock: (value='') => `
         <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
             <div id="input-container" class="rounded-t-2xl w-full">
@@ -557,7 +586,6 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         </div>
         `,
-
         privacyRowsProfile: ({ page_privacy, feed_privacy }) => {
             const pageOpts = `
             <option value="" ${page_privacy==null?'selected':''} disabled>Selecione</option>
@@ -576,250 +604,456 @@ document.addEventListener('DOMContentLoaded', () => {
                 UI.rowSelect('feed_privacy', 'Conteúdo', feedOpts, { bottom:true })
             );
         },
-
-        shortcutItem: (id, icon, label, { roundedTop=false, roundedBottom=false } = {}) => `
-        <div id="${id}" class="${roundedTop?'rounded-t-2xl':''} ${roundedBottom?'rounded-b-2xl':''} border-b border-gray-200 bg-white p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
-            <span class="fa-stack gray-500">
+        shortcutItem: (id, icon, label, color = 'gray', { roundedTop=false, roundedBottom=false } = {}) => `
+        <div id="${id}" title="${label}" class="${roundedTop?'rounded-t-2xl':''} ${roundedBottom?'rounded-b-2xl':'border-b'} bg-${ (color !== 'gray') ? color + '-200' : 'white' } text-${color}-700 p-3 cursor-pointer hover:bg-${ (color !== 'gray') ? color + '-300' : 'white/50' } transition-all duration-300 ease-in-out">
+            <span class="fa-stack">
                 <i class="fas fa-circle fa-stack-2x"></i>
                 <i class="fas ${icon} fa-stack-1x fa-inverse"></i>
             </span>
             ${label}
         </div>
         `,
-
         shortcutList: (items=[]) => `
         <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
-            ${items.map((it, i) => UI.shortcutItem(it.id, it.icon, it.label, {
-            roundedTop: i===0,
-            roundedBottom: i===items.length-1
+            ${items.map((it, i) => UI.shortcutItem(it.id, it.icon, it.label, it.color, {
+                roundedTop: i===0,
+                roundedBottom: i===items.length-1                
             })).join('')}
+        </div>
+        `,
+        signature: () => `
+        <div class="text-center border-t border-gray-200 grid grid-cols-1 gap-1 py-4">
+            <img class="mx-auto" src="https://guilhermesantana.com.br/images/50x50.png" style="height: 40px; width: 40px" alt="meSan"></img>
+            <a href="https://guilhermesantana.com.br" target="_blank">Guilherme Santana © 2025</a>
         </div>
         `
     };
 
-    templates.sidebarPageSettings = async ({ view, data, type = null }) => {
+    templates.sidebarPageSettings = async ({ view = null, data = null, type = null, origin = null, prevTitle = null, navTitle = null }) => {
         const sidebarContent = document.querySelector('.sidebar-content');
+        if (sidebarContent) sidebarContent.dataset.currentView = view || 'root';
         let html = '';
 
         // Cabeçalhos unificados
         const titles = {
-        'profile': data.tt,
-        'business': data.tt,
-        'team': data.tt,
-        'user-education': 'Formação Acadêmica',
-        'user-jobs': 'Experiência Profissional',
-        'user-testmonials': 'Depoimentos',
-        'business-shareholding': 'Estrutura Societária',
-        'employees': 'Colaboradores',
-        'testmonials': 'Depoimentos',
+            'profile': data?.tt ?? '',
+            'business': data?.tt ?? '',
+            'team': data?.tt ?? '',
+            'people': 'Pessoas Seguidas',
+            'businesses': 'Negócios Gerenciados',
+            'teams': 'Equipes Gerenciadas',
+            'employees': 'Colaboradores',
+            'testimonials': 'Depoimentos',
+            'billing': 'Cobrança e Recebimento',
+            'transactions': 'Transações',
+            'subscriptions': 'Assinaturas',
+            'user-education': 'Formação Acadêmica',
+            'user-jobs': 'Experiência Profissional',
+            // 'business-shareholding': 'Estrutura Societária' // removido por ora
+            'apps': 'Aplicativos'
         };
 
-        const headerBackLabel = (['profile','business','team'].includes(view)) ? 'Ajustes' : (view.startsWith('user-') ? currentUserData.tt : data.tt);
+        const headerBackLabel = (view !== null) ? (([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(view)) ? 'Ajustes' : (view.startsWith('user-') ? (currentUserData?.tt ?? '') : (data?.tt ?? ''))) : 'Fechar';
 
-        // Hero quando for página “principal”
-        if (['profile','business','team'].includes(view)) {
+        const financeShortcuts = UI.shortcutList([
+            { id: 'billing',      icon: 'fa-money-bill',     label: 'Cobrança e Recebimento' },
+            { id: 'transactions', icon: 'fa-receipt',        label: 'Transações' },
+            { id: 'subscriptions',icon: 'fa-satellite-dish', label: 'Assinaturas' }
+        ]);
+
+        // Cabeçalho e navegação com suporte a stack
+        const isStack = (origin === 'stack');
+        if ([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(view)) {
             html += `
-                ${UI.renderHeader({ backAction: 'settings', backLabel: 'Ajustes', title: data.tt })}
-                ${UI.renderHero({ tt: data.tt, im: data?.im })}
+                ${UI.renderHeader({ backAction: (isStack ? 'stack-back' : 'settings'), backLabel: (isStack ? (prevTitle || 'Ajustes') : 'Ajustes'), title: (data?.tt ?? '') })}
+                ${UI.renderHero({ tt: (data?.tt ?? ''), im: data?.im })}
                 <div id="message" class="w-full fixed"></div>
             `;
+            // Marcar tipo/identificador da entidade atual no dataset para navegação interna
+            sidebarContent.dataset.sidebarType = (view === ENTITY.PROFILE && data?.id === currentUserData?.id) ? 'current-user' : view;
+            if (data?.id) {
+                sidebarContent.dataset.entityType = view;
+                sidebarContent.dataset.entityId = String(data.id);
+            }
+        } else if (view === null) {
+            html += UI.renderCloseHeader();
         } else {
-            html += UI.renderHeader({ backAction: 'page-settings', backLabel: headerBackLabel, title: titles[view] ?? '' });
+            const topShortcuts = ['people','businesses','teams','apps'];
+            const isTopShortcut = topShortcuts.includes(view);
+            const backAction = isStack ? 'stack-back' : (isTopShortcut ? 'settings' : 'page-settings');
+            const backLabel = isStack ? (prevTitle || 'Ajustes') : (isTopShortcut ? 'Ajustes' : (data?.tt ?? 'Ajustes'));
+            html += UI.renderHeader({ backAction, backLabel, title: titles[view] ?? '' });
         }
 
         // VIEWS
-        if (view === 'profile') {
-        sidebarContent.dataset.sidebarType = (data.id === currentUserData.id) ? 'current-user' : 'profile';
+        if (view === null) {
+            const appearance = UI.shortcutList([
+                { id: 'desktop', icon: 'fa-th', label: 'Área de Trabalho' }
+            ]);
+            const applications = UI.shortcutList([
+                { id: 'apps', icon: 'fa-shapes', label: 'Aplicativos' }
+            ]);
+            const pages = UI.shortcutList([
+                { id: 'people', icon: 'fa-user-friends', label: 'Pessoas' },
+                { id: 'businesses', icon: 'fa-briefcase', label: 'Negócios' },
+                { id: 'teams', icon: 'fa-users', label: 'Equipes' }
+            ]);
+            const logout = UI.shortcutList([
+                { id: 'logout', icon: 'fa-sign-out-alt', label: 'Sair' }
+            ]);
+            html += `
+                <div data-sidebar-type="current-user" class="pointer w-full bg-white shadow-md rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
+                    <div data-sidebar-action="page-settings" class="grid grid-cols-4 items-center gap-3">
+                        <div class="flex col-span-1 justify-center">
+                            <img id="sidebar-profile-image" class="w-full rounded-full" src="https://placehold.co/100x100/EFEFEF/333?text=${data.tt.charAt(0)}" alt="Foto do Utilizador">
+                        </div>
+                        <div class="flex col-span-3 flex-col gap-1">
+                            <p class="truncate font-bold">${data.tt}</p>
+                            <p class="truncate">${data.ml}</p>
+                            <small class="text-gray-500 truncate" >Perfil Workz!, E-mail, Foto, Endereço</small>
+                        </div>
+                    </div>
+                    <div class="flex justify-end col-span-1">
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                </div>
+                ${appearance}
+                ${applications}
+                ${pages}
+                ${logout}
+            `;
 
-        const card1 = UI.sectionCard(
-            UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
-            UI.row('email','E-mail*', `<input class="w-full border-0 focus:outline-none" type="email" id="email" name="ml" value="${data.ml}" ${(data.provider ? '' : 'disabled')} required>`, {bottom:true})
-        );
 
-        const cardAbout = UI.sectionCard(UI.rowTextarea('cf', 'Sobre', data.cf));
+        } else if (view === ENTITY.PROFILE) {
+            sidebarContent.dataset.sidebarType = (data.id === currentUserData.id) ? 'current-user' : 'profile';
 
-        const cardUserMeta = UI.sectionCard(
-            UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}) +
-            UI.rowSelect('page_privacy', 'Página', `
-            <option value="" ${currentUserData.page_privacy==null?'selected':''} disabled>Selecione</option>
-            <option value="0" ${currentUserData.page_privacy===0?'selected':''}>Usuários logados</option>
-            <option value="1" ${currentUserData.page_privacy===1?'selected':''}>Toda a internet</option>
-            `) +
-            UI.rowSelect('feed_privacy', 'Conteúdo', `
-            <option value="" ${currentUserData.feed_privacy==null?'selected':''} disabled>Selecione</option>
-            <option value="0" ${currentUserData.feed_privacy===0?'selected':''}>Moderadores</option>
-            <option value="1" ${currentUserData.feed_privacy===1?'selected':''}>Usuários membros</option>
-            <option value="2" ${currentUserData.feed_privacy===2?'selected':''}>Usuários logados</option>
-            <option value="3" ${currentUserData.feed_privacy===3 && currentUserData.page_privacy>0?'selected':''} ${currentUserData.page_privacy<1?'disabled':''}>Toda a internet</option>
-            `, {bottom:true})
-        );
+            const card1 = UI.sectionCard(
+                UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
+                UI.row('email','E-mail*', `<input class="w-full border-0 focus:outline-none" type="email" id="email" name="ml" value="${data.ml}" ${(data.provider ? '' : 'disabled')} required>`, {bottom:true})
+            );
 
-        const cardPersonal = UI.sectionCard(
-            UI.rowSelect('gender','Gênero', `
-            <option value="" ${(!['male','female'].includes(currentUserData.gender))?'selected':''} disabled>Selecione</option>
-            <option value="male" ${currentUserData.gender==='male'?'selected':''}>Masculino</option>
-            <option value="female" ${currentUserData.gender==='female'?'selected':''}>Feminino</option>
-            `, {top:true}) +
-            UI.row('birth','Nascimento', `<input class="w-full border-0 focus:outline-none" type="date" id="birth" name="birth" value="${(currentUserData.birth)? new Date(currentUserData.birth).toISOString().split('T')[0] : ''}">`) +
-            UI.row('cpf','CPF', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="999.999.999-99" id="cpf" name="national_id" value="${currentUserData.national_id ?? ''}">`, {bottom:true})
-        );
+            const cardAbout = UI.sectionCard(UI.rowTextarea('cf', 'Sobre', data.cf));
 
-        const contacts = UI.contactBlock(data.url ?? '');
+            const cardUserMeta = UI.sectionCard(
+                UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}) +
+                UI.rowSelect('page_privacy', 'Página', `
+                <option value="" ${currentUserData.page_privacy==null?'selected':''} disabled>Selecione</option>
+                <option value="0" ${currentUserData.page_privacy===0?'selected':''}>Usuários logados</option>
+                <option value="1" ${currentUserData.page_privacy===1?'selected':''}>Toda a internet</option>
+                `) +
+                UI.rowSelect('feed_privacy', 'Conteúdo', `
+                <option value="" ${currentUserData.feed_privacy==null?'selected':''} disabled>Selecione</option>
+                <option value="0" ${currentUserData.feed_privacy===0?'selected':''}>Moderadores</option>
+                <option value="1" ${currentUserData.feed_privacy===1?'selected':''}>Usuários membros</option>
+                <option value="2" ${currentUserData.feed_privacy===2?'selected':''}>Usuários logados</option>
+                <option value="3" ${currentUserData.feed_privacy===3 && currentUserData.page_privacy>0?'selected':''} ${currentUserData.page_privacy<1?'disabled':''}>Toda a internet</option>
+                `, {bottom:true})
+            );
 
-        const shortcuts = UI.shortcutList([
-            { id:'user-education', icon:'fa-graduation-cap', label:'Formação Acadêmica' },
-            { id:'user-jobs', icon:'fa-user-tie', label:'Experiência Profissional' },
-            { id:'testmonials', icon:'fa-scroll', label:'Depoimentos' },
-        ]) + `
-            <div class="bg-white w-full shadow-md rounded-2xl p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
-            <span class="fa-stack gray-500">
-                <i class="fas fa-circle fa-stack-2x"></i>
-                <i class="fas fa-key fa-stack-1x fa-inverse"></i>
-            </span>
-            Alterar Senha
-            </div>
-        `;
+            const cardPersonal = UI.sectionCard(
+                UI.rowSelect('gender','Gênero', `
+                <option value="" ${(!['male','female'].includes(currentUserData.gender))?'selected':''} disabled>Selecione</option>
+                <option value="male" ${currentUserData.gender==='male'?'selected':''}>Masculino</option>
+                <option value="female" ${currentUserData.gender==='female'?'selected':''}>Feminino</option>
+                `, {top:true}) +
+                UI.row('birth','Nascimento', `<input class="w-full border-0 focus:outline-none" type="date" id="birth" name="birth" value="${(currentUserData.birth)? new Date(currentUserData.birth).toISOString().split('T')[0] : ''}">`) +
+                UI.row('cpf','CPF', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="999.999.999-99" id="cpf" name="national_id" value="${currentUserData.national_id ?? ''}">`, {bottom:true})
+            );
 
-        html += `
-            <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
-            <input type="hidden" name="id" value="${data.id}">
-            ${card1}
-            ${cardAbout}
-            ${cardUserMeta}
-            ${cardPersonal}
-            ${contacts}
-            <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
-            </form>
-            <hr>
-            ${shortcuts}
-        `;
-        } else if (view === 'business') {
-        sidebarContent.id = 'business';
+            const contacts = UI.contactBlock(data.url ?? '');
 
-        const basics = UI.sectionCard(
-            UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
-            UI.row('cnpj','CNPJ', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99.999.999/9999-99" id="cnpj" name="cnpj" value="${data.national_id ?? ''}">`, {bottom:true})
-        );
+            const shortcuts = UI.shortcutList([
+                { id:'user-education', icon:'fa-graduation-cap', label:'Formação Acadêmica' },
+                { id:'user-jobs', icon:'fa-user-tie', label:'Experiência Profissional' },
+                { id:'testimonials', icon:'fa-scroll', label:'Depoimentos' },
+            ]);
 
-        const about = UI.sectionCard(UI.rowTextarea('cf','Sobre', data.cf));
+            const userChoices = UI.shortcutList([
+                { id: 'password', icon: 'fa-key', label: 'Alterar Senha' },
+                { id: 'delete-account', icon: 'fa-times', label: 'Excluir Conta', color: 'red' }
+            ]);
 
-        const privacy = UI.sectionCard(
-            UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}) +
-            UI.rowSelect('page_privacy','Página', `
-            <option value="" ${data.pg==null?'selected':''} disabled>Selecione</option>
-            <option value="0" ${data.pg===0?'selected':''}>Usuários logados</option>
-            <option value="1" ${data.pg===1?'selected':''}>Toda a internet</option>
-            `) +
-            UI.rowSelect('feed_privacy','Conteúdo', `
-            <option value="" ${data.pc==null?'selected':''} disabled>Selecione</option>
-            <option value="0" ${data.pc===0?'selected':''}>Moderadores</option>
-            <option value="1" ${data.pc===1?'selected':''}>Usuários membros</option>
-            <option value="2" ${data.pc===2?'selected':''}>Usuários logados</option>
-            <option value="3" ${data.pc===3 && (data.pg>0)?'selected':''} ${data.pg<1?'disabled':''}>Toda a internet</option>
-            `, {bottom:true})
-        );
+            html += `
+                <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
+                    <input type="hidden" name="id" value="${data.id}">
+                    ${card1}
+                    ${cardAbout}
+                    ${cardUserMeta}
+                    ${cardPersonal}
+                    ${contacts}
+                    <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
+                </form>
+                <hr>
+                ${shortcuts}
+                ${financeShortcuts}
+                ${userChoices}                
+            `;
+        } else if (view === ENTITY.BUSINESS) {
+            sidebarContent.id = 'business';
 
-        const address = UI.sectionCard(
-            UI.row('zip_code','CEP', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99999-999" id="zip_code" name="zip_code" value="${data?.zip_code ?? ''}">`, {top:true}) +
-            UI.rowSelect('country','País', `<option value="" disabled ${!data?.country?'selected':''}>Selecione</option>`) +
-            UI.row('state','Estado', `<input class="w-full border-0 focus:outline-none" type="text" id="state" name="state" value="${data?.state ?? ''}">`) +
-            UI.row('city','Cidade', `<input class="w-full border-0 focus:outline-none" type="text" id="city" name="city" value="${data?.city ?? ''}">`) +
-            UI.row('district','Bairro', `<input class="w-full border-0 focus:outline-none" type="text" id="district" name="district" value="${data?.district ?? ''}">`) +
-            UI.row('address','Endereço', `<input class="w-full border-0 focus:outline-none" type="text" id="address" name="address" value="${data?.address ?? ''}">`) +
-            UI.row('complement','Complemento', `<input class="w-full border-0 focus:outline-none" type="text" id="complement" name="complement" value="${data?.complement ?? ''}">`, {bottom:true})
-        );
+            const basics = UI.sectionCard(
+                UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
+                UI.row('cnpj','CNPJ', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99.999.999/9999-99" id="cnpj" name="cnpj" value="${data.national_id ?? ''}">`, {bottom:true})
+            );
 
-        const contacts = UI.contactBlock(data.url ?? '');
+            const about = UI.sectionCard(UI.rowTextarea('cf','Sobre', data.cf));
 
-        const shortcuts = UI.shortcutList([
-            { id:'business-shareholding', icon:'fa-sitemap', label:'Estrutura Societária' },
-            { id:'employees', icon:'fa-id-badge', label:'Colaboradores' },
-            { id:'testmonials', icon:'fa-scroll', label:'Depoimentos' },
-        ]);
+            const privacy = UI.sectionCard(
+                UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}) +
+                UI.rowSelect('page_privacy','Página', `
+                <option value="" ${data.pg==null?'selected':''} disabled>Selecione</option>
+                <option value="0" ${data.pg===0?'selected':''}>Usuários logados</option>
+                <option value="1" ${data.pg===1?'selected':''}>Toda a internet</option>
+                `) +
+                UI.rowSelect('feed_privacy','Conteúdo', `
+                <option value="" ${data.pc==null?'selected':''} disabled>Selecione</option>
+                <option value="0" ${data.pc===0?'selected':''}>Moderadores</option>
+                <option value="1" ${data.pc===1?'selected':''}>Usuários membros</option>
+                <option value="2" ${data.pc===2?'selected':''}>Usuários logados</option>
+                <option value="3" ${data.pc===3 && (data.pg>0)?'selected':''} ${data.pg<1?'disabled':''}>Toda a internet</option>
+                `, {bottom:true})
+            );
 
-        html += `
-            <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
-            <input type="hidden" name="id" value="${data.id}">
-            ${basics}
-            ${about}
-            ${privacy}
-            ${address}
-            ${contacts}
-            <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
-            </form>
-            <hr>
-            ${shortcuts}
-        `;
-        } else if (view === 'team') {
-        // exemplo: reuso igual ao business/profile para campos
-        // (mantém tua lógica de buscar businesses; só exibindo com os helpers)
-        let mappedBusinesses = await Promise.all(userBusinesses.map(async (business) => {
-            const b = await fetchByIds(business, 'businesses');
-            return `<option value="${business}" ${(data.em===business)?'selected':''}>${b.tt}</option>`;
-        }));
+            const address = UI.sectionCard(
+                UI.row('zip_code','CEP', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99999-999" id="zip_code" name="zip_code" value="${data?.zip_code ?? ''}">`, {top:true}) +
+                UI.rowSelect('country','País', `<option value="" disabled ${!data?.country?'selected':''}>Selecione</option>`) +
+                UI.row('state','Estado', `<input class="w-full border-0 focus:outline-none" type="text" id="state" name="state" value="${data?.state ?? ''}">`) +
+                UI.row('city','Cidade', `<input class="w-full border-0 focus:outline-none" type="text" id="city" name="city" value="${data?.city ?? ''}">`) +
+                UI.row('district','Bairro', `<input class="w-full border-0 focus:outline-none" type="text" id="district" name="district" value="${data?.district ?? ''}">`) +
+                UI.row('address','Endereço', `<input class="w-full border-0 focus:outline-none" type="text" id="address" name="address" value="${data?.address ?? ''}">`) +
+                UI.row('complement','Complemento', `<input class="w-full border-0 focus:outline-none" type="text" id="complement" name="complement" value="${data?.complement ?? ''}">`, {bottom:true})
+            );
 
-        const basics = UI.sectionCard(
-            UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
-            UI.rowSelect('business','Negócio', `
-            <option value="" ${data.em==null?'selected':''} disabled>Selecione</option>
-            ${mappedBusinesses.join('')}
-            `, {bottom:true})
-        );
+            const contacts = UI.contactBlock(data.url ?? '');
 
-        const about = UI.sectionCard(UI.rowTextarea('cf','Sobre', data.cf));
+            const shortcuts = UI.shortcutList([
+                // { id:'business-shareholding', icon:'fa-sitemap', label:'Estrutura Societária' },
+                { id:'employees', icon:'fa-id-badge', label:'Colaboradores' },
+                { id:'testimonials', icon:'fa-scroll', label:'Depoimentos' },
+            ]);
 
-        const feedPrivacy = UI.sectionCard(
-            UI.rowSelect('feed_privacy','Conteúdo', `
-            <option value="" ${data.pc==null?'selected':''} disabled>Selecione</option>
-            <option value="0" ${data.pc===0?'selected':''}>Moderadores</option>
-            <option value="1" ${data.pc===1?'selected':''}>Membros da equipe</option>
-            <option value="2" ${data.pc===2?'selected':''}>Todos do negócio</option>
-            `, {bottom:true})
-        );
+            
+            html += `
+                <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
+                <input type="hidden" name="id" value="${data.id}">
+                ${basics}
+                ${about}
+                ${privacy}
+                ${address}
+                ${contacts}
+                <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
+                </form>
+                <hr>
+                ${shortcuts}
+                ${financeShortcuts}
+            `;
+        } else if (view === ENTITY.TEAM) {
+            // exemplo: reuso igual ao business/profile para campos
+            // (mantém tua lógica de buscar businesses; só exibindo com os helpers)
+            let mappedBusinesses = await Promise.all(userBusinesses.map(async (business) => {
+                const b = await fetchByIds(business, 'businesses');
+                return `<option value="${business}" ${(data.em===business)?'selected':''}>${b.tt}</option>`;
+            }));
 
-        const contacts = UI.contactBlock(data.url ?? '');
+            const basics = UI.sectionCard(
+                UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
+                UI.rowSelect('business','Negócio', `
+                <option value="" ${data.em==null?'selected':''} disabled>Selecione</option>
+                ${mappedBusinesses.join('')}
+                `, {bottom:true})
+            );
 
-        const shortcuts = UI.shortcutList([
-            { id:'employees', icon:'fa-id-badge', label:'Colaboradores' },
-        ]);
+            const about = UI.sectionCard(UI.rowTextarea('cf','Sobre', data.cf));
 
-        html += `
-            <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
-            <input type="hidden" name="id" value="${data.id}">
-            ${basics}
-            ${about}
-            ${UI.sectionCard(UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}))}
-            ${feedPrivacy}
-            ${contacts}
-            <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
-            </form>
-            ${shortcuts}
-        `;
+            const feedPrivacy = UI.sectionCard(
+                UI.rowSelect('feed_privacy','Conteúdo', `
+                <option value="" ${data.pc==null?'selected':''} disabled>Selecione</option>
+                <option value="0" ${data.pc===0?'selected':''}>Moderadores</option>
+                <option value="1" ${data.pc===1?'selected':''}>Membros da equipe</option>
+                <option value="2" ${data.pc===2?'selected':''}>Todos do negócio</option>
+                `, {bottom:true})
+            );
+
+            const contacts = UI.contactBlock(data.url ?? '');
+
+            const shortcuts = UI.shortcutList([
+                { id:'employees', icon:'fa-id-badge', label:'Colaboradores' },
+            ]);
+
+            html += `
+                <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
+                <input type="hidden" name="id" value="${data.id}">
+                ${basics}
+                ${about}
+                ${UI.sectionCard(UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}))}
+                ${feedPrivacy}
+                ${contacts}
+                <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
+                </form>
+                ${shortcuts}
+            `;
         } else if (view === 'employees') {
             const table = (type === 'business') ? 'employees' : 'teams_users';
-            const conditions = (type === 'business') ? { em: data.id } : { cm: data.id };
-            const employees = await apiClient.post('/search', { db:'workz_companies', table, columns:['us','nv','st'], conditions, fetchAll:true });
-            const people = await fetchByIds(employees?.data?.map(o => o.us), 'people');
-
+            const conditions = (type === 'business') ? { em: data.id } : { cm: data.id };            
+            const employees = await apiClient.post('/search', { db: 'workz_companies', table, columns: ['us', 'nv', 'st'], conditions, exists: [{ db: 'workz_data', table: 'hus', local: 'us', remote: 'id', conditions: { st: 1 }}], fetchAll: true});
+            let people = await fetchByIds(employees?.data?.map(o => o.us), 'people');
+            people = (!Array.isArray(people)) ? [people] : people; //Normaliza o array caso resultado único
             html += UI.sectionCard(
                 (people||[]).map(p => UI.row(`employee-${p.id}`, p.tt, `<input class="w-full border-0 focus:outline-none" name="employee" id="employee-${p.id}">`)).join('')
             );
-        } else if (view === 'business-shareholding') {
-        html += `
-            <div class="w-full shadow-md rounded-2xl">
-            <div id="tree" class="bg-white rounded-t-2xl divide-y divide-gray-100"></div>
-            <button id="add-root" class="w-full p-4 rounded-b-2xl bg-gray-100 hover:bg-gray-200 text-center">
-                <i class="fas fa-plus centered"></i> Adicionar Acionista
-            </button>
-            </div>
-            <button id="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700">Gerar JSON</button>
-            <div class="mt-6">
-            <label class="block text-sm font-medium text-gray-600 mb-2">JSON gerado</label>
-            <textarea id="output" rows="10" class="w-full p-3 rounded-xl border border-gray-200 bg-white font-mono text-sm" readonly></textarea>
-            </div>
-        `;
-        } else if (view === 'testmonials') {
-            const res = await apiClient.post('/search', { db:'workz_data', table:'testmonials', columns:['*'], conditions: { recipient: data.id, recipient_type: type }, fetchAll:true });
+        } else if (view === 'people') {
+            // Pessoas seguidas pelo usuário logado
+            const ids = Array.isArray(userPeople) ? userPeople : [];
+            if (!ids.length) {
+                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Você ainda não segue ninguém.</div>`;
+            } else {
+                let list = await fetchByIds(ids, 'people');
+                list = Array.isArray(list) ? list : (list ? [list] : []);
+                const rows = list.map(u => {
+                    const img = u?.im ? `data:image/png;base64,${u.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(u?.tt||'?').charAt(0)}`;
+                    return `
+                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${u.id}">
+                        <div class="col-span-1 p-3 flex justify-center">
+                            <img src="${img}" alt="${u?.tt || 'Usuário'}" class="w-7 h-7 rounded-full" />
+                        </div>
+                        <div class="col-span-5 p-3 truncate">${u?.tt || 'Usuário'}</div>
+                    </div>`;
+                }).join('');
+                html += UI.sectionCard(rows);
+            }
+        } else if (view === 'businesses') {
+            // Negócios onde o usuário é membro com nível de moderação/gestão (nv >= 3)
+            const managed = Array.isArray(userBusinessesData)
+                ? userBusinessesData.filter(r => Number(r?.nv ?? 0) >= 3 && Number(r?.st ?? 1) === 1).map(r => r.em)
+                : [];
+            const ids = managed;
+            if (!ids.length) {
+                const createBusinessCard = UI.sectionCard(
+                    UI.row('new-business-name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-business-name" placeholder="Digite o nome do negócio" required>`, { top:true }) +
+                    `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
+                        <button data-action="create-business" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
+                    </div>`
+                );
+                html += createBusinessCard;
+                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center mt-3">Você ainda não gerencia nenhum negócio.</div>`;
+            } else {
+                let list = await fetchByIds(ids, 'businesses');
+                list = Array.isArray(list) ? list : (list ? [list] : []);
+                const createBusinessCard = UI.sectionCard(
+                    UI.row('new-business-name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-business-name" placeholder="Digite o nome do negócio" required>`, { top:true }) +
+                    `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
+                        <button data-action="create-business" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
+                    </div>`
+                );
+                html += createBusinessCard;
+                const rows = list.map(b => {
+                    const img = b?.im ? `data:image/png;base64,${b.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(b?.tt||'?').charAt(0)}`;
+                    return `
+                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${b.id}">
+                        <div class="col-span-1 p-3 flex justify-center">
+                            <img src="${img}" alt="${b?.tt || 'Negócio'}" class="w-7 h-7 rounded-full" />
+                        </div>
+                        <div class="col-span-5 p-3 truncate">${b?.tt || 'Negócio'}</div>
+                    </div>`;
+                }).join('');
+                html += UI.sectionCard(rows);
+            }
+        } else if (view === 'teams') {
+            // Equipes em que o usuário é criador (us) ou moderador (usmn contém id), ativas (st=1)
+            // e cujo negócio (companies.em) também está ativo (companies.st=1)
+            const res = await apiClient.post('/search', {
+                db: 'workz_companies',
+                table: 'teams',
+                columns: ['id','tt','im','us','usmn','st','em'],
+                conditions: { st: 1 },
+                exists: [{ table: 'companies', local: 'em', remote: 'id', conditions: { st: 1 } }],
+                fetchAll: true
+            });
+            const all = Array.isArray(res?.data) ? res.data : [];
+            const uid = String(currentUserData.id);
+            const managed = all.filter(t => {
+                const isOwner = String(t.us) === uid;
+                let moderators = [];
+                try { moderators = t?.usmn ? JSON.parse(t.usmn) : []; } catch (_) { moderators = []; }
+                const isModerator = Array.isArray(moderators) && moderators.map(String).includes(uid);
+                return isOwner || isModerator;
+            });
+            if (!managed.length) {
+                // Select de negócios gerenciados para criar equipe (em)
+                const managedBiz = Array.isArray(userBusinessesData)
+                    ? userBusinessesData.filter(r => Number(r?.nv ?? 0) >= 3 && Number(r?.st ?? 1) === 1).map(r => r.em)
+                    : [];
+                let bizList = await fetchByIds(managedBiz, 'businesses');
+                bizList = Array.isArray(bizList) ? bizList : (bizList ? [bizList] : []);
+                const options = [`<option value="">Selecione um negócio</option>`]
+                    .concat(bizList.map(b => `<option value="${b.id}">${b.tt}</option>`)).join('');
+                const createTeamCard = UI.sectionCard(
+                    UI.row('new-team-name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-team-name" placeholder="Digite o nome da equipe" required>`, { top:true }) +
+                    UI.rowSelect('new-team-business','Negócio', options) +
+                    `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
+                        <button data-action="create-team" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
+                    </div>`
+                );
+                html += createTeamCard;
+                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center mt-3">Você ainda não gerencia nenhuma equipe.</div>`;
+            } else {
+                // Formulário de criação no topo (bloco/padrão depoimentos)
+                const managedBiz = Array.isArray(userBusinessesData)
+                    ? userBusinessesData.filter(r => Number(r?.nv ?? 0) >= 3 && Number(r?.st ?? 1) === 1).map(r => r.em)
+                    : [];
+                let bizList = await fetchByIds(managedBiz, 'businesses');
+                bizList = Array.isArray(bizList) ? bizList : (bizList ? [bizList] : []);
+                const options = [`<option value="">Selecione um negócio</option>`]
+                    .concat(bizList.map(b => `<option value="${b.id}">${b.tt}</option>`)).join('');
+                const createTeamCard = UI.sectionCard(
+                    UI.row('new-team-name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-team-name" placeholder="Digite o nome da equipe" required>`, { top:true }) +
+                    UI.rowSelect('new-team-business','Negócio', options) +
+                    `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
+                        <button data-action="create-team" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
+                    </div>`
+                );
+                html += createTeamCard;
+                const rows = managed.map(t => {
+                    const img = t?.im ? `data:image/png;base64,${t.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(t?.tt||'?').charAt(0)}`;
+                    return `
+                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${t.id}">
+                        <div class="col-span-1 p-3 flex justify-center">
+                            <img src="${img}" alt="${t?.tt || 'Equipe'}" class="w-7 h-7 rounded-full" />
+                        </div>
+                        <div class="col-span-5 p-3 truncate">${t?.tt || 'Equipe'}</div>
+                    </div>`;
+                }).join('');
+                html += UI.sectionCard(rows);
+            }
+        } else if (view === 'apps') {
+            // Lista de apps instalados do usuário logado
+            let userApps = await apiClient.post('/search', {
+                db: 'workz_apps',
+                table: 'gapp',
+                columns: ['ap'],
+                conditions: { us: currentUserData.id },
+                fetchAll: true
+            });
+            const appIds = Array.isArray(userApps?.data) ? userApps.data.map(o => o.ap) : [];
+            const apps = await fetchByIds(appIds, 'apps');
+            const list = Array.isArray(apps) ? apps : (apps ? [apps] : []);
+            if (!list.length) {
+                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Nenhum aplicativo instalado.</div>`;
+            } else {
+                const rows = list.map(app => {
+                    const img = app?.im ? `data:image/png;base64,${app.im}` : '/images/app-default.png';
+                    return `
+                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-app-id="${app.id}">
+                        <div class="col-span-1 p-3 flex justify-center">
+                            <img src="${img}" alt="${app?.tt || 'App'}" class="w-7 h-7 rounded-md" />
+                        </div>
+                        <div class="col-span-5 p-3 truncate">${app?.tt || 'App'}</div>
+                    </div>`;
+                }).join('');
+                html += UI.sectionCard(rows);
+            }
+        } else if (view === 'testimonials') {            
+            const res = await apiClient.post('/search', { db:'workz_data', table:'testimonials', columns:['*'], conditions: { recipient: data.id, recipient_type: type }, fetchAll:true });
             const list = Array.isArray(res?.data) ? res.data : [];
             if (!list.length) {
                 html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Não há depoimentos.</div>`;
@@ -848,6 +1082,47 @@ document.addEventListener('DOMContentLoaded', () => {
                 }));
                 html += cards.join('');
             }
+        } else if (view === 'billing') {
+            console.log(data, view, type);            
+            html += `<div class="bg-white rounded-2xl shadow-md p-4">Cobrança e Recebimento</div>`;
+        } else if (view === 'transactions') {
+            html += `<div class="bg-white rounded-2xl shadow-md p-4">Transações</div>`;
+        } else if (view === 'subscriptions') {
+            const conditions = (type === 'business') ? { em: data.id, subscription: 1 } : { us: data.id, subscription: 1 };
+
+            const exists = [{ table: 'apps', local: 'ap', remote: 'id'}];
+            const res = await apiClient.post('/search', { db:'workz_apps', table:'gapp', columns:['*'], conditions: conditions, exists: exists, fetchAll:true });                        
+            const list = Array.isArray(res?.data) ? res.data : [];
+
+            if (!list.length) {
+                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Não há assinaturas.</div>`;
+            } else {
+                const cards = await Promise.all(list.map(async t => {                    
+                    const app = await fetchByIds(t.ap, 'apps');
+                    const avatar = app?.im ? `data:image/png;base64,${app.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(app?.tt||'?').charAt(0)}`;
+                    const actionBtn = (t.end_date === null)
+                        ? `<button title="Cancelar" data-action="reject-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-b-2xl"><i class="fas fa-ban"></i> Cancelar Assinatura</button>`
+                        : `<button title="Renovar" data-action="revert-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-b-2xl"><i class="fas fa-undo"></i> Renovar Assinatura</button>`
+                    ;
+                    console.log(app);
+                    return `
+                        <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
+                            <div class="pt-4 px-4 col-span-4 flex items-center truncate">
+                                <img class="w-9 h-9 mr-2 rounded-md pointer" src="${avatar}" />
+                                <a class="font-semibold">${app?.tt}</a>
+                            </div>
+                            <div class="grid grid-cols-1 border-t p-4">                                
+                                ${ (app?.vl > 0) ? app?.vl : 'Gratuito' }
+                            </div>
+                            <div class="grid grid-cols-1 border-t">
+                                ${actionBtn}
+                            </div>
+                        </div>
+                    `;
+                }));
+                html += cards.join('');
+            }
+
         } else if (view === 'user-education') {
         html += `<div class="bg-white rounded-2xl shadow-md p-4">Education content</div>`;
         } else if (view === 'user-jobs') {
@@ -876,15 +1151,18 @@ document.addEventListener('DOMContentLoaded', () => {
             html += cards.join('');
             html += `<button id="add-job-btn" class="w-full py-2 px-4 bg-green-500 text-white font-semibold rounded-3xl hover:bg-green-700 transition-colors mt-4">Adicionar Experiência Profissional</button>`;
         }
+        html += UI.signature();
         return html;
     };
 
 
 
     async function appendWidget(type = 'people', gridList, count) {
-        
+                
         // people aqui são IDs; resolvemos antes de tudo
-        const resolved = await fetchByIds(gridList, type);            
+        let resolved = await fetchByIds(gridList, type);      
+        
+        resolved = (!Array.isArray(resolved)) ? [resolved] : resolved;        
 
         count = Number(count) ?? 0;
         const visorCount = count > 0 ? ` (${count})` : '';
@@ -894,7 +1172,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // monta o grid (ou o vazio) sem ternário com várias linhas
         let gridHtml = '';
         if (count > 0) {            
-            const cards = resolved.map(p => `
+            const cards = resolved?.map(p => `
             <div data-id="${p.id}" class="relative rounded-2xl overflow-hidden bg-gray-300 aspect-square cursor-pointer card-item">
                 <div class="absolute inset-0 bg-center bg-cover" style="background-image: url('${ (p.im) ? 'data:image/png;base64,' + p.im : `https://placehold.co/100x100/EFEFEF/333?text=${p.tt.charAt(0)}` }');"></div>
                 <div class="absolute h-full inset-x-0 bottom-0 bg-black/20 hover:bg-black/40 text-white font-medium px-2 py-1 truncate">
@@ -938,61 +1216,45 @@ document.addEventListener('DOMContentLoaded', () => {
     async function pageAction() {        
         const actionContainer = document.querySelector('#action-container');
         const isManager = memberLevel >= 3;
-        if (viewType === 'profile') {
+        if (viewType === ENTITY.PROFILE) {
             if (userPeople.includes(viewId)) {
-                actionContainer.insertAdjacentHTML('beforeend', `
-                    <button data-action="unfollow-user" class="cursor-pointer text-center rounded-3xl bg-red-400 hover:bg-red-600 text-white transition-colors truncate w-full p-2 mb-1"><a class="truncate">Deixar de Seguir</a></button>
-                `);
+                actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'unfollow-user', label: 'Deixar de Seguir', color: 'red' }));
             } else {
-                actionContainer.insertAdjacentHTML('beforeend', `
-                    <button data-action="follow-user" class="cursor-pointer text-center rounded-3xl bg-blue-400 hover:bg-blue-600 text-white transition-colors truncate w-full p-2 mb-1"><a class="truncate">Seguir</a></button>
-                `);
+                actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'follow-user', label: 'Seguir', color: 'blue' }));
             }
-        } else if (viewType === 'business') {
+        } else if (viewType === ENTITY.BUSINESS) {
             const isModerator = (viewData.usmn !== '') ? JSON.parse(viewData.usmn).map(String).includes(String(currentUserData.id)) : '';
             
             // Verifica se o usuário não é gestor na empresa ou moderador
             if(!isManager && !isModerator){                                
                 if (userBusinesses.includes(viewId)) {
                     if(memberStatus === 0) {
-                        actionContainer.insertAdjacentHTML('beforeend', `
-                            <button data-action="cancel-request" class="cursor-pointer text-center rounded-3xl bg-yellow-400 hover:bg-yellow-600 text-white transition-colors truncate w-full p-2 mb-1"><a class="truncate">Cancelar Pedido</a></button>
-                        `);
+                        actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'cancel-request', label: 'Cancelar Pedido', color: 'yellow' }));
                     } else {
-                        actionContainer.insertAdjacentHTML('beforeend', `
-                            <button data-action="cancel-access" class="cursor-pointer text-center rounded-3xl bg-red-400 hover:bg-red-600 text-white transition-colors truncate w-full p-2 mb-1"><a class="truncate">Cancelar Acesso</a></button>
-                        `);
-                    }                    
+                        actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'cancel-access', label: 'Cancelar Acesso', color: 'red' }));
+                    }
                 } else {
-                    actionContainer.insertAdjacentHTML('beforeend', `
-                        <button data-action="request-join" class="cursor-pointer text-center rounded-3xl bg-green-400 hover:bg-green-600 text-white transition-colors truncate w-full p-2 mb-1"><a class="truncate">Solicitar Acesso</a></button>
-                    `);
-                }                
+                    actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'request-join', label: 'Solicitar Acesso', color: 'green' }));
+                }
             } else {
                 actionContainer.insertAdjacentHTML('beforeend', `
                     <li><button data-sidebar-action="page-settings" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-cog fa-stack-1x text-gray-700"></i></span><span class="truncate">Ajustes</a></span></li>
                 `);
             }
                         
-        } else if (viewType === 'team') {                                    
+        } else if (viewType === ENTITY.TEAM) {                                    
             const isModerator = (viewData.usmn !== '') ? JSON.parse(viewData.usmn).map(String).includes(String(currentUserData.id)) : '';
 
             // Verifica se o usuário não é gestor na empresa ou moderador
             if (!isManager && !isModerator) {
                 if (userTeams.includes(viewId)) {
                     if(memberStatus === 0) {
-                        actionContainer.insertAdjacentHTML('beforeend', `
-                            <button data-action="cancel-request" class="cursor-pointer text-center rounded-3xl bg-yellow-400 hover:bg-yellow-600 text-white transition-colors truncate w-full p-2 mb-1"><a class="truncate">Cancelar Pedido</a></button>
-                        `);
+                        actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'cancel-request', label: 'Cancelar Pedido', color: 'yellow' }));
                     } else {
-                        actionContainer.insertAdjacentHTML('beforeend', `
-                            <button data-action="cancel-access" class="cursor-pointer text-center rounded-3xl bg-red-400 hover:bg-red-600 text-white transition-colors truncate w-full p-2 mb-1"><a class="truncate">Cancelar Acesso</a></button>
-                        `);
+                        actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'cancel-access', label: 'Cancelar Acesso', color: 'red' }));
                     }
                 } else {
-                    actionContainer.insertAdjacentHTML('beforeend', `
-                        <button data-action="request-join" class="cursor-pointer text-center rounded-3xl bg-green-400 hover:bg-grenn-600 text-white transition-colors truncate w-full p-2 mb-1"><a class="truncate">Solicitar Acesso</a></button>
-                    `);
+                    actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'request-join', label: 'Solicitar Acesso', color: 'green' }));
                 }
             } else {
                 actionContainer.insertAdjacentHTML('beforeend', `
@@ -1007,9 +1269,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const standardMenu = document.querySelector('#standard-menu');
 
         if (viewType === 'dashboard') {
-            customMenu.insertAdjacentHTML('beforeend', `<li><button data-action="my-profile" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-address-card fa-stack-1x text-gray-700"></i></span><a class="truncate">Meu Perfil</a></button></li>`);
+            customMenu.insertAdjacentHTML('beforeend', UI.menuItem({ action: 'my-profile', icon: 'fa-address-card', label: 'Meu Perfil' }));
         } else {
-            if (viewType === 'profile' && currentUserData.id === viewId) {
+            if (viewType === ENTITY.PROFILE && currentUserData.id === viewId) {
                 customMenu.insertAdjacentHTML('beforeend', `
                     <li><button data-sidebar-action="page-settings" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-cog fa-stack-1x text-gray-700"></i></span><span class="truncate">Ajustes</a></span></li>
                 `);
@@ -1019,59 +1281,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 `);
                 pageAction();
             }
-            customMenu.insertAdjacentHTML('beforeend', `
-                <li><button data-action="dashboard" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-home fa-stack-1x text-gray-700"></i></span><a class="truncate">Início</a></button></li>                
-                <li><button data-action="share-page" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-share fa-stack-1x text-gray-700"></i></span><a class="truncate">Compartilhar</a></button></li>                
-            `);
+            customMenu.insertAdjacentHTML('beforeend',
+                UI.menuItem({ action: 'dashboard',  icon: 'fa-home',  label: 'Início' }) +
+                UI.menuItem({ action: 'share-page', icon: 'fa-share', label: 'Compartilhar' })
+            );
         } 
         
-        standardMenu.parentNode.addEventListener('click', (e) => {
-            e.preventDefault();
-            const target = e.target.closest('button');
-            // Ações da navegação principal (fora do #custom-menu)
-            if (target.matches('button[href="#people"]')) {
-                history.pushState({}, '', '/people');
-                $('#loading').fadeIn();
-                loadPage();
-            } else if (target.matches('button[href="#businesses"]')) {
-                history.pushState({}, '', '/businesses');
-                $('#loading').fadeIn();
-                loadPage();
-            } else if (target.matches('button[href="#teams"]')) {
-                history.pushState({}, '', '/teams');
-                $('#loading').fadeIn();
-                loadPage();
-            }    
-        });
-
-        customMenu.parentNode.addEventListener('click', (e) => {
-            e.preventDefault();
-            const target = e.target.closest('button');
-
-            // Ações do menu customizável (dentro do #custom-menu)
-            const action = target.dataset.action;
-            if (!action) return;
-
-            const contextId = (viewType === 'dashboard') ? currentUserData.id : viewId;
-            const contextType = viewType;
-
-            switch (action) {
-                case 'dashboard':
-                    history.pushState({}, '', '/');
-                    $('#loading').fadeIn();
-                    loadPage();
-                    break;                
-                case 'my-profile':
-                    history.pushState({}, '', `/profile/${contextId}`);
-                    $('#loading').fadeIn(); 
-                    loadPage();
-                    break;
-            }
-
-        });
-         
-        // Gatilhos de botões
-        document.getElementById('logout-btn-sidebar').addEventListener('click', handleLogout);
+        // Delegação global do roteador cobre cliques com data-action
     }
 
     function appendFeed ( items ) {
@@ -1086,6 +1302,219 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('');
 
         timeline.insertAdjacentHTML('beforeend', html);
+    }
+
+    // Exibição de loading (abstrai jQuery e permite trocar no futuro)
+    function showLoading() { try { $('#loading').fadeIn(); } catch(e) { const el = document.getElementById('loading'); if (el) el.style.display = 'block'; } }
+    function hideLoading() { try { $('#loading').fadeOut(); } catch(e) { const el = document.getElementById('loading'); if (el) el.style.display = 'none'; } }
+
+    // Navegação centralizada (mantém padrão e facilita manutenção)
+    function navigateTo(path) {
+        history.pushState({}, '', path);
+        showLoading();
+        loadPage();
+    }
+
+    // Snapshot simples do estado (facilita roteadores e handlers)
+    function getState() {
+        return {
+            user: currentUserData,
+            view: { type: viewType, id: viewId, data: viewData },
+            memberships: { people: userPeople, businesses: userBusinesses, teams: userTeams, level: memberLevel, status: memberStatus }
+        };
+    }
+
+    // Compartilhar página atual
+    async function sharePage() {
+        const url = window.location.href;
+        try {
+            if (navigator.share) {
+                await navigator.share({ title: document.title || 'Workz!', url });
+                return true;
+            }
+        } catch (_) {}
+        try {
+            await navigator.clipboard.writeText(url);
+            alert('Link copiado!');
+            return true;
+        } catch (_) {
+            prompt('Copie o link da página:', url);
+            return false;
+        }
+    }
+
+    // Helpers de mapeamento de condições por tipo de view
+    function getPostConditions(type, id) {
+        const base = { st: 1 };
+        if (type === ENTITY.PROFILE) {
+            return { ...base, us: id, em: 0, cm: 0 };
+        }
+        if (type === ENTITY.BUSINESS) {
+            return { ...base, em: id };
+        }
+        if (type === ENTITY.TEAM) {
+            return { ...base, cm: id };
+        }
+        return base;
+    }
+
+    function getFollowersConditions(type, id) {
+        if (type === ENTITY.PROFILE) return { s1: id };
+        return null;
+    }
+
+    // Roteador de ações centralizado
+    const ACTIONS = {
+        'dashboard': ({ state }) => navigateTo('/'),
+        'my-profile': ({ state }) => navigateTo(`/profile/${state.user?.id}`),
+        'share-page': () => sharePage(),
+        'list-people': () => navigateTo('/people'),
+        'list-businesses': () => navigateTo('/businesses'),
+        'list-teams': () => navigateTo('/teams'),
+        'logout': () => handleLogout(),
+        // Criação (negócio/equipe)
+        'create-business': async () => {
+            const name = (document.getElementById('new-business-name')?.value || '').trim();
+            if (!name) { alert('Informe o nome do negócio.'); return; }
+            showLoading();
+            try {
+                const res = await apiClient.post('/insert', {
+                    db: 'workz_companies',
+                    table: 'companies',
+                    data: { tt: name, us: currentUserData.id, st: 1 }
+                });
+                // Recarrega a subview
+                const sidebarContent = document.querySelector('.sidebar-content');
+                await renderTemplate(sidebarContent, templates.sidebarPageSettings, { view: 'businesses', data: currentUserData, origin: 'settings' });
+            } finally { hideLoading(); }
+        },
+        'create-team': async () => {
+            const name = (document.getElementById('new-team-name')?.value || '').trim();
+            const em   = (document.getElementById('new-team-business')?.value || '').trim();
+            if (!name || !em) { alert('Informe o nome da equipe e o negócio.'); return; }
+            showLoading();
+            try {
+                const res = await apiClient.post('/insert', {
+                    db: 'workz_companies',
+                    table: 'teams',
+                    data: { tt: name, us: currentUserData.id, em: Number(em), st: 1 }
+                });
+                const sidebarContent = document.querySelector('.sidebar-content');
+                await renderTemplate(sidebarContent, templates.sidebarPageSettings, { view: 'teams', data: currentUserData, origin: 'settings' });
+            } finally { hideLoading(); }
+        },
+        // Ações sociais: seguir/desseguir pessoa (tabela workz_data.usg)
+        'follow-user': async ({ state }) => {
+            const follower = state.user?.id;
+            const followed = state.view?.id;
+            if (!follower || !followed) return;
+            showLoading();
+            try {
+                await apiClient.post('/insert', { db: 'workz_data', table: 'usg', data: { s0: follower, s1: followed } });
+                loadPage();
+            } finally { hideLoading(); }
+        },
+        'unfollow-user': async ({ state }) => {
+            const follower = state.user?.id;
+            const followed = state.view?.id;
+            if (!follower || !followed) return;
+            showLoading();
+            try {
+                await apiClient.post('/delete', { db: 'workz_data', table: 'usg', conditions: { s0: follower, s1: followed } });
+                loadPage();
+            } finally { hideLoading(); }
+        },
+        // Acesso a negócios/equipes
+        'request-join': async ({ state }) => {
+            const { table, idKey } = getMembershipMeta(state.view?.type);
+            if (!table || !idKey) return;
+            const payloadKeys = { us: state.user?.id, [idKey]: state.view?.id };
+            showLoading();
+            try {
+                const exists = await apiClient.post('/search', { db: 'workz_companies', table, columns: ['id','st'], conditions: payloadKeys, fetchAll: true, limit: 1 });
+                if (Array.isArray(exists?.data) && exists.data.length) {
+                    await apiClient.post('/update', { db: 'workz_companies', table, data: { st: 0 }, conditions: payloadKeys });
+                } else {
+                    await apiClient.post('/insert', { db: 'workz_companies', table, data: { ...payloadKeys, st: 0 } });
+                }
+                loadPage();
+            } finally { hideLoading(); }
+        },
+        'cancel-request': async ({ state }) => {
+            const { table, idKey } = getMembershipMeta(state.view?.type);
+            if (!table || !idKey) return;
+            const keys = { us: state.user?.id, [idKey]: state.view?.id, st: 0 };
+            showLoading();
+            try {
+                await apiClient.post('/delete', { db: 'workz_companies', table, conditions: keys });
+                loadPage();
+            } finally { hideLoading(); }
+        },
+        'cancel-access': async ({ state }) => {
+            const { table, idKey } = getMembershipMeta(state.view?.type);
+            if (!table || !idKey) return;
+            const keys = { us: state.user?.id, [idKey]: state.view?.id };
+            showLoading();
+            try {
+                // Define status inativo (0). Se preferir remover por completo, troque por /delete
+                await apiClient.post('/update', { db: 'workz_companies', table, data: { st: 0 }, conditions: keys });
+                loadPage();
+            } finally { hideLoading(); }
+        },
+        // Depoimentos (testimonials)
+        'accept-testmonial': async ({ button }) => {
+            const id = button?.dataset?.id;
+            if (!id) return;
+            await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 1 }, conditions: { id } });
+            loadPage();
+        },
+        'reject-testmonial': async ({ button }) => {
+            const id = button?.dataset?.id;
+            if (!id) return;
+            await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 2 }, conditions: { id } });
+            loadPage();
+        },
+        'revert-testmonial': async ({ button }) => {
+            const id = button?.dataset?.id;
+            if (!id) return;
+            await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 0 }, conditions: { id } });
+            loadPage();
+        },
+        // Jobs (experiências)
+        'delete-job': async ({ button }) => {
+            const id = button?.dataset?.id;
+            if (!id) return;
+            showLoading();
+            try {
+                await apiClient.post('/delete', { db: 'workz_companies', table: 'employees', conditions: { id } });
+                loadPage();
+            } finally { hideLoading(); }
+        },
+        'edit-job': ({ button }) => {
+            const id = button?.dataset?.id;
+            if (!id) return;
+            const form = document.querySelector(`.job-form[data-job-id="${id}"]`);
+            if (!form) return;
+            form.dataset.readonlyMode = '0';
+            form.querySelectorAll('input,select,textarea').forEach(el => el.disabled = false);
+        }
+    };
+
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const action = btn.dataset.action;
+        const handler = ACTIONS[action];
+        if (!handler) return;
+        e.preventDefault();
+        handler({ event: e, button: btn, state: getState() });
+    });
+
+    // Retorna metadados da tabela de associação conforme o tipo de página
+    function getMembershipMeta(type) {
+        if (type === ENTITY.BUSINESS) return { table: 'employees', idKey: 'em' };
+        if (type === ENTITY.TEAM) return { table: 'teams_users', idKey: 'cm' };
+        return { table: null, idKey: null };
     }
 
     // ===================================================================
@@ -1189,13 +1618,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     }
 
-    function toggleSidebar(el = null, toggle = true) {
+    async function toggleSidebar(el = null, toggle = true) {
 
         if (sidebarWrapper.innerHTML.trim() !== '') {
             sidebarWrapper.innerHTML = '';
         }
 
-        console.log(el);
+        //
 
         if (toggle === true) {
             sidebarWrapper.classList.toggle('w-0');
@@ -1210,289 +1639,138 @@ document.addEventListener('DOMContentLoaded', () => {
             const sidebarContent = document.querySelector('.sidebar-content');
             const action = el.dataset.sidebarAction;            
             if (action === 'settings') {
-                renderTemplate(sidebarContent, templates.sidebarMain, { data: currentUserData });
+                // Página principal de configurações (atalhos gerais)
+                SidebarNav.setMount(sidebarContent);
+                SidebarNav.resetRoot(currentUserData);
+                renderTemplate(sidebarContent, templates.sidebarPageSettings, { data: currentUserData, origin: 'stack' }, () => {});
+
             } else if (action === 'page-settings') {
-                const pageSettingsView = (el.parentNode.dataset.sidebarType === 'current-user') ? 'profile' : viewType;
-                const pageSettingsData = (el.parentNode.dataset.sidebarType === 'current-user') ? currentUserData : viewData;
-
-                renderTemplate(sidebarContent, templates.sidebarPageSettings, {                    
-                    view: pageSettingsView,
-                    data: pageSettingsData
-                }, () => {
-                    const settingsForm = document.querySelector('#settings-form');
-                    if (!settingsForm) return;
-                    //Botões de Adição / Remoção
-                    settingsForm?.addEventListener('click', (e) => {
-                        const addBtn = e.target.closest('#add-input-button');
-                        const rmBtn  = e.target.closest('#remove-input-button');
-                        if (!addBtn && !rmBtn) return;
-                        e.preventDefault();
-                        const container = settingsForm.querySelector('#input-container');
-                        if (!container) return;
-                        if (addBtn) {
-                            const last = container.lastElementChild;
-                            const lastId = last ? parseInt(last.dataset.inputId || '-1', 10) : -1;
-                            const newId = Number.isFinite(lastId) ? lastId + 1 : 0;
-                            let newRow;
-                            if (last) {
-                                newRow = last.cloneNode(true);
-                                newRow.dataset.inputId = String(newId);
-                                newRow.querySelectorAll('input, select, textarea').forEach((el) => {
-                                    if (el.tagName === 'SELECT') el.selectedIndex = 0;
-                                    else el.value = '';
-                                    if (el.id) {
-                                        const base = el.id.replace(/-\d+$/, '');
-                                        el.id = `${base}-${newId}`;
-                                    }
-                                });
-                                newRow.querySelectorAll('label[for]').forEach((lab) => {
-                                    const base = lab.htmlFor?.replace(/-\d+$/, '') ?? '';
-                                    if (base) lab.htmlFor = `${base}-${newId}`;
-                                });
-                            } else {
-                                return;
-                            }                            
-                            newRow.style.willChange = 'height, opacity, transform';
-                            container.appendChild(newRow);
-                            enterRow(newRow);
-                            fixRoundings(container);
+                // Entrou em Ajustes a partir da página atual (fora do stack ou entidade corrente)
+                SidebarNav.setMount(sidebarContent);
+                SidebarNav.resetRoot(currentUserData);
+                let pageSettingsView = (el.parentNode.dataset.sidebarType === 'current-user') ? ENTITY.PROFILE : viewType;
+                let pageSettingsData = (el.parentNode.dataset.sidebarType === 'current-user') ? currentUserData : viewData;
+                SidebarNav.push({ view: pageSettingsView, title: (pageSettingsData?.tt || 'Ajustes'), payload: { data: pageSettingsData, type: pageSettingsView } });
+                // listeners complementares (contatos etc.)
+                const settingsForm = document.querySelector('#settings-form');
+                if (!settingsForm) return;
+                //Botões de Adição / Remoção
+                settingsForm?.addEventListener('click', (e) => {
+                    const addBtn = e.target.closest('#add-input-button');
+                    const rmBtn  = e.target.closest('#remove-input-button');
+                    if (!addBtn && !rmBtn) return;
+                    e.preventDefault();
+                    const container = settingsForm.querySelector('#input-container');
+                    if (!container) return;
+                    if (addBtn) {
+                        const last = container.lastElementChild;
+                        const lastId = last ? parseInt(last.dataset.inputId || '-1', 10) : -1;
+                        const newId = Number.isFinite(lastId) ? lastId + 1 : 0;
+                        let newRow;
+                        if (last) {
+                            newRow = last.cloneNode(true);
+                            newRow.dataset.inputId = String(newId);
+                            newRow.querySelectorAll('input, select, textarea').forEach((el) => {
+                                if (el.tagName === 'SELECT') el.selectedIndex = 0;
+                                else el.value = '';
+                                if (el.id) {
+                                    const base = el.id.replace(/-\d+$/, '');
+                                    el.id = `${base}-${newId}`;
+                                }
+                            });
+                            newRow.querySelectorAll('label[for]').forEach((lab) => {
+                                const base = lab.htmlFor?.replace(/-\d+$/, '') ?? '';
+                                if (base) lab.htmlFor = `${base}-${newId}`;
+                            });
+                        } else {
+                            return;
+                        }                            
+                        newRow.style.willChange = 'height, opacity, transform';
+                        container.appendChild(newRow);
+                        enterRow(newRow);
+                        fixRoundings(container);
+                    }
+                    if (rmBtn) {
+                        if (container.children.length > 1) {
+                            const row = container.lastElementChild;
+                            row.style.willChange = 'height, opacity, transform';
+                            leaveRow(row, () => {
+                                row.remove();
+                                fixRoundings(container);
+                            });
                         }
-                        if (rmBtn) {
-                            if (container.children.length > 1) {
-                                const row = container.lastElementChild;
-                                row.style.willChange = 'height, opacity, transform';
-                                leaveRow(row, () => {
-                                    row.remove();
-                                    fixRoundings(container);
-                                });
-                            }
-                        }
-                    });                    
-                    document?.querySelector("#business-shareholding")?.addEventListener('click', (e) => {
-                        renderTemplate(sidebarContent, templates.sidebarPageSettings, {
-                            view: 'business-shareholding',
-                            data: pageSettingsData
-                        }, () => {
-                             // ---------- Estado ----------
-                            let nextId = 1;
-                            /** Estrutura: [{ id, cnpj, children: [...] }] */
-                            let roots = [];
-
-                            // ---------- Helpers ----------
-                            const onlyDigits = (s) => (s || '').replace(/\D/g, '');
-                            const formatCNPJ = (digits) => {
-                            const d = onlyDigits(digits).slice(0,14);
-                            if (!d) return '';
-                            const p = [
-                                d.slice(0,2),
-                                d.slice(2,5),
-                                d.slice(5,8),
-                                d.slice(8,12),
-                                d.slice(12,14)
-                            ];
-                            let out = '';
-                            if (p[0]) out = p[0];
-                            if (p[1]) out += '.' + p[1];
-                            if (p[2]) out += '.' + p[2];
-                            if (p[3]) out += '/' + p[3];
-                            if (p[4]) out += '-' + p[4];
-                            return out;
-                            };
-                            const isValidCNPJLen = (digits) => onlyDigits(digits).length === 14;
-
-                            const newNode = (cnpj='') => ({ id: nextId++, cnpj, children: [] });
-
-                            function findParentAndIndex(id, nodes=roots, parent=null) {
-                                for (let i=0;i<nodes.length;i++){
-                                    const n = nodes[i];
-                                    if (n.id === id) return { parent, nodes, index:i, node:n };
-                                    const deep = findParentAndIndex(id, n.children, n);
-                                    if (deep) return deep;
-                                }
-                                return null;
-                            }
-                            function addChild(id){
-                                const info = findParentAndIndex(id);
-                                if (!info) return;
-                                info.node.children.push(newNode(''));
-                                render();
-                            }
-                            function removeNode(id){
-                                const info = findParentAndIndex(id);
-                                if (!info) return;
-                                info.nodes.splice(info.index, 1);
-                                render();
-                            }
-                            function updateCNPJ(id, value){
-                                const info = findParentAndIndex(id);
-                                if (!info) return;
-                                info.node.cnpj = formatCNPJ(value);                                
-                            }
-            
-                            const treeEl = document.getElementById('tree');
-
-                            function render(){
-                                treeEl.innerHTML = '';
-                                roots.forEach(node => {
-                                    treeEl.appendChild(renderNode(node, 0));
-                                });
-                            }
-
-                            function renderNode(node, depth){
-                                const wrapper = document.createElement('div');
-                                wrapper.className = (depth === 0) ? "ml-0" : "ml-3";
-                                const row = document.createElement('div');
-                                row.className = "flex items-center gap-2";
-                                const input = document.createElement('input');
-                                input.type = "text";
-                                input.value = node.cnpj || '';
-                                input.placeholder = "00.000.000/0000-00";
-                                input.dataset.id = node.id;
-                                input.className = "flex-1 rounded-2xl p-4 focus:outline-none";
-                                input.addEventListener('input', e => {
-                                    updateCNPJ(node.id, e.target.value);
-                                    e.target.value = formatCNPJ(e.target.value);
-                                });
-                                const addBtn = document.createElement('button');
-                                addBtn.textContent = '+';
-                                addBtn.className = "w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-2xl font-bold";
-                                addBtn.addEventListener('click', (e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    addChild(node.id)
-                                });
-                                const rmBtn = document.createElement('button');
-                                rmBtn.textContent = '-';
-                                rmBtn.className = "w-9 h-9 rounded-full bg-gray-100 hover:bg-gray-200 text-2xl font-bold";
-                                rmBtn.addEventListener('click', (e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    removeNode(node.id)
-                                });
-                                row.appendChild(input);
-                                row.appendChild(rmBtn);
-                                row.appendChild(addBtn);
-                                row.appendChild(document.createElement('div')); // spacer
-                                wrapper.appendChild(row);
-                                if(node.children?.length){
-                                    const childrenWrap = document.createElement('div');
-                                    childrenWrap.className = "ml-3 border-l border-gray-200";
-                                    node.children.forEach(ch=>{
-                                    childrenWrap.appendChild(renderNode(ch, depth+1));
-                                    });
-                                    wrapper.appendChild(childrenWrap);
-                                }
-                                return wrapper;
-                            }
-
-
-                            // ---------- Inicialização ----------
-                            // Exemplo inicial (opcional): uma raiz vazia para começar
-                            roots.push(newNode(''));
-                            render();
-
-                            // ---------- Controles globais ----------
-                            document.getElementById('add-root').addEventListener('click', ()=>{
-                                roots.push(newNode(''));
-                                render();
-                            });
-
-                            document.getElementById('submit').addEventListener('click', ()=>{
-                                // Validação básica (opcional): todos preenchidos e 14 dígitos
-                                const allNodes = [];
-                                (function collect(nodes){
-                                    nodes.forEach(n=>{
-                                    allNodes.push(n);
-                                    collect(n.children);
-                                    });
-                                })(roots);
-
-                                const invalid = allNodes.filter(n=> !isValidCNPJLen(n.cnpj));
-                                if (invalid.length){
-                                    alert('Há CNPJ(s) incompletos. Preencha com 14 dígitos (ex.: 12.345.678/0001-90).');
-                                    return;
-                                }
-
-                                // Serializa removendo ids internos
-                                const serialize = (nodes)=> nodes.map(n=> ({
-                                    cnpj: onlyDigits(n.cnpj).replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5"),
-                                    children: serialize(n.children)
-                                }));
-
-                                const json = JSON.stringify(serialize(roots), null, 2);
-                                document.getElementById('output').value = json;
-                                // Scroll suave até a saída
-                                document.getElementById('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
-                            });
-                        });
-                    });
-                    document?.querySelector("#employees")?.addEventListener('click', (e) => {
-                        renderTemplate(sidebarContent, templates.sidebarPageSettings, {
-                            view: 'employees',
-                            data: pageSettingsData,
-                            type: pageSettingsView
-                        }, () => {
-
-                        });
-                    });
-                    document?.querySelector("#user-jobs")?.addEventListener('click', (e) => {
-                        renderTemplate(sidebarContent, templates.sidebarPageSettings, {
-                            view: 'user-jobs',
-                            data: pageSettingsData
-                        }, () => {
-                        
-                            sidebarContent.addEventListener('change', (e) => {
-                                e.preventDefault();
-                                const sel = e.target.closest('select[name="type"]');
-                                if (!sel) return;
-                                const form = sel.closest('.job-form');
-                                const disabled = sel.disabled || form?.dataset.readonlyMode === '1';
-                                const currentExtraValue = form?.querySelector('[name="third_party"]')?.value || form?.dataset.thirdParty || '';
-                                renderOutsourcedRow(sel, { selected: currentExtraValue, disabled });
-                            });                            
-
-                            sidebarContent.addEventListener('submit', async (e) => {
-                                if (e.target.classList.contains('job-form')) {
-                                    e.preventDefault();
-                                    const messageContainer = document.getElementById('message');
-                                    const form = new FormData(e.target);
-                                    const data = Object.fromEntries(form.entries());                                      
-                                    data.visibility = e.target.querySelector(`[name="visibility"]`).checked ? 1 : 0;
-                                    data.st = e.target.querySelector(`[name="st"]`).checked ? 1 : 0;                                
-                                    if (data) {
-                                        const result = await apiClient.post('/update', {
-                                            db: 'workz_companies',
-                                            table: 'employees',
-                                            data: data,
-                                            conditions: {
-                                                id: e.target.dataset.jobId
-                                            }
-                                        });
-                                        if (result) {
-                                            renderTemplate(messageContainer, templates.message, { message: 'Experiência profissional atualizada com sucesso!', type: 'success' });
-                                        } else {
-                                            renderTemplate(messageContainer, templates.message, { message: 'Falha na atualização', type: 'error' });                                            
-                                        }
-                                    }                                    
-                                }
-                            });
-
-                            initOutsourcedUI(document.querySelector('.sidebar-content'));
-                        });
-                    });
-                    document?.querySelector("#testmonials")?.addEventListener('click', (e) => {
-                        renderTemplate(sidebarContent, templates.sidebarPageSettings, {
-                            view: 'testmonials',                            
-                            data: pageSettingsData,
-                            type: pageSettingsView
-                        }, () => {                          
-                        });
-                    });
-                    document?.getElementById('settings-form')?.addEventListener('submit', handleUpdate);
-                    initMasks();
+                    }
+                });                    
+                document?.querySelector("#business-shareholding")?.addEventListener('click', (e) => {
+                    renderTemplate(sidebarContent, templates.sidebarPageSettings, {
+                        view: 'business-shareholding',
+                        data: pageSettingsData
+                    }, () => {});
                 });
-            }
+            };
+        };            
+    };
+    
+    // Anexa listeners necessários para interações dentro de uma subview de ajustes
+    function wireSidebarPageActions(sidebarContent, pageSettingsData, pageSettingsView) {
+        const settingsForm = document.querySelector('#settings-form');
+        if (settingsForm) {
+            if (settingsForm._clickHandler) settingsForm.removeEventListener('click', settingsForm._clickHandler);
+            const clickHandler = (e) => {
+                const addBtn = e.target.closest('#add-input-button');
+                const rmBtn  = e.target.closest('#remove-input-button');
+                if (!addBtn && !rmBtn) return;
+                e.preventDefault();
+                const container = settingsForm.querySelector('#input-container');
+                if (!container) return;
+                if (addBtn) {
+                    const last = container.lastElementChild;
+                    const lastId = last ? parseInt(last.dataset.inputId || '-1', 10) : -1;
+                    const newId = Number.isFinite(lastId) ? lastId + 1 : 0;
+                    if (!last) return;
+                    const newRow = last.cloneNode(true);
+                    newRow.dataset.inputId = String(newId);
+                    newRow.querySelectorAll('input, select, textarea').forEach((el) => {
+                        if (el.tagName === 'SELECT') el.selectedIndex = 0; else el.value = '';
+                        if (el.id) { const base = el.id.replace(/-\d+$/, ''); el.id = `${base}-${newId}`; }
+                    });
+                    newRow.querySelectorAll('label[for]').forEach((lab) => {
+                        const base = lab.htmlFor?.replace(/-\d+$/, '') ?? '';
+                        if (base) lab.htmlFor = `${base}-${newId}`;
+                    });
+                    newRow.style.willChange = 'height, opacity, transform';
+                    container.appendChild(newRow);
+                    enterRow(newRow);
+                    fixRoundings(container);
+                }
+                if (rmBtn && container.children.length > 1) {
+                    const row = container.lastElementChild;
+                    row.style.willChange = 'height, opacity, transform';
+                    leaveRow(row, () => { row.remove(); fixRoundings(container); });
+                }
+            };
+            settingsForm.addEventListener('click', clickHandler);
+            settingsForm._clickHandler = clickHandler;
         }
+
+        // atalhos da subview (via stack)
+        if (sidebarContent._shortcutsHandler) sidebarContent.removeEventListener('click', sidebarContent._shortcutsHandler);
+        const shortcutsHandler = (e) => {
+            const shortcut = e.target.closest('#employees, #user-jobs, #testimonials, #billing, #transactions, #subscriptions');
+            if (!shortcut) return;
+            const id = shortcut.id;
+            const title = pageSettingsData?.tt || 'Ajustes';
+            if (typeof SidebarNav !== 'undefined') {
+                SidebarNav.push({ view: id, title, payload: { data: pageSettingsData, type: pageSettingsView } });
+            } else {
+                renderTemplate(sidebarContent, templates.sidebarPageSettings, { view: id, data: pageSettingsData, type: pageSettingsView, origin: 'page' });
+            }
+        };
+        sidebarContent.addEventListener('click', shortcutsHandler);
+        sidebarContent._shortcutsHandler = shortcutsHandler;
+
+        document?.getElementById('settings-form')?.addEventListener('submit', handleUpdate);
+        initMasks();
     }
     
     // OUTRAS FUNÇÕES
@@ -1535,38 +1813,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentExtraValue = form?.querySelector('[name="third_party"]')?.value || form?.dataset.thirdParty || '';
             renderOutsourcedRow(sel, { selected: currentExtraValue, disabled });
         });        
-    }
-
-
-    // ===================================================================
-    // BUSCAS BÁSICAS DE DADOS
-    // ===================================================================
-
-    const toInputDate = (d) => {
-        if (!d) return '';
-        const dt = new Date(d);
-        if (Number.isNaN(dt.getTime())) return '';
-        const y = dt.getFullYear();
-        const m = String(dt.getMonth() + 1).padStart(2, '0');
-        const day = String(dt.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-    };
-    
-    async function getBusinessName(em = null) {
-        if (em == null) return '';
-        const res = await apiClient.post('/search', {
-            db: 'workz_companies',
-            table: 'companies',
-            columns: ['tt'],
-            conditions: { id: em },
-            fetchAll: false
-        });
-
-        // Se o seu backend retorna { data: { tt: '...' } }:
-        return res?.data?.tt ?? '';
-
-        // Se retorna { data: [ { tt: '...' } ] }:
-        //return Array.isArray(res?.data) ? (res.data[0]?.tt ?? '') : (res?.data?.tt ?? '');
     }
 
     // ===================================================================
@@ -1730,14 +1976,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }); 
             list = list.data;
             renderTemplate(workzContent, templates.listView, list, async () => {
-                workzContent.querySelectorAll('.list-item').forEach(item => {
-                    item.addEventListener('click', async () => {
-                        history.pushState({}, '', `/${ entityMap[listType].url + item.dataset.itemId }`);
-                        $('#loading').fadeIn();
-                        loadPage();                        
-                    });
-                });
-                $('#loading').fadeOut();
+                // Delegação única para os itens da lista
+                const handler = (e) => {
+                    const item = e.target.closest('.list-item');
+                    if (!item) return;
+                    navigateTo(`/${ entityMap[listType].url + item.dataset.itemId }`);
+                };
+                workzContent.addEventListener('click', handler, { once: true });
+                hideLoading();
             });
         };
 
@@ -1823,21 +2069,21 @@ document.addEventListener('DOMContentLoaded', () => {
             
             let entityMap = {};
             let entitiesToFetch = [];
-            if (viewType === 'profile') {
+            if (viewType === ENTITY.PROFILE) {
                 entityMap = {
                     people:     { db: 'workz_data',      table: 'usg',             target: 's1', conditions: { s0: entityId }, mainDb: 'workz_data', mainTable: 'hus' },
                     businesses: { db: 'workz_companies', table: 'employees',       target: 'em', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'companies' },
                     teams:      { db: 'workz_companies', table: 'teams_users',     target: 'cm', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'teams' },
                 }; 
                 entitiesToFetch = ['people', 'businesses', 'teams'];                
-            } else if (viewType === 'business') {
+            } else if (viewType === ENTITY.BUSINESS) {
                 entityMap = {
                     people:     { db: 'workz_companies', table: 'employees',       target: 'us', conditions: { em: entityId }, mainDb: 'workz_data', mainTable: 'hus' },                    
                     teams:      { db: 'workz_companies', table: 'teams',           target: 'id', conditions: { em: entityId, st: 1 } },
                     businesses: { db: 'workz_companies', table: 'employees',       target: 'em', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'companies' },
                 }; 
                 entitiesToFetch = ['people', 'teams'];
-            } else if  (viewType === 'team') {
+            } else if  (viewType === ENTITY.TEAM) {
                 entityMap = {
                     people:     { db: 'workz_companies', table: 'teams_users',     target: 'us', conditions: { cm: entityId }, mainDb: 'workz_data', mainTable: 'hus' },
                     teams:      { db: 'workz_companies', table: 'teams_users',     target: 'cm', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'teams' }
@@ -1846,7 +2092,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Define o tipo de entidade
-            let entityType = (viewType === 'profile') ? 'people' : (viewType === 'business')   ? 'businesses' : 'teams';
+            let entityType = (viewType === ENTITY.PROFILE) ? 'people' : (viewType === ENTITY.BUSINESS)   ? 'businesses' : 'teams';
 
             // Busca dados da entidade
             entityData = await apiClient.post('/search', {
@@ -1926,18 +2172,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
             viewData = entityData.data[0];
 
-            let postConditions = { st: 1 };
-            let followersConditions = {};
-            if (viewType === 'profile') {
-                postConditions.us = entityId;
-                postConditions.em = 0;
-                postConditions.cm = 0;
-                followersConditions.s1 = entityId;
-            } else if (viewType === 'business') {
-                postConditions.em = entityId;
-            } else if (viewType === 'team') {
-                postConditions.cm = entityId;
-            }
+            const postConditions = getPostConditions(viewType, entityId);
+            const followersConditions = getFollowersConditions(viewType, entityId);
 
             // Obtém o número de publicações
             let postsCount = await apiClient.post('/count', {
@@ -1948,13 +2184,13 @@ document.addEventListener('DOMContentLoaded', () => {
            
             results.postsCount = postsCount.count;
 
-            const needFollowers = Object.keys(followersConditions).length > 0;
+            const needFollowers = !!followersConditions;
             // Só chama a contagem de seguidores se houver condições
             if (needFollowers) {
                 const followersCount = await apiClient.post('/count', {
                     db: 'workz_data',
                     table: 'usg',
-                    conditions: { s1: entityId }, // Ex.: quem segue este perfil
+                    conditions: followersConditions, // Ex.: quem segue este perfil
                     distinct: 's0',               // (mapeie para $distinctCol no backend)
                     exists: [{
                         db: 'workz_data',
@@ -1971,7 +2207,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             entityImage = (entityData.data[0].im) ? 'data:image/png;base64,' + entityData.data[0].im : `https://placehold.co/100x100/EFEFEF/333?text=${entityData.data[0].tt.charAt(0)}`;
 
-            if (viewType === 'profile' && results?.teams) {
+            if (viewType === ENTITY.PROFILE && results?.teams) {
                 // 1) Colete os IDs dos teams (cm) e busque todos de uma vez
                 const cmIds = results?.teams.filter(Boolean);
 
@@ -2020,8 +2256,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (widgetBusinesses.length)  await appendWidget('businesses',  widgetBusinesses,  widgetBusinessesCount);
         if (widgetTeams.length)       await appendWidget('teams',       widgetTeams,       widgetTeamsCount);
 
-        memberLevel = (viewType === 'team') ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.em)?.nv ?? 0)) : (viewType === 'business') ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.id)?.nv ?? 0)) : 0;
-        memberStatus = (viewType === 'team') ? Number(parseInt(userTeamsData.find(item => item.cm === viewData.id)?.st ?? 0)) : (viewType === 'business') ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.id)?.st ?? 0)) : 0;
+        memberLevel = (viewType === ENTITY.TEAM) ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.em)?.nv ?? 0)) : (viewType === ENTITY.BUSINESS) ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.id)?.nv ?? 0)) : 0;
+        memberStatus = (viewType === ENTITY.TEAM) ? Number(parseInt(userTeamsData.find(item => item.cm === viewData.id)?.st ?? 0)) : (viewType === ENTITY.BUSINESS) ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.id)?.st ?? 0)) : 0;
 
         Promise.all([            
             // Menu customizado
@@ -2082,9 +2318,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (type === 'teams') baseUrl = '/team/';
                 else baseUrl = '/business/';
 
-                history.pushState({}, '', `${baseUrl}${id}`);
-                $('#loading').fadeIn();
-                loadPage();
+                navigateTo(`${baseUrl}${id}`);
             });
 
 
@@ -2235,11 +2469,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (baseBiz.length)     orBlocks.push({ em: { op: 'IN', value: baseBiz } });
             if (baseTeams.length)   orBlocks.push({ cm: { op: 'IN', value: baseTeams } });
 
-        } else if (viewType === 'profile') {
+        } else if (viewType === ENTITY.PROFILE) {
             orBlocks.push({ us: viewId, cm: 0, em: 0 });
-        } else if (viewType === 'business') {
+        } else if (viewType === ENTITY.BUSINESS) {
             orBlocks.push({ em: viewId });
-        } else if (viewType === 'team') {
+        } else if (viewType === ENTITY.TEAM) {
             orBlocks.push({ cm: viewId });
         } else if (viewType === 'public') {
             orBlocks.push({ cm: 0, em: 0 });
@@ -2320,12 +2554,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function handleMultipleUpdates(e) {
-        e.preventDefault();
-        const messageContainer = document.getElementById('message');
-
-    }
-
     async function handleUpdate(e) {
         e.preventDefault();
         const view = e.target.dataset.view;
@@ -2368,14 +2596,14 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        let enitityType = (view === 'profile') ? 'people' 
-                        : (view === 'business ') ? 'businesses' 
-                        : 'teams';
+        const entityType = (view === ENTITY.PROFILE) ? 'people' 
+                         : (view === ENTITY.BUSINESS) ? 'businesses' 
+                         : 'teams';
 
         if (data.id) {            
             const result = await apiClient.post('/update', {
-                db: typeMap[enitityType].db,
-                table: typeMap[enitityType].table,
+                db: typeMap[entityType].db,
+                table: typeMap[entityType].table,
                 data: changedData,
                 conditions: {
                     id: data.id
@@ -2546,6 +2774,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const clickedSidebarTrigger = !!target.closest('#sidebarTrigger');
         
         const actionBtn = target.closest('[data-sidebar-action]');        
+        const actionType = actionBtn?.dataset?.sidebarAction;
+        if (actionType === 'sidebar-back') {
+            // Deixa o handler de histórico cuidar; não limpar/trocar o sidebar aqui
+            event.preventDefault();
+            return;
+        }
+        if (actionType === 'stack-back') {
+            event.preventDefault();
+            if (typeof SidebarNav !== 'undefined') SidebarNav.back();
+            return;
+        }
         if (actionBtn && !isSidebarOpen) {
             event.preventDefault();
             toggleSidebar(actionBtn);     
@@ -2562,6 +2801,8 @@ document.addEventListener('DOMContentLoaded', () => {
             toggleSidebar(); // fecha
         }
     });
+
+    // Removido: fallback global. A navegação do sidebar é controlada por SidebarNav.
 
     // Opções das máscaras
     const phoneMaskOptions = {
