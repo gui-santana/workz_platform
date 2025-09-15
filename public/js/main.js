@@ -13,12 +13,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Variáveis Globais do Usuário
     let currentUserData = null;
-    let userPeople = null;
-    let userBusinesses = null; //Ids de empresa
-    let userTeams = null;
+    let userPeople = [];
+    let userBusinesses = []; //Ids de empresa
+    let userTeams = [];
     
-    let userBusinessesData = null; // Condições do usuário nas empresas
-    let userTeamsData = null; // Condições do usuário nas equipes
+    let userBusinessesData = [];// Condições do usuário nas empresas
+    let userTeamsData = []; // Condições do usuário nas equipes
 
     let businessesJobs = {};
 
@@ -73,6 +73,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Delegação para abrir itens de listas (negócios/equipes)
                 if (this.mount._listHandler) this.mount.removeEventListener('click', this.mount._listHandler);
                 const listHandler = async (e) => {
+                    // Pessoas/Negócios/Equipes (data-id) e Aplicativos (data-app-id)
+                    const appRow = e.target.closest('[data-app-id]');
+                    if (appRow && this.mount.contains(appRow) && this.mount.dataset.currentView === 'apps') {
+                        const ap = appRow.dataset.appId;
+                        const res = await apiClient.post('/search', { db:'workz_apps', table:'apps', columns:['*'], conditions:{ id: ap } });
+                        const app = Array.isArray(res?.data) ? res.data[0] : res?.data || null;
+                        if (app) this.push({ view: 'app-settings', title: app.tt || 'Aplicativo', payload: { data: app, appId: ap } });
+                        return;
+                    }
                     const row = e.target.closest('[data-id]');
                     if (!row || !this.mount.contains(row)) return;
                     const id = row.dataset.id;
@@ -86,11 +95,85 @@ document.addEventListener('DOMContentLoaded', () => {
                         const data = Array.isArray(res?.data) ? res.data[0] : res?.data || null;
                         if (data) this.push({ view: ENTITY.TEAM, title: data.tt || 'Equipe', payload: { data, type:'team' } });
                     } else if (this.mount.dataset.currentView === 'people') {
-                        // opcional: abrir perfil
+                        // Abrir o perfil do usuário (visualização pública), não ajustes
+                        navigateTo(`/profile/${id}`);
+                        try { await toggleSidebar(); } catch(_) {}
                     }
                 };
                 this.mount.addEventListener('click', listHandler);
                 this.mount._listHandler = listHandler;
+
+                // Filtro de busca em Pessoas (live filter)
+                if (this.mount.dataset.currentView === 'people') {
+                    const input = this.mount.querySelector('#people-search');
+                    const listEl = this.mount.querySelector('#people-list');
+                    if (input && listEl) {
+                        if (this.mount._peopleSearchHandler) input.removeEventListener('input', this.mount._peopleSearchHandler);
+                        const handler = (ev) => {
+                            const q = (ev.target.value || '').toLowerCase().trim();
+                            [...listEl.children].forEach(row => {
+                                const name = row.getAttribute('data-name') || '';
+                                row.style.display = (!q || name.includes(q)) ? '' : 'none';
+                            });
+                        };
+                        input.addEventListener('input', handler);
+                        this.mount._peopleSearchHandler = handler;
+                    }
+                }
+
+                // Filtro de busca em Negócios
+                if (this.mount.dataset.currentView === 'businesses') {
+                    const input = this.mount.querySelector('#businesses-search');
+                    const listEl = this.mount.querySelector('#businesses-list');
+                    if (input && listEl) {
+                        if (this.mount._bizSearchHandler) input.removeEventListener('input', this.mount._bizSearchHandler);
+                        const handler = (ev) => {
+                            const q = (ev.target.value || '').toLowerCase().trim();
+                            [...listEl.children].forEach(row => {
+                                const name = row.getAttribute('data-name') || '';
+                                row.style.display = (!q || name.includes(q)) ? '' : 'none';
+                            });
+                        };
+                        input.addEventListener('input', handler);
+                        this.mount._bizSearchHandler = handler;
+                    }
+                }
+
+                // Filtro de busca em Equipes
+                if (this.mount.dataset.currentView === 'teams') {
+                    const input = this.mount.querySelector('#teams-search');
+                    const listEl = this.mount.querySelector('#teams-list');
+                    if (input && listEl) {
+                        if (this.mount._teamsSearchHandler) input.removeEventListener('input', this.mount._teamsSearchHandler);
+                        const handler = (ev) => {
+                            const q = (ev.target.value || '').toLowerCase().trim();
+                            [...listEl.children].forEach(row => {
+                                const name = row.getAttribute('data-name') || '';
+                                row.style.display = (!q || name.includes(q)) ? '' : 'none';
+                            });
+                        };
+                        input.addEventListener('input', handler);
+                        this.mount._teamsSearchHandler = handler;
+                    }
+                }
+
+                // Filtro de busca em Aplicativos
+                if (this.mount.dataset.currentView === 'apps') {
+                    const input = this.mount.querySelector('#apps-search');
+                    const listEl = this.mount.querySelector('#apps-list');
+                    if (input && listEl) {
+                        if (this.mount._appsSearchHandler) input.removeEventListener('input', this.mount._appsSearchHandler);
+                        const handler = (ev) => {
+                            const q = (ev.target.value || '').toLowerCase().trim();
+                            [...listEl.children].forEach(row => {
+                                const name = row.getAttribute('data-name') || '';
+                                row.style.display = (!q || name.includes(q)) ? '' : 'none';
+                            });
+                        };
+                        input.addEventListener('input', handler);
+                        this.mount._appsSearchHandler = handler;
+                    }
+                }
 
                 // Se estiver em view de entidade, conecte os atalhos internos
                 if ([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(st.view)) {
@@ -419,7 +502,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <p><small class="text-gray-500">Publicações</small><br>${data.postsCount}</p>
                     </div>
                     <div class="col-span-1 flex items-center text-center justify-center">                        
-				        <p><small class="text-gray-500">Seguidores</small><br>${data.followersCount}</p>
+				        <p><small class="text-gray-500">Seguidores</small><br><span id="followers-count">${data.followersCount}</span></p>
                     </div>
                     <div class="col-span-1 flex items-center text-center justify-center">
                         <p><small class="text-gray-500">Seguindo</small><br>${data.peopleCount}</p>
@@ -522,7 +605,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
         // Botão de ação padronizado (para sidebar/actions)
         actionButton: ({ action, label, color='blue', extra='' }) => `
-            <button data-action="${action}" class="${CLASSNAMES.actionBtn} bg-${color}-400 hover:bg-${color}-600 ${extra}"><a class="truncate">${label}</a></button>
+            <button data-action="${action}" class="${CLASSNAMES.actionBtn} bg-${color}-400 hover:bg-${color}-600 ${extra}"><span class="truncate">${label}</span></button>
         `,
         row: (id, label, inputHtml, { top=false, bottom=false } = {}) => `
             <div class="grid grid-cols-4 border-b border-gray-200 ${top ? 'rounded-t-2xl' : ''} ${bottom ? 'rounded-b-2xl' : ''}">
@@ -846,6 +929,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <hr>
                 ${shortcuts}
                 ${financeShortcuts}
+                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 mt-3">
+                    <button data-action="delete-business" data-id="${data.id}" class="p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-2xl"><i class="fas fa-trash"></i> Excluir Negócio</button>
+                </div>
             `;
         } else if (view === ENTITY.TEAM) {
             // exemplo: reuso igual ao business/profile para campos
@@ -894,13 +980,41 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         } else if (view === 'employees') {
             const table = (type === 'business') ? 'employees' : 'teams_users';
-            const conditions = (type === 'business') ? { em: data.id } : { cm: data.id };            
+            const idKey = (type === 'business') ? 'em' : 'cm';
+            const conditions = { [idKey]: data.id };
             const employees = await apiClient.post('/search', { db: 'workz_companies', table, columns: ['us', 'nv', 'st'], conditions, exists: [{ db: 'workz_data', table: 'hus', local: 'us', remote: 'id', conditions: { st: 1 }}], fetchAll: true});
-            let people = await fetchByIds(employees?.data?.map(o => o.us), 'people');
-            people = (!Array.isArray(people)) ? [people] : people; //Normaliza o array caso resultado único
-            html += UI.sectionCard(
-                (people||[]).map(p => UI.row(`employee-${p.id}`, p.tt, `<input class="w-full border-0 focus:outline-none" name="employee" id="employee-${p.id}">`)).join('')
-            );
+            const entries = Array.isArray(employees?.data) ? employees.data : [];
+            const allUserIds = entries.map(o => o.us);
+            let people = await fetchByIds(allUserIds, 'people');
+            people = Array.isArray(people) ? people : (people ? [people] : []);
+            const userMap = new Map(people.map(p => [p.id, p]));
+
+            const active = entries.filter(e => Number(e.st) === 1);
+            const pending = entries.filter(e => Number(e.st) === 0);
+
+            const activeRows = active.length
+                ? active.map(e => {
+                    const p = userMap.get(e.us) || { id: e.us, tt: 'Usuário' };
+                    return UI.row(`member-${p.id}`, p.tt, `<span class=\"text-gray-500\">Membro</span>`);
+                }).join('')
+                : `<div class=\"p-3 text-sm text-gray-500\">Nenhum membro ativo.</div>`;
+
+            const pendingRows = pending.length
+                ? pending.map(e => {
+                    const p = userMap.get(e.us) || { id: e.us, tt: 'Usuário' };
+                    const controls = `
+                        <div class=\"flex gap-2\">
+                            <button data-action=\"accept-member\" data-user-id=\"${p.id}\" data-scope-type=\"${type}\" data-scope-id=\"${data.id}\" class=\"p-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-md\">Aceitar</button>
+                            <button data-action=\"reject-member\" data-user-id=\"${p.id}\" data-scope-type=\"${type}\" data-scope-id=\"${data.id}\" class=\"p-2 bg-red-100 hover:bg-red-200 text-red-800 rounded-md\">Recusar</button>
+                        </div>`;
+                    return UI.row(`pending-${p.id}`, p.tt, controls);
+                }).join('')
+                : `<div class=\"p-3 text-sm text-gray-500\">Sem solicitações pendentes.</div>`;
+
+            html += `
+                ${UI.sectionCard(`<div class=\"p-3 font-semibold\">Membros Ativos</div>` + activeRows)}
+                ${UI.sectionCard(`<div class=\"p-3 font-semibold\">Solicitações Pendentes</div>` + pendingRows)}
+            `;
         } else if (view === 'people') {
             // Pessoas seguidas pelo usuário logado
             const ids = Array.isArray(userPeople) ? userPeople : [];
@@ -909,17 +1023,23 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 let list = await fetchByIds(ids, 'people');
                 list = Array.isArray(list) ? list : (list ? [list] : []);
+                // Campo de busca
+                const searchCard = UI.sectionCard(
+                    UI.row('people-search','Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="people-search" placeholder="Digite para filtrar">`, { top:true, bottom:true })
+                );
+
                 const rows = list.map(u => {
                     const img = u?.im ? `data:image/png;base64,${u.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(u?.tt||'?').charAt(0)}`;
+                    const name = (u?.tt || 'Usuário');
                     return `
-                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${u.id}">
+                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${u.id}" data-name="${name.toLowerCase()}">
                         <div class="col-span-1 p-3 flex justify-center">
                             <img src="${img}" alt="${u?.tt || 'Usuário'}" class="w-7 h-7 rounded-full" />
                         </div>
-                        <div class="col-span-5 p-3 truncate">${u?.tt || 'Usuário'}</div>
+                        <div class="col-span-5 p-3 truncate">${name}</div>
                     </div>`;
                 }).join('');
-                html += UI.sectionCard(rows);
+                html += searchCard + UI.sectionCard(`<div id="people-list">${rows}</div>`);
             }
         } else if (view === 'businesses') {
             // Negócios onde o usuário é membro com nível de moderação/gestão (nv >= 3)
@@ -946,17 +1066,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>`
                 );
                 html += createBusinessCard;
+                const searchCardBiz = UI.sectionCard(
+                    UI.row('businesses-search','Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="businesses-search" placeholder="Digite para filtrar">`, { top:true, bottom:true })
+                );
+                html += searchCardBiz;
                 const rows = list.map(b => {
                     const img = b?.im ? `data:image/png;base64,${b.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(b?.tt||'?').charAt(0)}`;
+                    const name = (b?.tt || 'Negócio');
                     return `
-                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${b.id}">
+                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${b.id}" data-name="${name.toLowerCase()}">
                         <div class="col-span-1 p-3 flex justify-center">
-                            <img src="${img}" alt="${b?.tt || 'Negócio'}" class="w-7 h-7 rounded-full" />
+                            <img src="${img}" alt="${name}" class="w-7 h-7 rounded-full" />
                         </div>
-                        <div class="col-span-5 p-3 truncate">${b?.tt || 'Negócio'}</div>
+                        <div class="col-span-5 p-3 truncate">${name}</div>
                     </div>`;
                 }).join('');
-                html += UI.sectionCard(rows);
+                html += UI.sectionCard(`<div id="businesses-list">${rows}</div>`);
             }
         } else if (view === 'teams') {
             // Equipes em que o usuário é criador (us) ou moderador (usmn contém id), ativas (st=1)
@@ -1013,17 +1138,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>`
                 );
                 html += createTeamCard;
+                const searchCardTeams = UI.sectionCard(
+                    UI.row('teams-search','Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="teams-search" placeholder="Digite para filtrar">`, { top:true, bottom:true })
+                );
+                html += searchCardTeams;
                 const rows = managed.map(t => {
                     const img = t?.im ? `data:image/png;base64,${t.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(t?.tt||'?').charAt(0)}`;
+                    const name = (t?.tt || 'Equipe');
                     return `
-                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${t.id}">
+                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${t.id}" data-name="${name.toLowerCase()}">
                         <div class="col-span-1 p-3 flex justify-center">
-                            <img src="${img}" alt="${t?.tt || 'Equipe'}" class="w-7 h-7 rounded-full" />
+                            <img src="${img}" alt="${name}" class="w-7 h-7 rounded-full" />
                         </div>
-                        <div class="col-span-5 p-3 truncate">${t?.tt || 'Equipe'}</div>
+                        <div class="col-span-5 p-3 truncate">${name}</div>
                     </div>`;
                 }).join('');
-                html += UI.sectionCard(rows);
+                html += UI.sectionCard(`<div id="teams-list">${rows}</div>`);
             }
         } else if (view === 'apps') {
             // Lista de apps instalados do usuário logado
@@ -1040,18 +1170,45 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!list.length) {
                 html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Nenhum aplicativo instalado.</div>`;
             } else {
+                const searchCardApps = UI.sectionCard(
+                    UI.row('apps-search','Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="apps-search" placeholder="Digite para filtrar">`, { top:true, bottom:true })
+                );
                 const rows = list.map(app => {
                     const img = app?.im ? `data:image/png;base64,${app.im}` : '/images/app-default.png';
+                    const name = (app?.tt || 'App');
                     return `
-                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-app-id="${app.id}">
+                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-app-id="${app.id}" data-name="${name.toLowerCase()}">
                         <div class="col-span-1 p-3 flex justify-center">
-                            <img src="${img}" alt="${app?.tt || 'App'}" class="w-7 h-7 rounded-md" />
+                            <img src="${img}" alt="${name}" class="w-7 h-7 rounded-md" />
                         </div>
-                        <div class="col-span-5 p-3 truncate">${app?.tt || 'App'}</div>
+                        <div class="col-span-5 p-3 truncate">${name}</div>
                     </div>`;
                 }).join('');
-                html += UI.sectionCard(rows);
+                html += searchCardApps + UI.sectionCard(`<div id="apps-list">${rows}</div>`);
             }
+        } else if (view === 'app-settings') {
+            const app = data || {};
+            const appId = app.id || payload?.appId || null;
+            const img = app?.im ? `data:image/png;base64,${app.im}` : '/images/app-default.png';
+            const notifyKey = `app_notify_${appId}`;
+            const enabled = (localStorage.getItem(notifyKey) === '1');
+            const header = `
+            <div class="w-full bg-white rounded-2xl shadow-md p-4 flex items-center gap-3">
+                <img src="${img}" alt="${app?.tt || 'App'}" class="w-9 h-9 rounded-md" />
+                <div class="font-semibold truncate">${app?.tt || 'Aplicativo'}</div>
+            </div>`;
+            const actions = `
+            <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
+                <div class="grid grid-cols-1 border-t border-gray-200 bg-white">
+                    <button data-action="app-toggle-notifications" data-app-id="${appId}" class="p-3 bg-blue-100 hover:bg-blue-200 text-blue-800">
+                        <i class="fas fa-bell"></i> ${enabled ? 'Desativar Notificações' : 'Ativar Notificações'}
+                    </button>
+                    <button data-action="app-uninstall" data-app-id="${appId}" class="p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-b-2xl">
+                        <i class="fas fa-trash"></i> Desinstalar aplicativo
+                    </button>
+                </div>
+            </div>`;
+            html += header + actions;
         } else if (view === 'testimonials') {            
             const res = await apiClient.post('/search', { db:'workz_data', table:'testimonials', columns:['*'], conditions: { recipient: data.id, recipient_type: type }, fetchAll:true });
             const list = Array.isArray(res?.data) ? res.data : [];
@@ -1217,13 +1374,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const actionContainer = document.querySelector('#action-container');
         const isManager = memberLevel >= 3;
         if (viewType === ENTITY.PROFILE) {
-            if (userPeople.includes(viewId)) {
+            const isFollowing = Array.isArray(userPeople)
+                ? userPeople.map(String).includes(String(viewId))
+                : false;
+            if (isFollowing) {
                 actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'unfollow-user', label: 'Deixar de Seguir', color: 'red' }));
             } else {
                 actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'follow-user', label: 'Seguir', color: 'blue' }));
             }
         } else if (viewType === ENTITY.BUSINESS) {
-            const isModerator = (viewData.usmn !== '') ? JSON.parse(viewData.usmn).map(String).includes(String(currentUserData.id)) : '';
+            const parseIdArray = (val) => { try { const arr = JSON.parse(val); return Array.isArray(arr) ? arr : []; } catch(_) { return []; } };
+            const mods = (viewData?.usmn) ? parseIdArray(viewData.usmn) : [];
+            const isModerator = mods.map(String).includes(String(currentUserData.id));
             
             // Verifica se o usuário não é gestor na empresa ou moderador
             if(!isManager && !isModerator){                                
@@ -1243,7 +1405,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
                         
         } else if (viewType === ENTITY.TEAM) {                                    
-            const isModerator = (viewData.usmn !== '') ? JSON.parse(viewData.usmn).map(String).includes(String(currentUserData.id)) : '';
+            const parseIdArray = (val) => { try { const arr = JSON.parse(val); return Array.isArray(arr) ? arr : []; } catch(_) { return []; } };
+            const mods = (viewData?.usmn) ? parseIdArray(viewData.usmn) : [];
+            const isModerator = mods.map(String).includes(String(currentUserData.id));
 
             // Verifica se o usuário não é gestor na empresa ou moderador
             if (!isManager && !isModerator) {
@@ -1372,57 +1536,239 @@ document.addEventListener('DOMContentLoaded', () => {
         'list-businesses': () => navigateTo('/businesses'),
         'list-teams': () => navigateTo('/teams'),
         'logout': () => handleLogout(),
+        // Apps: notificações e desinstalar
+        'app-toggle-notifications': ({ button }) => {
+            const appId = button?.dataset?.appId;
+            if (!appId) return;
+            const key = `app_notify_${appId}`;
+            const enabled = (localStorage.getItem(key) === '1');
+            localStorage.setItem(key, enabled ? '0' : '1');
+            const label = enabled ? 'Ativar Notificações' : 'Desativar Notificações';
+            if (button) button.innerHTML = `<i class="fas fa-bell"></i> ${label}`;
+        },
+        'app-uninstall': async ({ button }) => {
+            const appId = button?.dataset?.appId;
+            if (!appId) return;
+            // Remove a associação do app ao usuário e permanece no sidebar
+            await apiClient.post('/delete', { db: 'workz_apps', table: 'gapp', conditions: { us: currentUserData.id, ap: appId } });
+            if (typeof SidebarNav !== 'undefined') {
+                const prev = SidebarNav.prev?.();
+                // Se a view anterior é a lista de apps, apenas volte (isso re-renderiza a lista atualizada)
+                if (prev && prev.view === 'apps') {
+                    SidebarNav.back();
+                } else {
+                    // Caso contrário, garanta que mostramos a lista de apps sem fechar o sidebar
+                    SidebarNav.resetRoot(currentUserData);
+                    SidebarNav.push({ view: 'apps', title: 'Aplicativos', payload: { data: currentUserData } });
+                }
+            }
+        },
+        'delete-business': async ({ button }) => {
+            const id = button?.dataset?.id;
+            if (!id) return;
+            if (!confirm('Tem certeza que deseja excluir este negócio? Esta ação não pode ser desfeita.')) return;
+            // Exclui vínculos de employees e o próprio negócio
+            await apiClient.post('/delete', { db: 'workz_companies', table: 'employees', conditions: { em: id } });
+            const result = await apiClient.post('/delete', { db: 'workz_companies', table: 'companies', conditions: { id } });
+            // Atualiza caches locais
+            if (Array.isArray(userBusinessesData)) {
+                userBusinessesData = userBusinessesData.filter(r => String(r.em) !== String(id));
+            }
+            if (Array.isArray(userBusinesses)) {
+                userBusinesses = userBusinesses.filter(em => String(em) !== String(id));
+            }
+            // Volta para lista de Negócios no sidebar
+            if (typeof SidebarNav !== 'undefined') {
+                const prev = SidebarNav.prev?.();
+                if (prev && prev.view === 'businesses') {
+                    SidebarNav.back();
+                } else {
+                    SidebarNav.resetRoot(currentUserData);
+                    SidebarNav.push({ view: 'businesses', title: 'Negócios', payload: { data: currentUserData } });
+                }
+            }
+        },
         // Criação (negócio/equipe)
         'create-business': async () => {
             const name = (document.getElementById('new-business-name')?.value || '').trim();
             if (!name) { alert('Informe o nome do negócio.'); return; }
-            showLoading();
-            try {
-                const res = await apiClient.post('/insert', {
+            const sc = document.querySelector('.sidebar-content');
+            // Cria o negócio
+            const res = await apiClient.post('/insert', {
+                db: 'workz_companies',
+                table: 'companies',
+                data: { tt: name, us: currentUserData.id, st: 1 }
+            });
+            // Descobre o ID recém criado (preferencialmente pelo retorno)
+            let newId = res?.id;
+            if (!newId) {
+                const lookup = await apiClient.post('/search', {
                     db: 'workz_companies',
                     table: 'companies',
-                    data: { tt: name, us: currentUserData.id, st: 1 }
+                    columns: ['*'],
+                    conditions: { tt: name, us: currentUserData.id },
+                    order: { by: 'id', dir: 'DESC' },
+                    fetchAll: true,
+                    limit: 1
                 });
-                // Recarrega a subview
-                const sidebarContent = document.querySelector('.sidebar-content');
-                await renderTemplate(sidebarContent, templates.sidebarPageSettings, { view: 'businesses', data: currentUserData, origin: 'settings' });
-            } finally { hideLoading(); }
+                newId = Array.isArray(lookup?.data) && lookup.data[0]?.id;
+            }
+            if (!newId) {
+                alert('Falha ao criar o negócio.');
+                return;
+            }
+            // Garante vínculo do usuário ao novo negócio (funciona com a lista "Negócios Gerenciados")
+            try {
+                await apiClient.post('/insert', {
+                    db: 'workz_companies',
+                    table: 'employees',
+                    data: { us: currentUserData.id, em: newId, nv: 4, st: 1 }
+                });
+                // Atualiza caches locais usados nas listas de Negócios
+                if (Array.isArray(userBusinessesData)) {
+                    userBusinessesData.push({ us: currentUserData.id, em: newId, nv: 4, st: 1 });
+                } else {
+                    userBusinessesData = [{ us: currentUserData.id, em: newId, nv: 4, st: 1 }];
+                }
+                if (Array.isArray(userBusinesses)) {
+                    if (!userBusinesses.includes(newId)) userBusinesses.push(newId);
+                } else {
+                    userBusinesses = [newId];
+                }
+            } catch (_) { /* ignore silent; backend may also auto-create */ }
+            // Busca dados completos do negócio e abre diretamente as Configurações dele no sidebar (sem recarregar a página)
+            const fetchNew = await apiClient.post('/search', {
+                db: 'workz_companies',
+                table: 'companies',
+                columns: ['*'],
+                conditions: { id: newId }
+            });
+            const business = Array.isArray(fetchNew?.data) ? fetchNew.data[0] : fetchNew?.data || null;
+            if (!business) { alert('Negócio criado, mas não foi possível carregar os dados.'); return; }
+            if (typeof SidebarNav !== 'undefined') {
+                SidebarNav.push({ view: ENTITY.BUSINESS, title: business.tt || 'Negócio', payload: { data: business, type: 'business' } });
+            } else if (sc) {
+                // Fallback: render direto
+                await renderTemplate(sc, templates.sidebarPageSettings, { view: ENTITY.BUSINESS, data: business, origin: 'settings' });
+            }
         },
         'create-team': async () => {
             const name = (document.getElementById('new-team-name')?.value || '').trim();
             const em   = (document.getElementById('new-team-business')?.value || '').trim();
             if (!name || !em) { alert('Informe o nome da equipe e o negócio.'); return; }
-            showLoading();
-            try {
-                const res = await apiClient.post('/insert', {
+            const sc = document.querySelector('.sidebar-content');
+            // Cria a equipe
+            const res = await apiClient.post('/insert', {
+                db: 'workz_companies',
+                table: 'teams',
+                data: { tt: name, us: currentUserData.id, em: Number(em), st: 1 }
+            });
+            // Descobre o ID recém criado
+            let newId = res?.id;
+            if (!newId) {
+                const lookup = await apiClient.post('/search', {
                     db: 'workz_companies',
                     table: 'teams',
-                    data: { tt: name, us: currentUserData.id, em: Number(em), st: 1 }
+                    columns: ['*'],
+                    conditions: { tt: name, us: currentUserData.id, em: Number(em) },
+                    order: { by: 'id', dir: 'DESC' },
+                    fetchAll: true,
+                    limit: 1
                 });
-                const sidebarContent = document.querySelector('.sidebar-content');
-                await renderTemplate(sidebarContent, templates.sidebarPageSettings, { view: 'teams', data: currentUserData, origin: 'settings' });
-            } finally { hideLoading(); }
+                newId = Array.isArray(lookup?.data) && lookup.data[0]?.id;
+            }
+            if (!newId) { alert('Falha ao criar a equipe.'); return; }
+            // Vínculo do usuário à equipe (teams_users)
+            try {
+                await apiClient.post('/insert', {
+                    db: 'workz_companies',
+                    table: 'teams_users',
+                    data: { us: currentUserData.id, cm: newId, st: 1 }
+                });
+                if (Array.isArray(userTeamsData)) {
+                    userTeamsData.push({ us: currentUserData.id, cm: newId, st: 1 });
+                } else {
+                    userTeamsData = [{ us: currentUserData.id, cm: newId, st: 1 }];
+                }
+                if (Array.isArray(userTeams)) {
+                    if (!userTeams.includes(newId)) userTeams.push(newId);
+                } else {
+                    userTeams = [newId];
+                }
+            } catch (_) { /* ignore; backend may also auto-create */ }
+            // Busca dados completos da equipe e abre diretamente as Configurações da equipe no sidebar
+            const fetchNew = await apiClient.post('/search', {
+                db: 'workz_companies',
+                table: 'teams',
+                columns: ['*'],
+                conditions: { id: newId }
+            });
+            const team = Array.isArray(fetchNew?.data) ? fetchNew.data[0] : fetchNew?.data || null;
+            if (!team) { alert('Equipe criada, mas não foi possível carregar os dados.'); return; }
+            if (typeof SidebarNav !== 'undefined') {
+                SidebarNav.push({ view: ENTITY.TEAM, title: team.tt || 'Equipe', payload: { data: team, type: 'team' } });
+            } else if (sc) {
+                await renderTemplate(sc, templates.sidebarPageSettings, { view: ENTITY.TEAM, data: team, origin: 'settings' });
+            }
         },
         // Ações sociais: seguir/desseguir pessoa (tabela workz_data.usg)
-        'follow-user': async ({ state }) => {
+        'follow-user': async ({ state, button }) => {
             const follower = state.user?.id;
             const followed = state.view?.id;
             if (!follower || !followed) return;
-            showLoading();
+            button.disabled = true;
             try {
-                await apiClient.post('/insert', { db: 'workz_data', table: 'usg', data: { s0: follower, s1: followed } });
-                loadPage();
-            } finally { hideLoading(); }
+                const res = await apiClient.post('/insert', { db: 'workz_data', table: 'usg', data: { s0: follower, s1: followed } });
+                if (res && res.status === 'success') {
+                    // Atualiza estado local
+                    const fid = String(followed);
+                    if (Array.isArray(userPeople)) {
+                        if (!userPeople.map(String).includes(fid)) userPeople.push(followed);
+                    } else {
+                        userPeople = [followed];
+                    }
+                    // Troca o botão
+                    const container = document.querySelector('#action-container');
+                    if (container) container.innerHTML = UI.actionButton({ action: 'unfollow-user', label: 'Deixar de Seguir', color: 'red' });
+                    // Ajusta contagem de seguidores da página (se existir)
+                    const cntEl = document.querySelector('#followers-count');
+                    if (cntEl) {
+                        const n = parseInt(cntEl.textContent || '0', 10) || 0;
+                        cntEl.textContent = String(n + 1);
+                    }
+                }
+            } finally {
+                button.disabled = false;
+            }
         },
-        'unfollow-user': async ({ state }) => {
+        'unfollow-user': async ({ state, button }) => {
             const follower = state.user?.id;
             const followed = state.view?.id;
             if (!follower || !followed) return;
-            showLoading();
+            button.disabled = true;
             try {
-                await apiClient.post('/delete', { db: 'workz_data', table: 'usg', conditions: { s0: follower, s1: followed } });
-                loadPage();
-            } finally { hideLoading(); }
+                const res = await apiClient.post('/delete', { db: 'workz_data', table: 'usg', conditions: { s0: follower, s1: followed } });
+                if (res && res.status === 'success') {
+                    // Atualiza estado local
+                    const fid = String(followed);
+                    if (Array.isArray(userPeople)) {
+                        userPeople = userPeople.filter(id => String(id) !== fid);
+                    } else {
+                        userPeople = [];
+                    }
+                    // Troca o botão
+                    const container = document.querySelector('#action-container');
+                    if (container) container.innerHTML = UI.actionButton({ action: 'follow-user', label: 'Seguir', color: 'blue' });
+                    // Ajusta contagem de seguidores da página (se existir)
+                    const cntEl = document.querySelector('#followers-count');
+                    if (cntEl) {
+                        const n = parseInt(cntEl.textContent || '0', 10) || 0;
+                        cntEl.textContent = String(Math.max(0, n - 1));
+                    }
+                }
+            } finally {
+                button.disabled = false;
+            }
         },
         // Acesso a negócios/equipes
         'request-join': async ({ state }) => {
@@ -1460,6 +1806,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 await apiClient.post('/update', { db: 'workz_companies', table, data: { st: 0 }, conditions: keys });
                 loadPage();
             } finally { hideLoading(); }
+        },
+        // Gestão de solicitações (membros de equipe/negócio) via sidebar
+        'accept-member': async ({ button }) => {
+            const uid = button?.dataset?.userId;
+            const scopeType = button?.dataset?.scopeType; // 'business' | 'team'
+            const scopeId = button?.dataset?.scopeId;
+            if (!uid || !scopeType || !scopeId) return;
+            const table = (scopeType === 'business') ? 'employees' : 'teams_users';
+            const idKey = (scopeType === 'business') ? 'em' : 'cm';
+            button.disabled = true;
+            try {
+                await apiClient.post('/update', { db: 'workz_companies', table, data: { st: 1 }, conditions: { us: Number(uid), [idKey]: Number(scopeId) } });
+                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+            } finally { button.disabled = false; }
+        },
+        'reject-member': async ({ button }) => {
+            const uid = button?.dataset?.userId;
+            const scopeType = button?.dataset?.scopeType;
+            const scopeId = button?.dataset?.scopeId;
+            if (!uid || !scopeType || !scopeId) return;
+            const table = (scopeType === 'business') ? 'employees' : 'teams_users';
+            const idKey = (scopeType === 'business') ? 'em' : 'cm';
+            button.disabled = true;
+            try {
+                await apiClient.post('/delete', { db: 'workz_companies', table, conditions: { us: Number(uid), [idKey]: Number(scopeId), st: 0 } });
+                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+            } finally { button.disabled = false; }
         },
         // Depoimentos (testimonials)
         'accept-testmonial': async ({ button }) => {
@@ -1874,6 +2247,7 @@ document.addEventListener('DOMContentLoaded', () => {
         userPeople = userPeople.data.map(o => o.s1);        
 
         // Negócios
+        // 1) Vínculos por employees (membros/gestores)
         userBusinesses = await apiClient.post('/search', {
             db: 'workz_companies',
             table: 'employees',
@@ -1890,8 +2264,26 @@ document.addEventListener('DOMContentLoaded', () => {
             order: { by: 'em', dir: 'DESC' },
             fetchAll: true         
         });
-        userBusinessesData = userBusinesses.data;
-        userBusinesses = userBusinessesData.map(o => o.em);        
+        userBusinessesData = Array.isArray(userBusinesses?.data) ? userBusinesses.data.slice() : [];
+        userBusinesses = userBusinessesData.map(o => o.em);
+
+        // 2) Inclui também negócios criados pelo usuário (companies.us = currentUserData.id)
+        const ownedBiz = await apiClient.post('/search', {
+            db: 'workz_companies',
+            table: 'companies',
+            columns: ['id','us','st','tt'],
+            conditions: { us: currentUserData.id, st: 1 },
+            order: { by: 'id', dir: 'DESC' },
+            fetchAll: true
+        });
+        const ownedList = Array.isArray(ownedBiz?.data) ? ownedBiz.data : [];
+        // Mescla: adiciona como se fossem vínculos employees nv=4
+        for (const b of ownedList) {
+            if (!userBusinesses.includes(b.id)) {
+                userBusinesses.push(b.id);
+                userBusinessesData.push({ us: currentUserData.id, em: b.id, nv: 4, st: b.st });
+            }
+        }
 
         // Equipes
         userTeams = await apiClient.post('/search', {
