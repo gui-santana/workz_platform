@@ -19,6 +19,8 @@ use Workz\Platform\Controllers\AuthController;
 use Workz\Platform\Controllers\TestController;
 use Workz\Platform\Controllers\UserController;
 use Workz\Platform\Controllers\GeneralController;
+use Workz\Platform\Controllers\TeamsController;
+use Workz\Platform\Controllers\CompaniesController;
 
 use Workz\Platform\Middleware\AuthMiddleware;
 
@@ -72,6 +74,17 @@ $router->add('POST', '/api/delete', [GeneralController::class, 'delete']);
 $router->add('POST', '/api/change-email', [GeneralController::class, 'changeEmail']);
 // Rota para alterar a senha
 $router->add('POST', '/api/change-password', [GeneralController::class, 'changePassword']);
+
+// Rotas de equipes (protegidas)
+$router->add('POST', '/api/teams/delete', [TeamsController::class, 'delete'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/teams/members/level', [TeamsController::class, 'updateMemberLevel'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/teams/members/accept', [TeamsController::class, 'acceptMember'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/teams/members/reject', [TeamsController::class, 'rejectMember'], [AuthMiddleware::class, 'handle']);
+
+// Rotas de negócios (protegidas)
+$router->add('POST', '/api/companies/members/level', [CompaniesController::class, 'updateMemberLevel'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/companies/members/accept', [CompaniesController::class, 'acceptMember'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/companies/members/reject', [CompaniesController::class, 'rejectMember'], [AuthMiddleware::class, 'handle']);
 
 
 // ==================================================

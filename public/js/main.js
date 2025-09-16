@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let memberStatus = null; // Status do usuário em páginas de negócio e de equipe
     let memberLevel = null; // Nível do usuário em páginas de negócio e de equipe
+    let viewRestricted = false; // Restrição de acesso (ex.: equipe fora de negócios do usuário)
 
     // Variáveis Globais da Página
     let viewType = null;
@@ -476,13 +477,17 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         listView: (listItems) => {
+            if (!Array.isArray(listItems) || listItems.length === 0) {
+                return `<div class="col-span-12"><div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Nenhum item encontrado.</div></div>`;
+            }
             let html = '<div class="col-span-12 flex flex-col grid grid-cols-12 gap-6">';        
             listItems.forEach(item => {
+                const name = (item.tt || '');
                 html += `
-                <div class="list-item sm:col-span-12 md:col-span-6 lg:col-span-4 flex flex-col bg-white p-3 rounded-3xl shadow-lg bg-gray hover:bg-gray-100 cursor-pointer" data-item-id="${item.id}">
+                <div class="list-item sm:col-span-12 md:col-span-6 lg:col-span-4 flex flex-col bg-white p-3 rounded-3xl shadow-lg bg-gray hover:bg-gray-100 cursor-pointer" data-item-id="${item.id}" data-name="${name.toLowerCase()}">
                     <div class="flex items-center gap-3">
-                        <img class="w-10 h-10 rounded-full" src="https://placehold.co/40x40/EFEFEF/333?text=${item.tt.charAt(0)}" alt="${item.tt}">
-                        <span class="font-semibold">${item.tt}</span>
+                        <img class="w-10 h-10 rounded-full" src="https://placehold.co/40x40/EFEFEF/333?text=${name.charAt(0)}" alt="${name}">
+                        <span class="font-semibold truncate">${name}</span>
                     </div>                    
                 </div> 
                 `;
@@ -514,6 +519,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         return content;
     };
+
+    // Mensagem para equipe sem acesso ao negócio correspondente
+    templates.teamRestricted = () => `
+        <div class="rounded-3xl w-full p-4 bg-white shadow-lg">
+            <div class="p-3 text-sm text-gray-700">
+                Você não participa do negócio desta equipe. Solicite acesso ao negócio para visualizar o conteúdo.
+            </div>
+        </div>
+    `;
 
     templates.appLibrary = async ({ appsList }) => {
         const resolved = await fetchByIds(appsList, 'apps'); // cada app: { id, tt, ic } etc.
@@ -966,6 +980,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 { id:'employees', icon:'fa-id-badge', label:'Colaboradores' },
             ]);
 
+            // Apenas dono ou moderadores da equipe podem excluir a equipe
+            let canDeleteTeam = canManageTeam(data);
+            const deleteTeamButton = canDeleteTeam
+                ? `
+                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 mt-3">
+                    <button data-action="delete-team" data-id="${data.id}" data-em="${data.em}" class="p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-2xl"><i class="fas fa-trash"></i> Excluir Equipe</button>
+                </div>`
+                : '';
+
             html += `
                 <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
                 <input type="hidden" name="id" value="${data.id}">
@@ -977,6 +1000,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
                 </form>
                 ${shortcuts}
+                ${deleteTeamButton}
             `;
         } else if (view === 'employees') {
             const table = (type === 'business') ? 'employees' : 'teams_users';
@@ -992,14 +1016,35 @@ document.addEventListener('DOMContentLoaded', () => {
             const active = entries.filter(e => Number(e.st) === 1);
             const pending = entries.filter(e => Number(e.st) === 0);
 
+            // Permissões de gestão
+            let canManage = (type === 'business') ? isBusinessManager(data.id) : canManageTeam(data);
+
+            const levelSelect = (current) => {
+                const options = [
+                    { v: 1, t: 'Membro' },
+                    { v: 2, t: 'Colaborador' },
+                    { v: 3, t: 'Moderador' },
+                    { v: 4, t: 'Gestor' }
+                ];
+                return `<select name=\"nv\" class=\"border-0 focus:outline-none\">${options.map(o => `<option value=\"${o.v}\" ${Number(current)===o.v?'selected':''}>${o.t}</option>`).join('')}</select>`;
+            };
+
             const activeRows = active.length
                 ? active.map(e => {
                     const p = userMap.get(e.us) || { id: e.us, tt: 'Usuário' };
-                    return UI.row(`member-${p.id}`, p.tt, `<span class=\"text-gray-500\">Membro</span>`);
+                    if (canManage) {
+                        const controls = `
+                            <div class=\"flex gap-2 items-center\">
+                                ${levelSelect(e.nv ?? 1)}
+                                <button data-action=\"update-member-level\" data-user-id=\"${p.id}\" data-scope-type=\"${type}\" data-scope-id=\"${data.id}\" class=\"p-2 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-md\">Atualizar</button>
+                            </div>`;
+                        return UI.row(`member-${p.id}`, p.tt, controls);
+                    }
+                    return UI.row(`member-${p.id}`, p.tt, `<span class=\"text-gray-500\">Nível: ${Number(e.nv ?? 1)}</span>`);
                 }).join('')
                 : `<div class=\"p-3 text-sm text-gray-500\">Nenhum membro ativo.</div>`;
 
-            const pendingRows = pending.length
+            const pendingRows = (pending.length && canManage)
                 ? pending.map(e => {
                     const p = userMap.get(e.us) || { id: e.us, tt: 'Usuário' };
                     const controls = `
@@ -1103,7 +1148,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isModerator = Array.isArray(moderators) && moderators.map(String).includes(uid);
                 return isOwner || isModerator;
             });
-            if (!managed.length) {
+            // Filtro: só equipes cujos negócios o usuário participa com aprovação
+            const approvedBizSet = new Set((Array.isArray(userBusinessesData) ? userBusinessesData : [])
+                .filter(r => Number(r?.st ?? 0) === 1)
+                .map(r => String(r.em))
+            );
+            const visible = managed.filter(t => approvedBizSet.has(String(t.em)));
+            if (!visible.length) {
                 // Select de negócios gerenciados para criar equipe (em)
                 const managedBiz = Array.isArray(userBusinessesData)
                     ? userBusinessesData.filter(r => Number(r?.nv ?? 0) >= 3 && Number(r?.st ?? 1) === 1).map(r => r.em)
@@ -1142,7 +1193,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     UI.row('teams-search','Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="teams-search" placeholder="Digite para filtrar">`, { top:true, bottom:true })
                 );
                 html += searchCardTeams;
-                const rows = managed.map(t => {
+                const rows = visible.map(t => {
                     const img = t?.im ? `data:image/png;base64,${t.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(t?.tt||'?').charAt(0)}`;
                     const name = (t?.tt || 'Equipe');
                     return `
@@ -1405,12 +1456,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
                         
         } else if (viewType === ENTITY.TEAM) {                                    
-            const parseIdArray = (val) => { try { const arr = JSON.parse(val); return Array.isArray(arr) ? arr : []; } catch(_) { return []; } };
-            const mods = (viewData?.usmn) ? parseIdArray(viewData.usmn) : [];
-            const isModerator = mods.map(String).includes(String(currentUserData.id));
-
-            // Verifica se o usuário não é gestor na empresa ou moderador
-            if (!isManager && !isModerator) {
+            const canManage = canManageTeam(viewData);
+            // Acesso de equipe NÃO herda de gestor do negócio.
+            // Somente moderadores/dono da equipe ou membros aprovados têm alternativas a pedir acesso.
+            if (!canManage) {
                 if (userTeams.includes(viewId)) {
                     if(memberStatus === 0) {
                         actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'cancel-request', label: 'Cancelar Pedido', color: 'yellow' }));
@@ -1488,6 +1537,43 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
+    // Notificações simples
+    function notifySuccess(msg) { try { swal('Pronto', msg, 'success'); } catch(_) { try { alert(msg); } catch(__) {} } }
+    function notifyError(msg) { try { swal('Ops', msg, 'error'); } catch(_) { try { alert(msg); } catch(__) {} } }
+    async function confirmDialog(msg, { title='Confirmação', danger=false } = {}) {
+        try {
+            return await swal({
+                title,
+                text: msg,
+                icon: danger ? 'warning' : 'info',
+                buttons: ['Cancelar', 'Confirmar'],
+                dangerMode: !!danger,
+            });
+        } catch(_) {
+            try { return confirm(msg); } catch(__) { return false; }
+        }
+    }
+
+    // UX helpers (debounce e estado de carregamento em botões)
+    function debounce(fn, delay = 250) {
+        let t;
+        return (...args) => { clearTimeout(t); t = setTimeout(() => fn.apply(null, args), delay); };
+    }
+
+    function setButtonLoading(button, loading = true, textWhileLoading = 'Aguarde…') {
+        if (!button) return;
+        if (loading) {
+            if (!button.dataset.origHtml) button.dataset.origHtml = button.innerHTML;
+            button.disabled = true;
+            button.classList.add('opacity-60','cursor-not-allowed');
+            button.innerHTML = `<span class="inline-block animate-pulse">${textWhileLoading}</span>`;
+        } else {
+            button.disabled = false;
+            button.classList.remove('opacity-60','cursor-not-allowed');
+            if (button.dataset.origHtml) { button.innerHTML = button.dataset.origHtml; delete button.dataset.origHtml; }
+        }
+    }
+
     // Compartilhar página atual
     async function sharePage() {
         const url = window.location.href;
@@ -1499,7 +1585,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_) {}
         try {
             await navigator.clipboard.writeText(url);
-            alert('Link copiado!');
+            notifySuccess('Link copiado!');
             return true;
         } catch (_) {
             prompt('Copie o link da página:', url);
@@ -1517,6 +1603,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return { ...base, em: id };
         }
         if (type === ENTITY.TEAM) {
+            // Se acesso à equipe está restrito, não retorna posts
+            if (viewRestricted) return { cm: -1 };
             return { ...base, cm: id };
         }
         return base;
@@ -1562,36 +1650,82 @@ document.addEventListener('DOMContentLoaded', () => {
                     SidebarNav.push({ view: 'apps', title: 'Aplicativos', payload: { data: currentUserData } });
                 }
             }
+            notifySuccess('Aplicativo desinstalado.');
         },
         'delete-business': async ({ button }) => {
             const id = button?.dataset?.id;
             if (!id) return;
-            if (!confirm('Tem certeza que deseja excluir este negócio? Esta ação não pode ser desfeita.')) return;
-            // Exclui vínculos de employees e o próprio negócio
-            await apiClient.post('/delete', { db: 'workz_companies', table: 'employees', conditions: { em: id } });
-            const result = await apiClient.post('/delete', { db: 'workz_companies', table: 'companies', conditions: { id } });
+            if (!(await confirmDialog('Tem certeza que deseja excluir este negócio? Esta ação não pode ser desfeita.', { danger: true }))) return;
+            setButtonLoading(button, true, 'Excluindo…');
+            try {
+                // Exclui vínculos de employees e o próprio negócio
+                await apiClient.post('/delete', { db: 'workz_companies', table: 'employees', conditions: { em: id } });
+                await apiClient.post('/delete', { db: 'workz_companies', table: 'companies', conditions: { id } });
+                // Atualiza caches locais
+                if (Array.isArray(userBusinessesData)) {
+                    userBusinessesData = userBusinessesData.filter(r => String(r.em) !== String(id));
+                }
+                if (Array.isArray(userBusinesses)) {
+                    userBusinesses = userBusinesses.filter(em => String(em) !== String(id));
+                }
+                // Volta para lista de Negócios no sidebar
+                if (typeof SidebarNav !== 'undefined') {
+                    const prev = SidebarNav.prev?.();
+                    if (prev && prev.view === 'businesses') {
+                        SidebarNav.back();
+                    } else {
+                        SidebarNav.resetRoot(currentUserData);
+                        SidebarNav.push({ view: 'businesses', title: 'Negócios', payload: { data: currentUserData } });
+                    }
+                }
+                notifySuccess('Negócio excluído.');
+            } catch(_) {
+                notifyError('Falha ao excluir o negócio.');
+            }
+            setButtonLoading(button, false);
+        },
+        'delete-team': async ({ button, state }) => {
+            const id = button?.dataset?.id;
+            const em = button?.dataset?.em || state?.view?.data?.em;
+            if (!id) return;
+            // Permissão: somente dono da equipe ou moderadores podem excluir
+            let canDelete = false;
+            try {
+                const teamData = state?.view?.data;
+                const uid = String(currentUserData.id);
+                const isOwner = String(teamData?.us) === uid;
+                let moderators = [];
+                try { moderators = teamData?.usmn ? JSON.parse(teamData.usmn) : []; } catch (_) { moderators = []; }
+                const isModerator = Array.isArray(moderators) && moderators.map(String).includes(uid);
+                canDelete = isOwner || isModerator;
+            } catch (_) { canDelete = false; }
+            if (!canDelete) { notifyError('Você não tem permissão para excluir esta equipe.'); return; }
+            if (!(await confirmDialog('Tem certeza que deseja excluir esta equipe? Esta ação não pode ser desfeita.', { danger: true }))) return;
+            // Usa endpoint protegido no backend
+            await apiClient.post('/teams/delete', { id: Number(id) });
+            notifySuccess('Equipe excluída.');
             // Atualiza caches locais
-            if (Array.isArray(userBusinessesData)) {
-                userBusinessesData = userBusinessesData.filter(r => String(r.em) !== String(id));
+            if (Array.isArray(userTeamsData)) userTeamsData = userTeamsData.filter(r => String(r.cm) !== String(id));
+            if (Array.isArray(userTeams)) userTeams = userTeams.filter(cm => String(cm) !== String(id));
+            // Se estamos na página desta equipe, redireciona
+            if (state?.view?.type === ENTITY.TEAM && String(state.view.id) === String(id)) {
+                if (em) navigateTo(`/business/${em}`); else navigateTo('/');
             }
-            if (Array.isArray(userBusinesses)) {
-                userBusinesses = userBusinesses.filter(em => String(em) !== String(id));
-            }
-            // Volta para lista de Negócios no sidebar
+            // Atualiza a navegação do sidebar para a lista de equipes
             if (typeof SidebarNav !== 'undefined') {
                 const prev = SidebarNav.prev?.();
-                if (prev && prev.view === 'businesses') {
+                if (prev && prev.view === 'teams') {
                     SidebarNav.back();
                 } else {
                     SidebarNav.resetRoot(currentUserData);
-                    SidebarNav.push({ view: 'businesses', title: 'Negócios', payload: { data: currentUserData } });
+                    SidebarNav.push({ view: 'teams', title: 'Equipes', payload: { data: currentUserData } });
                 }
             }
         },
         // Criação (negócio/equipe)
         'create-business': async () => {
             const name = (document.getElementById('new-business-name')?.value || '').trim();
-            if (!name) { alert('Informe o nome do negócio.'); return; }
+            if (!name) { notifyError('Informe o nome do negócio.'); return; }
             const sc = document.querySelector('.sidebar-content');
             // Cria o negócio
             const res = await apiClient.post('/insert', {
@@ -1613,10 +1747,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 newId = Array.isArray(lookup?.data) && lookup.data[0]?.id;
             }
-            if (!newId) {
-                alert('Falha ao criar o negócio.');
-                return;
-            }
+            if (!newId) { notifyError('Falha ao criar o negócio.'); return; }
             // Garante vínculo do usuário ao novo negócio (funciona com a lista "Negócios Gerenciados")
             try {
                 await apiClient.post('/insert', {
@@ -1644,7 +1775,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 conditions: { id: newId }
             });
             const business = Array.isArray(fetchNew?.data) ? fetchNew.data[0] : fetchNew?.data || null;
-            if (!business) { alert('Negócio criado, mas não foi possível carregar os dados.'); return; }
+            if (!business) { notifyError('Negócio criado, mas não foi possível carregar os dados.'); return; }
             if (typeof SidebarNav !== 'undefined') {
                 SidebarNav.push({ view: ENTITY.BUSINESS, title: business.tt || 'Negócio', payload: { data: business, type: 'business' } });
             } else if (sc) {
@@ -1655,7 +1786,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'create-team': async () => {
             const name = (document.getElementById('new-team-name')?.value || '').trim();
             const em   = (document.getElementById('new-team-business')?.value || '').trim();
-            if (!name || !em) { alert('Informe o nome da equipe e o negócio.'); return; }
+            if (!name || !em) { notifyError('Informe o nome da equipe e o negócio.'); return; }
             const sc = document.querySelector('.sidebar-content');
             // Cria a equipe
             const res = await apiClient.post('/insert', {
@@ -1677,7 +1808,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 newId = Array.isArray(lookup?.data) && lookup.data[0]?.id;
             }
-            if (!newId) { alert('Falha ao criar a equipe.'); return; }
+            if (!newId) { notifyError('Falha ao criar a equipe.'); return; }
             // Vínculo do usuário à equipe (teams_users)
             try {
                 await apiClient.post('/insert', {
@@ -1704,7 +1835,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 conditions: { id: newId }
             });
             const team = Array.isArray(fetchNew?.data) ? fetchNew.data[0] : fetchNew?.data || null;
-            if (!team) { alert('Equipe criada, mas não foi possível carregar os dados.'); return; }
+            if (!team) { notifyError('Equipe criada, mas não foi possível carregar os dados.'); return; }
             if (typeof SidebarNav !== 'undefined') {
                 SidebarNav.push({ view: ENTITY.TEAM, title: team.tt || 'Equipe', payload: { data: team, type: 'team' } });
             } else if (sc) {
@@ -1716,7 +1847,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const follower = state.user?.id;
             const followed = state.view?.id;
             if (!follower || !followed) return;
-            button.disabled = true;
+            setButtonLoading(button, true, 'Seguindo…');
             try {
                 const res = await apiClient.post('/insert', { db: 'workz_data', table: 'usg', data: { s0: follower, s1: followed } });
                 if (res && res.status === 'success') {
@@ -1736,16 +1867,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         const n = parseInt(cntEl.textContent || '0', 10) || 0;
                         cntEl.textContent = String(n + 1);
                     }
+                    notifySuccess('Agora você está seguindo.');
                 }
-            } finally {
-                button.disabled = false;
-            }
+            } finally { setButtonLoading(button, false); }
         },
         'unfollow-user': async ({ state, button }) => {
             const follower = state.user?.id;
             const followed = state.view?.id;
             if (!follower || !followed) return;
-            button.disabled = true;
+            setButtonLoading(button, true, 'Removendo…');
             try {
                 const res = await apiClient.post('/delete', { db: 'workz_data', table: 'usg', conditions: { s0: follower, s1: followed } });
                 if (res && res.status === 'success') {
@@ -1765,17 +1895,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         const n = parseInt(cntEl.textContent || '0', 10) || 0;
                         cntEl.textContent = String(Math.max(0, n - 1));
                     }
+                    notifySuccess('Você deixou de seguir.');
                 }
-            } finally {
-                button.disabled = false;
-            }
+            } finally { setButtonLoading(button, false); }
         },
-        // Acesso a negócios/equipes
-        'request-join': async ({ state }) => {
+        // Acesso a negócios/equipes (UI otimista)
+        'request-join': async ({ state, button }) => {
             const { table, idKey } = getMembershipMeta(state.view?.type);
             if (!table || !idKey) return;
             const payloadKeys = { us: state.user?.id, [idKey]: state.view?.id };
-            showLoading();
+            if (button) setButtonLoading(button, true, 'Enviando…');
             try {
                 const exists = await apiClient.post('/search', { db: 'workz_companies', table, columns: ['id','st'], conditions: payloadKeys, fetchAll: true, limit: 1 });
                 if (Array.isArray(exists?.data) && exists.data.length) {
@@ -1783,29 +1912,84 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     await apiClient.post('/insert', { db: 'workz_companies', table, data: { ...payloadKeys, st: 0 } });
                 }
-                loadPage();
-            } finally { hideLoading(); }
+                // Estado local
+                const idVal = state.view?.id;
+                if (state.view?.type === ENTITY.BUSINESS) {
+                    if (!Array.isArray(userBusinessesData)) userBusinessesData = [];
+                    const found = userBusinessesData.find(r => String(r.em) === String(idVal) && Number(r.us) === Number(state.user?.id));
+                    if (found) found.st = 0; else userBusinessesData.push({ us: state.user?.id, em: idVal, st: 0 });
+                    if (!Array.isArray(userBusinesses)) userBusinesses = [];
+                    if (!userBusinesses.map(String).includes(String(idVal))) userBusinesses.push(idVal);
+                    memberStatus = 0;
+                } else if (state.view?.type === ENTITY.TEAM) {
+                    if (!Array.isArray(userTeamsData)) userTeamsData = [];
+                    const found = userTeamsData.find(r => String(r.cm) === String(idVal) && Number(r.us) === Number(state.user?.id));
+                    if (found) found.st = 0; else userTeamsData.push({ us: state.user?.id, cm: idVal, st: 0 });
+                    if (!Array.isArray(userTeams)) userTeams = [];
+                    if (!userTeams.map(String).includes(String(idVal))) userTeams.push(idVal);
+                    memberStatus = 0;
+                }
+                const container = document.querySelector('#action-container');
+                if (container) container.innerHTML = UI.actionButton({ action: 'cancel-request', label: 'Cancelar Pedido', color: 'yellow' });
+                notifySuccess('Solicitação enviada.');
+            } finally { if (button) setButtonLoading(button, false); }
         },
-        'cancel-request': async ({ state }) => {
+        'cancel-request': async ({ state, button }) => {
             const { table, idKey } = getMembershipMeta(state.view?.type);
             if (!table || !idKey) return;
             const keys = { us: state.user?.id, [idKey]: state.view?.id, st: 0 };
-            showLoading();
+            if (button) setButtonLoading(button, true, 'Cancelando…');
             try {
                 await apiClient.post('/delete', { db: 'workz_companies', table, conditions: keys });
-                loadPage();
-            } finally { hideLoading(); }
+                const idVal = state.view?.id;
+                if (state.view?.type === ENTITY.BUSINESS) {
+                    if (Array.isArray(userBusinessesData)) {
+                        userBusinessesData = userBusinessesData.filter(r => !(String(r.em) === String(idVal) && Number(r.st) === 0 && Number(r.us) === Number(state.user?.id)));
+                    }
+                    // Se não houver vínculo ativo restante, remove do resumo
+                    const stillActive = Array.isArray(userBusinessesData) && userBusinessesData.some(r => String(r.em) === String(idVal) && Number(r.st) === 1);
+                    if (!stillActive) userBusinesses = (userBusinesses || []).filter(em => String(em) !== String(idVal));
+                    memberStatus = stillActive ? 1 : null;
+                } else if (state.view?.type === ENTITY.TEAM) {
+                    if (Array.isArray(userTeamsData)) {
+                        userTeamsData = userTeamsData.filter(r => !(String(r.cm) === String(idVal) && Number(r.st) === 0 && Number(r.us) === Number(state.user?.id)));
+                    }
+                    const stillActive = Array.isArray(userTeamsData) && userTeamsData.some(r => String(r.cm) === String(idVal) && Number(r.st) === 1);
+                    if (!stillActive) userTeams = (userTeams || []).filter(cm => String(cm) !== String(idVal));
+                    memberStatus = stillActive ? 1 : null;
+                }
+                const container = document.querySelector('#action-container');
+                if (container) container.innerHTML = UI.actionButton({ action: 'request-join', label: 'Solicitar Acesso', color: 'green' });
+                notifySuccess('Solicitação cancelada.');
+            } finally { if (button) setButtonLoading(button, false); }
         },
-        'cancel-access': async ({ state }) => {
+        'cancel-access': async ({ state, button }) => {
             const { table, idKey } = getMembershipMeta(state.view?.type);
             if (!table || !idKey) return;
             const keys = { us: state.user?.id, [idKey]: state.view?.id };
-            showLoading();
+            if (button) setButtonLoading(button, true, 'Atualizando…');
             try {
-                // Define status inativo (0). Se preferir remover por completo, troque por /delete
                 await apiClient.post('/update', { db: 'workz_companies', table, data: { st: 0 }, conditions: keys });
-                loadPage();
-            } finally { hideLoading(); }
+                const idVal = state.view?.id;
+                if (state.view?.type === ENTITY.BUSINESS) {
+                    const rec = Array.isArray(userBusinessesData) && userBusinessesData.find(r => String(r.em) === String(idVal) && Number(r.us) === Number(state.user?.id));
+                    if (rec) rec.st = 0;
+                    memberStatus = 0;
+                } else if (state.view?.type === ENTITY.TEAM) {
+                    const rec = Array.isArray(userTeamsData) && userTeamsData.find(r => String(r.cm) === String(idVal) && Number(r.us) === Number(state.user?.id));
+                    if (rec) rec.st = 0;
+                    memberStatus = 0;
+                    // Se estamos vendo a equipe atual, bloqueia o conteúdo imediatamente
+                    if (viewType === ENTITY.TEAM && String(viewId) === String(idVal)) {
+                        viewRestricted = true;
+                        const main = document.querySelector('#main-content');
+                        if (main) await renderTemplate(main, templates.teamRestricted);
+                    }
+                }
+                const container = document.querySelector('#action-container');
+                if (container) container.innerHTML = UI.actionButton({ action: 'cancel-request', label: 'Cancelar Pedido', color: 'yellow' });
+                notifySuccess('Acesso desativado.');
+            } finally { if (button) setButtonLoading(button, false); }
         },
         // Gestão de solicitações (membros de equipe/negócio) via sidebar
         'accept-member': async ({ button }) => {
@@ -1813,44 +1997,123 @@ document.addEventListener('DOMContentLoaded', () => {
             const scopeType = button?.dataset?.scopeType; // 'business' | 'team'
             const scopeId = button?.dataset?.scopeId;
             if (!uid || !scopeType || !scopeId) return;
-            const table = (scopeType === 'business') ? 'employees' : 'teams_users';
-            const idKey = (scopeType === 'business') ? 'em' : 'cm';
-            button.disabled = true;
+            setButtonLoading(button, true, 'Aceitando…');
             try {
-                await apiClient.post('/update', { db: 'workz_companies', table, data: { st: 1 }, conditions: { us: Number(uid), [idKey]: Number(scopeId) } });
+                if (scopeType === 'business') {
+                    await apiClient.post('/companies/members/accept', { companyId: Number(scopeId), userId: Number(uid) });
+                } else {
+                    await apiClient.post('/teams/members/accept', { teamId: Number(scopeId), userId: Number(uid) });
+                    // Se o usuário aceitou a si mesmo na equipe atualmente aberta, liberar conteúdo imediatamente
+                    const isSelf = String(uid) === String(currentUserData.id);
+                    const isCurrentTeam = (viewType === ENTITY.TEAM) && String(viewId) === String(scopeId);
+                    if (isSelf) {
+                        // Atualiza caches locais
+                        if (!Array.isArray(userTeamsData)) userTeamsData = [];
+                        const found = userTeamsData.find(r => String(r.cm) === String(scopeId) && Number(r.us) === Number(currentUserData.id));
+                        if (found) found.st = 1; else userTeamsData.push({ us: currentUserData.id, cm: Number(scopeId), st: 1 });
+                        if (!Array.isArray(userTeams)) userTeams = [];
+                        if (!userTeams.map(String).includes(String(scopeId))) userTeams.push(Number(scopeId));
+                        if (isCurrentTeam) {
+                            memberStatus = 1;
+                            viewRestricted = false;
+                            // Re-renderiza a view atual para carregar conteúdo e feed
+                            try { await renderView(viewId); } catch(_) {}
+                        }
+                    }
+                }
                 if (typeof SidebarNav !== 'undefined') SidebarNav.render();
-            } finally { button.disabled = false; }
+                notifySuccess('Solicitação aceita.');
+            } finally { setButtonLoading(button, false); }
         },
         'reject-member': async ({ button }) => {
             const uid = button?.dataset?.userId;
             const scopeType = button?.dataset?.scopeType;
             const scopeId = button?.dataset?.scopeId;
             if (!uid || !scopeType || !scopeId) return;
-            const table = (scopeType === 'business') ? 'employees' : 'teams_users';
-            const idKey = (scopeType === 'business') ? 'em' : 'cm';
+            setButtonLoading(button, true, 'Rejeitando…');
+            try {
+                if (scopeType === 'business') {
+                    await apiClient.post('/companies/members/reject', { companyId: Number(scopeId), userId: Number(uid) });
+                } else {
+                    await apiClient.post('/teams/members/reject', { teamId: Number(scopeId), userId: Number(uid) });
+                }
+                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+                notifySuccess('Solicitação rejeitada.');
+            } finally { setButtonLoading(button, false); }
+        },
+        'update-member-level': async ({ button }) => {
+            const uid = button?.dataset?.userId;
+            const scopeType = button?.dataset?.scopeType; // 'business' | 'team'
+            const scopeId = button?.dataset?.scopeId;
+            if (!uid || !scopeType || !scopeId) return;
+            const row = button.closest('.grid');
+            const sel = row ? row.querySelector('select[name="nv"]') : null;
+            const nv = sel ? Number(sel.value) : null;
+            if (nv == null) return;
             button.disabled = true;
             try {
-                await apiClient.post('/delete', { db: 'workz_companies', table, conditions: { us: Number(uid), [idKey]: Number(scopeId), st: 0 } });
-                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
-            } finally { button.disabled = false; }
+                if (scopeType === 'business') {
+                    await apiClient.post('/companies/members/level', { companyId: Number(scopeId), userId: Number(uid), nv });
+                } else {
+                    await apiClient.post('/teams/members/level', { teamId: Number(scopeId), userId: Number(uid), nv });
+                }
+                // Atualiza caches locais mínimos
+                if (scopeType === 'business' && Array.isArray(userBusinessesData)) {
+                    const rec = userBusinessesData.find(r => String(r.em) === String(scopeId) && Number(r.us) === Number(uid));
+                    if (rec) rec.nv = nv;
+                }
+                if (scopeType === 'team' && Array.isArray(userTeamsData)) {
+                    const rec = userTeamsData.find(r => String(r.cm) === String(scopeId) && Number(r.us) === Number(uid));
+                    if (rec) rec.nv = nv;
+                }
+
+                // Se o usuário atual mudou seu próprio nível na página aberta, atualize a UI sem recarregar
+                const isSelf = String(uid) === String(currentUserData.id);
+                const onCurrentBusiness = (scopeType === 'business' && viewType === ENTITY.BUSINESS && String(viewId) === String(scopeId));
+                const onCurrentTeam = (scopeType === 'team' && viewType === ENTITY.TEAM && String(viewId) === String(scopeId));
+                if (isSelf && (onCurrentBusiness || onCurrentTeam)) {
+                    memberLevel = Number(nv) || 0;
+                    const ac = document.querySelector('#action-container');
+                    if (ac) { ac.innerHTML = ''; pageAction(); }
+                    if (typeof SidebarNav !== 'undefined') {
+                        try { await SidebarNav.render(); } catch(_) {}
+                    }
+                }
+                // Feedback simples
+                button.textContent = 'Atualizado';
+                notifySuccess('Nível atualizado.');
+                setTimeout(() => { button.textContent = 'Atualizar'; button.disabled = false; }, 800);
+            } catch (_) {
+                button.disabled = false;
+                notifyError('Falha ao atualizar nível.');
+            }
         },
         // Depoimentos (testimonials)
         'accept-testmonial': async ({ button }) => {
             const id = button?.dataset?.id;
             if (!id) return;
-            await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 1 }, conditions: { id } });
+            try {
+                await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 1 }, conditions: { id } });
+                notifySuccess('Depoimento aceito.');
+            } catch(_) { notifyError('Falha ao aceitar depoimento.'); }
             loadPage();
         },
         'reject-testmonial': async ({ button }) => {
             const id = button?.dataset?.id;
             if (!id) return;
-            await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 2 }, conditions: { id } });
+            try {
+                await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 2 }, conditions: { id } });
+                notifySuccess('Depoimento rejeitado.');
+            } catch(_) { notifyError('Falha ao rejeitar depoimento.'); }
             loadPage();
         },
         'revert-testmonial': async ({ button }) => {
             const id = button?.dataset?.id;
             if (!id) return;
-            await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 0 }, conditions: { id } });
+            try {
+                await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 0 }, conditions: { id } });
+                notifySuccess('Depoimento revertido.');
+            } catch(_) { notifyError('Falha ao reverter depoimento.'); }
             loadPage();
         },
         // Jobs (experiências)
@@ -1860,8 +2123,10 @@ document.addEventListener('DOMContentLoaded', () => {
             showLoading();
             try {
                 await apiClient.post('/delete', { db: 'workz_companies', table: 'employees', conditions: { id } });
+                notifySuccess('Experiência excluída.');
                 loadPage();
-            } finally { hideLoading(); }
+            } catch(_) { notifyError('Falha ao excluir experiência.'); }
+            finally { hideLoading(); }
         },
         'edit-job': ({ button }) => {
             const id = button?.dataset?.id;
@@ -1889,6 +2154,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (type === ENTITY.TEAM) return { table: 'teams_users', idKey: 'cm' };
         return { table: null, idKey: null };
     }
+
+    // ================================
+    // Helpers de permissão (front)
+    // ================================
+    function isBusinessManager(companyId) {
+        try {
+            const rec = (userBusinessesData || []).find(r => String(r.em) === String(companyId) && Number(r.st) === 1);
+            const level = Number(rec?.nv ?? 0);
+            return level >= 3;
+        } catch(_) { return false; }
+    }
+    function isTeamOwner(teamData) {
+        try { return String(teamData?.us) === String(currentUserData.id); } catch(_) { return false; }
+    }
+    function isTeamModerator(teamData) {
+        try {
+            const mods = teamData?.usmn ? JSON.parse(teamData.usmn) : [];
+            return Array.isArray(mods) && mods.map(String).includes(String(currentUserData.id));
+        } catch(_) { return false; }
+    }
+    function canManageTeam(teamData) { return isTeamOwner(teamData) || isTeamModerator(teamData); }
 
     // ===================================================================
     // 😉 ANIMAÇÃO E RENDERIZAÇÃO
@@ -2319,11 +2605,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // 2) Mapa id->em para consulta rápida
         const idToEm = new Map((teamRes?.data || []).map(r => [r.id, r.em]));
 
-        // 3) Conjunto de businesses do usuário (compatível com string/number)
+        // 3) Conjunto de businesses aprovados do usuário (compatível com string/number)
         const userBusinessSet = new Set(
-            (userBusinesses || []).map(b =>
-                String(typeof b === 'object' ? (b.em ?? b.id ?? b) : b)
-            )
+            (Array.isArray(userBusinessesData) ? userBusinessesData : [])
+                .filter(r => Number(r?.st ?? 0) === 1)
+                .map(r => String(r.em))
         );
 
         // 4) Filtre os teams que pertencem a businesses do usuário
@@ -2354,9 +2640,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const renderList = async (listType = 'people') => {
             const entityMap = {
-                people:     { db: 'workz_data', table: 'hus', columns: ['id', 'tt', 'im'], conditions: { st: 1 }, url: 'profile/' },
-                teams:      { db: 'workz_companies', table: 'teams', columns: ['id', 'tt', 'im'], conditions: { st: 1 }, url: 'team/' },
-                businesses: { db: 'workz_companies', table: 'companies', columns: ['id', 'tt', 'im'], conditions: { st: 1 }, url: 'business/' }
+                people:     { db: 'workz_data',      table: 'hus',       columns: ['id', 'tt', 'im'],        conditions: { st: 1 }, url: 'profile/' },
+                teams:      { db: 'workz_companies', table: 'teams',     columns: ['id', 'tt', 'im', 'em'], conditions: { st: 1 }, url: 'team/' },
+                businesses: { db: 'workz_companies', table: 'companies', columns: ['id', 'tt', 'im'],        conditions: { st: 1 }, url: 'business/' }
             };            
             let list = await apiClient.post('/search', {
                 db: entityMap[listType].db,
@@ -2367,6 +2653,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchAll: true
             }); 
             list = list.data;
+            // Filtro global: Equipes só são listadas se o usuário for membro aprovado do negócio dono
+            if (listType === 'teams') {
+                const approvedBizSet = new Set((Array.isArray(userBusinessesData) ? userBusinessesData : [])
+                    .filter(r => Number(r?.st ?? 0) === 1)
+                    .map(r => String(r.em))
+                );
+                list = (list || []).filter(t => approvedBizSet.has(String(t.em)));
+            }
             renderTemplate(workzContent, templates.listView, list, async () => {
                 // Delegação única para os itens da lista
                 const handler = (e) => {
@@ -2375,6 +2669,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     navigateTo(`/${ entityMap[listType].url + item.dataset.itemId }`);
                 };
                 workzContent.addEventListener('click', handler, { once: true });
+                // Busca rápida no cliente
+                const searchInput = document.getElementById(`${listType}-search`);
+                if (searchInput) {
+                    const listRoot = workzContent.querySelector('.col-span-12.grid');
+                    const doFilter = () => {
+                        const q = (searchInput.value || '').toLowerCase().trim();
+                        workzContent.querySelectorAll('.list-item').forEach(el => {
+                            const name = el.getAttribute('data-name') || '';
+                            el.style.display = (!q || name.includes(q)) ? '' : 'none';
+                        });
+                    };
+                    searchInput.addEventListener('input', debounce(doFilter, 150));
+                }
                 hideLoading();
             });
         };
@@ -2444,15 +2751,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (viewType === 'dashboard') {            
 
             const ppl = Array.isArray(userPeople) ? userPeople : [];
-            const biz = Array.isArray(userBusinesses) ? userBusinesses : [];
-            const teams = Array.isArray(userTeams) ? userTeams : [];
+            // Somente vínculos aprovados para widgets do dashboard
+            const approvedBizIds = (Array.isArray(userBusinessesData) ? userBusinessesData : [])
+                .filter(r => Number(r?.st ?? 0) === 1)
+                .map(r => r.em);
+            const approvedTeamIds = (Array.isArray(userTeamsData) ? userTeamsData : [])
+                .filter(r => Number(r?.st ?? 0) === 1)
+                .map(r => r.cm);
 
             widgetPeople = ppl.slice(0, 6);
-            widgetBusinesses = biz.slice(0, 6);
-            widgetTeams = teams.slice(0, 6);
+            widgetBusinesses = approvedBizIds.slice(0, 6);
+            widgetTeams = approvedTeamIds.slice(0, 6);
             widgetPeopleCount = ppl.length;
-            widgetBusinessesCount = biz.length;
-            widgetTeamsCount = teams.length;
+            widgetBusinessesCount = approvedBizIds.length;
+            widgetTeamsCount = approvedTeamIds.length;
 
             entityImage = (currentUserData.im) ? 'data:image/png;base64,' + currentUserData.im : `https://placehold.co/100x100/EFEFEF/333?text=${currentUserData.tt.charAt(0)}`;            
 
@@ -2464,20 +2776,23 @@ document.addEventListener('DOMContentLoaded', () => {
             if (viewType === ENTITY.PROFILE) {
                 entityMap = {
                     people:     { db: 'workz_data',      table: 'usg',             target: 's1', conditions: { s0: entityId }, mainDb: 'workz_data', mainTable: 'hus' },
-                    businesses: { db: 'workz_companies', table: 'employees',       target: 'em', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'companies' },
+                    // Somente businesses aprovados (st=1)
+                    businesses: { db: 'workz_companies', table: 'employees',       target: 'em', conditions: { us: entityId, st: 1 }, mainDb: 'workz_companies', mainTable: 'companies' },
                     teams:      { db: 'workz_companies', table: 'teams_users',     target: 'cm', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'teams' },
                 }; 
                 entitiesToFetch = ['people', 'businesses', 'teams'];                
             } else if (viewType === ENTITY.BUSINESS) {
                 entityMap = {
-                    people:     { db: 'workz_companies', table: 'employees',       target: 'us', conditions: { em: entityId }, mainDb: 'workz_data', mainTable: 'hus' },                    
+                    // Somente membros aprovados (st=1) devem aparecer no widget da página do negócio
+                    people:     { db: 'workz_companies', table: 'employees',       target: 'us', conditions: { em: entityId, st: 1 }, mainDb: 'workz_data', mainTable: 'hus' },                    
                     teams:      { db: 'workz_companies', table: 'teams',           target: 'id', conditions: { em: entityId, st: 1 } },
                     businesses: { db: 'workz_companies', table: 'employees',       target: 'em', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'companies' },
                 }; 
                 entitiesToFetch = ['people', 'teams'];
             } else if  (viewType === ENTITY.TEAM) {
                 entityMap = {
-                    people:     { db: 'workz_companies', table: 'teams_users',     target: 'us', conditions: { cm: entityId }, mainDb: 'workz_data', mainTable: 'hus' },
+                    // Somente membros aprovados (st=1) devem aparecer
+                    people:     { db: 'workz_companies', table: 'teams_users',     target: 'us', conditions: { cm: entityId, st: 1 }, mainDb: 'workz_data', mainTable: 'hus' },
                     teams:      { db: 'workz_companies', table: 'teams_users',     target: 'cm', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'teams' }
                 }; 
                 entitiesToFetch = ['people'];
@@ -2561,8 +2876,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             Object.assign(entityData.data[0], results);
-            
+
             viewData = entityData.data[0];
+
+            // Restrição de acesso para páginas de Equipe: somente membros aprovados da equipe
+            if (viewType === ENTITY.TEAM) {
+                const isTeamMemberApproved = Array.isArray(userTeamsData)
+                    ? userTeamsData.some(t => String(t.cm) === String(viewData.id) && Number(t.st) === 1)
+                    : false;
+                viewRestricted = !isTeamMemberApproved;
+            } else {
+                viewRestricted = false;
+            }
 
             const postConditions = getPostConditions(viewType, entityId);
             const followersConditions = getFollowersConditions(viewType, entityId);
@@ -2634,6 +2959,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 results.teamsCount = filteredTeams.length;
             }
 
+            // Negócios: se usuário não participa (aprovado) do negócio, não listar equipes dele
+            if (viewType === ENTITY.BUSINESS) {
+                const belongs = (Array.isArray(userBusinessesData) ? userBusinessesData : [])
+                    .some(r => String(r.em) === String(entityId) && Number(r.st) === 1);
+                if (!belongs) {
+                    results.teams = [];
+                    results.teamsCount = 0;
+                }
+            }
+
             // Atribuições com fallback
             widgetPeople     = Array.isArray(results?.people)     ? results.people.slice(0, 6)     : [];
             widgetBusinesses = Array.isArray(results?.businesses) ? results.businesses.slice(0, 6) : [];
@@ -2648,7 +2983,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (widgetBusinesses.length)  await appendWidget('businesses',  widgetBusinesses,  widgetBusinessesCount);
         if (widgetTeams.length)       await appendWidget('teams',       widgetTeams,       widgetTeamsCount);
 
-        memberLevel = (viewType === ENTITY.TEAM) ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.em)?.nv ?? 0)) : (viewType === ENTITY.BUSINESS) ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.id)?.nv ?? 0)) : 0;
+        // Nível do usuário
+        // - TEAM: utiliza nv do vínculo na própria equipe (teams_users)
+        // - BUSINESS: utiliza nv do vínculo na empresa (employees)
+        memberLevel = (viewType === ENTITY.TEAM)
+            ? Number(parseInt(userTeamsData.find(item => item.cm === viewData.id)?.nv ?? 0))
+            : (viewType === ENTITY.BUSINESS)
+                ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.id)?.nv ?? 0))
+                : 0;
         memberStatus = (viewType === ENTITY.TEAM) ? Number(parseInt(userTeamsData.find(item => item.cm === viewData.id)?.st ?? 0)) : (viewType === ENTITY.BUSINESS) ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.id)?.st ?? 0)) : 0;
 
         Promise.all([            
@@ -2682,7 +3024,11 @@ document.addEventListener('DOMContentLoaded', () => {
             (viewType !== 'dashboard')
                 ?
                 // Conteúdo principal (Perfil, Negócio ou Equipe)
-                renderTemplate(document.querySelector('#main-content'), templates['entityContent'], { data: entityData.data[0] } )
+                renderTemplate(
+                    document.querySelector('#main-content'),
+                    (viewType === ENTITY.TEAM && viewRestricted) ? templates.teamRestricted : templates['entityContent'],
+                    { data: entityData.data[0] }
+                )
                 : Promise.resolve(),
             
             // Imagem da página
@@ -2710,6 +3056,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (type === 'teams') baseUrl = '/team/';
                 else baseUrl = '/business/';
 
+                navigateTo(`${baseUrl}${id}`);
+            });
+
+            // Acessibilidade: abrir cards com Enter
+            widgetWrapper.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter') return;
+                const card = e.target.closest('.card-item');
+                if (!card) return;
+                const widgetRoot = card.closest('[id^="widget-"]');
+                const type = widgetRoot?.id?.replace('widget-','') || '';
+                const id = card.dataset.id;
+                let baseUrl;
+                if (type === 'people') baseUrl = '/profile/';
+                else if (type === 'teams') baseUrl = '/team/';
+                else baseUrl = '/business/';
                 navigateTo(`${baseUrl}${id}`);
             });
 
