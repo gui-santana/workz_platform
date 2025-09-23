@@ -1,0 +1,39 @@
+// Constantes de entidade para padronização
+    const ENTITY = Object.freeze({
+    const ENTITY_TO_TYPE_MAP = Object.freeze({
+        [ENTITY.PROFILE]: 'people',
+        [ENTITY.BUSINESS]: 'businesses',
+        [ENTITY.TEAM]: 'teams'
+    });
+
+    function resolveImageSrc(imValue, label = '', options = {}) {
+        const { size = 100, fallbackUrl = null } = options ?? {};
+        const raw = imValue ?? '';
+        const trimmed = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+
+        if (!trimmed) {
+            if (fallbackUrl) return fallbackUrl;
+            const initial = ((label ?? '').toString().trim().charAt(0) || '?').toUpperCase();
+            const safeInitial = encodeURIComponent(initial);
+            return `https://placehold.co/${size}x${size}/EFEFEF/333?text=${safeInitial}`;
+        }
+
+        if (/^data:image\//i.test(trimmed)) return trimmed;
+        if (/^https?:\/\//i.test(trimmed)) return trimmed;
+        if (trimmed.startsWith('/')) return trimmed;
+        return `data:image/png;base64,${trimmed}`;
+    }
+
+    function resolveBackgroundImage(imValue, label = '', options = {}) {
+        const src = resolveImageSrc(imValue, label, options);
+        return `url('${src}')`;
+    }
+
+        PROFILE: 'profile',
+        BUSINESS: 'business',
+        TEAM: 'team'
+    });
+
+   // ===================================================================
+    // 🏳️ TEMPLATES - Partes do HTML a ser renderizado
+    // =======================================

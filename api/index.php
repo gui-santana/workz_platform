@@ -70,10 +70,12 @@ $router->add('POST', '/api/search', [GeneralController::class, 'search']);
 $router->add('POST', '/api/count', [GeneralController::class, 'count']);
 $router->add('POST', '/api/delete', [GeneralController::class, 'delete']);
 
+
 // Rota para alterar o e-mail
 $router->add('POST', '/api/change-email', [GeneralController::class, 'changeEmail']);
 // Rota para alterar a senha
 $router->add('POST', '/api/change-password', [GeneralController::class, 'changePassword']);
+$router->add('POST', '/api/upload-image', [GeneralController::class, 'uploadImage'], [AuthMiddleware::class, 'handle']);
 
 // Rotas de equipes (protegidas)
 $router->add('POST', '/api/teams/delete', [TeamsController::class, 'delete'], [AuthMiddleware::class, 'handle']);
@@ -95,3 +97,6 @@ $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
 
 $router->dispatch($uri, $method);
+
+
+

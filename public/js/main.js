@@ -2,7 +2,7 @@
 
 import { ApiClient } from "./core/ApiClient.js";
 
-document.addEventListener('DOMContentLoaded', () => {    
+document.addEventListener('DOMContentLoaded', () => {
 
     const mainWrapper = document.querySelector("#main-wrapper"); //Main Wrapper
     const sidebarWrapper = document.querySelector('#sidebar-wrapper');
@@ -50,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
         async render(){
             if (!this.mount) return;
             const st = this.current();
+            destroyImageCropper({ keepContext: st?.view === 'image-crop' });
             const isRoot = (st.view === 'root');
             const payload = { ...(st.payload||{}), view: (isRoot ? null : st.view), origin: 'stack', navTitle: st.title, prevTitle: (this.prev()?.title || 'Ajustes') };
             this.mount.dataset.navMode = 'stack';
@@ -207,6 +208,31 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     initOutsourcedUI(this.mount);
                 }
+
+                if (st.view === 'image-crop') {
+                    initializeImageCropperView(this.mount, payload.crop);
+                    return;
+                }
+
+                if (st.view === 'password') {
+                    const form = this.mount.querySelector('#change-password-form');
+                    if (form) {
+                        if (form._changePasswordHandler) {
+                            form.removeEventListener('submit', form._changePasswordHandler, true);
+                        }
+                        const submitHandler = (ev) => {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            if (typeof ev.stopImmediatePropagation === 'function') {
+                                ev.stopImmediatePropagation();
+                            }
+                            handleChangePassword(ev);
+                        };
+                        form.addEventListener('submit', submitHandler, true);
+                        form.onsubmit = submitHandler;
+                        form._changePasswordHandler = submitHandler;
+                    }
+                }
             });
         }
     };
@@ -218,7 +244,532 @@ document.addEventListener('DOMContentLoaded', () => {
         TEAM: 'team'
     });
 
-   // ===================================================================
+    const ENTITY_TO_TYPE_MAP = Object.freeze({
+        [ENTITY.PROFILE]: 'people',
+        [ENTITY.BUSINESS]: 'businesses',
+        [ENTITY.TEAM]: 'teams'
+    });
+
+    function resolveImageSrc(imValue, label = '', options = {}) {
+        const { size = 100, fallbackUrl = null } = options ?? {};
+        const raw = imValue ?? '';
+        const trimmed = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+
+        if (!trimmed) {
+            if (fallbackUrl) return fallbackUrl;
+            const initial = ((label ?? '').toString().trim().charAt(0) || '?').toUpperCase();
+            const safeInitial = encodeURIComponent(initial);
+            return `https://placehold.co/${size}x${size}/EFEFEF/333?text=${safeInitial}`;
+        }
+
+        if (/^data:image\//i.test(trimmed)) return trimmed;
+        if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+        // If it starts with a known image path, treat it as a path.
+        if (trimmed.startsWith('/images/') || trimmed.startsWith('/users/')) {
+            return trimmed;
+        }
+    
+        // Otherwise, assume it's raw base64 data.
+        return `data:image/png;base64,${trimmed}`;
+    }
+
+    function resolveBackgroundImage(imValue, label = '', options = {}) {
+        const src = resolveImageSrc(imValue, label, options);
+        return `url('${src}')`;
+    }
+       const IMAGE_UPLOAD_STATE = {
+        input: null,
+        context: null,
+        cropper: null
+    };
+
+    function getImageUploadInput() {
+        if (IMAGE_UPLOAD_STATE.input) return IMAGE_UPLOAD_STATE.input;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.style.display = 'none';
+        input.addEventListener('change', handleHeroImageSelection);
+        sidebarWrapper.appendChild(input);
+        IMAGE_UPLOAD_STATE.input = input;
+        return input;
+    }
+
+    function resetImageUploadState({ clearContext = true } = {}) {
+        if (clearContext) IMAGE_UPLOAD_STATE.context = null;
+        if (IMAGE_UPLOAD_STATE.input) {
+            IMAGE_UPLOAD_STATE.input.value = '';
+        }
+    }
+
+    function setupHeroImageUpload(sidebarContent, pageSettingsData, pageSettingsView) {
+        const heroImage = sidebarContent?.querySelector('#sidebar-profile-image');
+        if (!heroImage) return;
+
+        const entityType = ENTITY_TO_TYPE_MAP[pageSettingsView] || 'people';
+        const entityId = pageSettingsData?.id ?? currentUserData?.id;
+        if (!entityId) return;
+
+        const clickHandler = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const input = getImageUploadInput();
+            IMAGE_UPLOAD_STATE.context = {
+                entityType,
+                entityId,
+                view: pageSettingsView,
+                data: pageSettingsData,
+                messageContainer: sidebarContent.querySelector('#message') || document.getElementById('message')
+            };
+            input.value = '';
+            input.click();
+        };
+
+        heroImage.style.cursor = 'pointer';
+        heroImage.classList.add('cursor-pointer');
+        if (heroImage._uploadHandler) {
+            heroImage.removeEventListener('click', heroImage._uploadHandler);
+        }
+        heroImage.addEventListener('click', clickHandler);
+        heroImage._uploadHandler = clickHandler;
+    }
+
+    function handleHeroImageSelection(event) {
+        const input = event.target;
+        const file = input?.files?.[0];
+        const context = IMAGE_UPLOAD_STATE.context;
+        if (!file || !context) {
+            resetImageUploadState();
+            return;
+        }
+
+        if (!file.type.startsWith('image/')) {
+            const container = context.messageContainer || document.getElementById('message');
+            if (container) {
+                showMessage(container, 'Selecione um arquivo de imagem válido.', 'warning', { dismissAfter: 5000 });
+            }
+            resetImageUploadState();
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result;
+            if (!dataUrl) {
+                const container = context.messageContainer || document.getElementById('message');
+                if (container) {
+                    showMessage(container, 'Não foi possível ler o arquivo selecionado.', 'error', { dismissAfter: 5000 });
+                }
+                resetImageUploadState();
+                return;
+            }
+
+            openImageCropperView({
+                entityContext: { ...context },
+                imageDataUrl: dataUrl,
+                fileName: file.name,
+                fileType: file.type,
+                fileSize: file.size
+            });
+        };
+        reader.onerror = () => {
+            const container = context.messageContainer || document.getElementById('message');
+            if (container) {
+                void showMessage(container, 'Falha ao carregar a imagem selecionada.', 'error', { dismissAfter: 5000 });
+            }
+            resetImageUploadState();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function openImageCropperView(cropPayload) {
+        if (!cropPayload?.entityContext?.entityId) {
+            resetImageUploadState();
+            return;
+        }
+
+        SidebarNav.push({
+            view: 'image-crop',
+            title: 'Editar imagem',
+            payload: {
+                data: cropPayload.entityContext.data,
+                type: cropPayload.entityContext.view,
+                crop: { ...cropPayload }
+            }
+        });
+    }
+
+        function initializeImageCropperView(sidebarMount, cropData) {
+        destroyImageCropper({ keepContext: true });
+        if (!sidebarMount || !cropData?.imageDataUrl) return;
+
+        const container = sidebarMount.querySelector('[data-role="cropper-box"]');
+        const imageEl = sidebarMount.querySelector('[data-role="cropper-image"]');
+        const zoomInput = sidebarMount.querySelector('[data-role="cropper-zoom"]');
+        const saveBtn = sidebarMount.querySelector('[data-action="crop-save"]');
+        const cancelBtn = sidebarMount.querySelector('[data-action="crop-cancel"]');
+        const messageContainer = sidebarMount.querySelector('[data-role="message"]') || document.getElementById('message');
+
+        if (!container || !imageEl || !zoomInput || !saveBtn || !cancelBtn) {
+            resetImageUploadState();
+            return;
+        }
+
+        container.style.position = 'relative';
+        container.style.touchAction = 'none';
+        imageEl.style.position = 'absolute';
+        imageEl.draggable = false;
+
+        const bounds = container.getBoundingClientRect();
+        const containerSize = Math.max(bounds.width, bounds.height) || container.clientWidth || container.clientHeight || 0;
+
+        const onPointerDown = (event) => {
+            const state = IMAGE_UPLOAD_STATE.cropper; // Get the latest state
+            if (!state) return;
+            event.preventDefault();
+            state.dragging = true;
+            state.pointerId = event.pointerId;
+            state.startPointerX = event.clientX;
+            state.startPointerY = event.clientY;
+            state.startOffsetX = state.offsetX;
+            state.startOffsetY = state.offsetY;
+            container.setPointerCapture(event.pointerId);
+        };
+
+        const onPointerMove = (event) => {
+            const state = IMAGE_UPLOAD_STATE.cropper; // Get the latest state
+            if (!state || !state.dragging || event.pointerId !== state.pointerId) return;
+            event.preventDefault();
+            const deltaX = event.clientX - state.startPointerX;
+            const deltaY = event.clientY - state.startPointerY;
+            state.offsetX = state.startOffsetX + deltaX;
+            state.offsetY = state.startOffsetY + deltaY;
+            clampCropperOffsets(state);
+            applyCropperState(state);
+        };
+
+        const onPointerUp = (event) => {
+            const state = IMAGE_UPLOAD_STATE.cropper; // Get the latest state
+            if (!state) return;
+            if (event.pointerId && container.hasPointerCapture(event.pointerId)) {
+                container.releasePointerCapture(event.pointerId);
+            }
+            state.dragging = false;
+            state.pointerId = null;
+        };
+
+        const onZoom = (event) => {
+            const state = IMAGE_UPLOAD_STATE.cropper; // Get the latest state
+            if (!state) return;
+            const newScale = parseFloat(event.target.value);
+            if (!Number.isFinite(newScale)) return;
+            const rect = container.getBoundingClientRect();
+            const anchorX = rect.width / 2;
+            const anchorY = rect.height / 2;
+            setCropperScale(state, newScale, anchorX, anchorY);
+        };
+
+        const onSave = async (event) => {
+            const state = IMAGE_UPLOAD_STATE.cropper; // Get the latest state
+            if (!state) return;
+            event.preventDefault();
+            await handleCropSave(state);
+        };
+
+        const onCancel = (event) => {
+            event.preventDefault();
+            destroyImageCropper();
+            SidebarNav.back();
+        };
+
+        container.addEventListener('pointerdown', onPointerDown);
+        container.addEventListener('pointermove', onPointerMove);
+        container.addEventListener('pointerup', onPointerUp);
+        container.addEventListener('pointerleave', onPointerUp);
+        zoomInput.addEventListener('input', onZoom);
+        zoomInput.addEventListener('change', onZoom);
+        saveBtn.addEventListener('click', onSave);
+        cancelBtn.addEventListener('click', onCancel);
+
+        IMAGE_UPLOAD_STATE.cropper = {
+            container,
+            imageEl,
+            zoomInput,
+            saveBtn,
+            cancelBtn,
+            messageContainer,
+            entityContext: cropData.entityContext,
+            imageDataUrl: cropData.imageDataUrl,
+            fileName: cropData.fileName || 'imagem.png',
+            fileType: cropData.fileType || 'image/png',
+            naturalWidth: 0,
+            naturalHeight: 0,
+            containerSize: containerSize || 300,
+            scale: 1,
+            minScale: 1,
+            maxScale: 4,
+            offsetX: 0,
+            offsetY: 0,
+            dragging: false,
+            pointerId: null,
+            startPointerX: 0,
+            startPointerY: 0,
+            startOffsetX: 0,
+            startOffsetY: 0,
+            image: null,
+            saving: false,
+            handlers: { pointerDown: onPointerDown, pointerMove: onPointerMove, pointerUp: onPointerUp, zoom: onZoom, save: onSave, cancel: onCancel }
+        };
+
+        imageEl.src = cropData.imageDataUrl;
+
+        const loader = new Image();
+        loader.onload = () => {
+            const currentState = IMAGE_UPLOAD_STATE.cropper;
+            if (!currentState) return;
+            currentState.image = loader;
+            currentState.naturalWidth = loader.naturalWidth || 1;
+            currentState.naturalHeight = loader.naturalHeight || 1;
+
+            // Define a origem da transformação. A imagem usará seu tamanho intrínseco.
+            currentState.imageEl.style.transformOrigin = 'top left';
+
+            currentState.containerSize = currentState.container.getBoundingClientRect().width || currentState.containerSize;
+            const minScale = Math.max(
+                currentState.containerSize / currentState.naturalWidth,
+                currentState.containerSize / currentState.naturalHeight
+            ) || 1;
+            currentState.minScale = minScale;
+            currentState.maxScale = minScale * 4;
+            currentState.scale = minScale;
+            currentState.offsetX = (currentState.containerSize - currentState.naturalWidth * currentState.scale) / 2;
+            currentState.offsetY = (currentState.containerSize - currentState.naturalHeight * currentState.scale) / 2;
+            clampCropperOffsets(currentState);
+            applyCropperState(currentState);
+            currentState.zoomInput.min = String(minScale);
+            currentState.zoomInput.max = String(currentState.maxScale);
+            currentState.zoomInput.step = '0.01';
+            currentState.zoomInput.value = String(currentState.scale);
+        };
+        loader.src = cropData.imageDataUrl;
+    }
+
+    function destroyImageCropper({ keepContext = false } = {}) {
+        const state = IMAGE_UPLOAD_STATE.cropper;
+        if (!state) {
+            if (!keepContext) resetImageUploadState();
+            return;
+        }
+
+        const { container, handlers, zoomInput, saveBtn, cancelBtn } = state;
+        if (container && handlers?.pointerDown) {
+            container.removeEventListener('pointerdown', handlers.pointerDown);
+            container.removeEventListener('pointermove', handlers.pointerMove);
+            container.removeEventListener('pointerup', handlers.pointerUp);
+            container.removeEventListener('pointerleave', handlers.pointerUp);
+        }
+        if (zoomInput && handlers?.zoom) {
+            zoomInput.removeEventListener('input', handlers.zoom);
+            zoomInput.removeEventListener('change', handlers.zoom);
+        }
+        if (saveBtn && handlers?.save) {
+            saveBtn.removeEventListener('click', handlers.save);
+        }
+        if (cancelBtn && handlers?.cancel) {
+            cancelBtn.removeEventListener('click', handlers.cancel);
+        }
+
+        IMAGE_UPLOAD_STATE.cropper = null;
+        if (!keepContext) {
+            resetImageUploadState();
+        }
+    }
+
+    function clampCropperOffsets(state) {
+        const displayWidth = state.naturalWidth * state.scale;
+        const displayHeight = state.naturalHeight * state.scale;
+        const containerSize = state.containerSize;
+
+        if (displayWidth <= containerSize) {
+            state.offsetX = (containerSize - displayWidth) / 2;
+        } else {
+            const minX = containerSize - displayWidth;
+            state.offsetX = Math.min(0, Math.max(minX, state.offsetX));
+        }
+
+        if (displayHeight <= containerSize) {
+            state.offsetY = (containerSize - displayHeight) / 2;
+        } else {
+            const minY = containerSize - displayHeight;
+            state.offsetY = Math.min(0, Math.max(minY, state.offsetY));
+        }
+    }
+
+    function applyCropperState(state) {
+        if (!state.imageEl) return;
+        state.imageEl.style.transform = `translate(${state.offsetX}px, ${state.offsetY}px) scale(${state.scale})`;
+        state.imageEl.style.maxWidth = '';
+        state.imageEl.style.width = '';
+        state.imageEl.style.height = '';
+        state.imageEl.style.left = '';
+        state.imageEl.style.top = '';
+    }
+
+    function setCropperScale(state, newScale, anchorX, anchorY) {
+        if (!state?.image) return;
+        const scale = Math.max(state.minScale, Math.min(state.maxScale, newScale));
+        if (!Number.isFinite(scale) || scale === state.scale) return;
+
+        const displayWidth = state.naturalWidth * state.scale;
+        const displayHeight = state.naturalHeight * state.scale;
+        const relX = ((anchorX ?? state.containerSize / 2) - state.offsetX) / displayWidth;
+        const relY = ((anchorY ?? state.containerSize / 2) - state.offsetY) / displayHeight;
+
+        state.scale = scale;
+        const newDisplayWidth = state.naturalWidth * state.scale;
+        const newDisplayHeight = state.naturalHeight * state.scale;
+
+        state.offsetX = (anchorX ?? state.containerSize / 2) - relX * newDisplayWidth;
+        state.offsetY = (anchorY ?? state.containerSize / 2) - relY * newDisplayHeight;
+
+        clampCropperOffsets(state);
+        applyCropperState(state);
+        state.zoomInput.value = String(state.scale);
+    }
+
+    async function finalizeImageCrop(state) {
+        if (!state?.image) {
+            throw new Error('Imagem não carregada.');
+        }
+
+        const canvasSize = 600;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvasSize;
+        canvas.height = canvasSize;
+        const ctx = canvas.getContext('2d');
+
+        const displayWidth = state.naturalWidth * state.scale;
+        const displayHeight = state.naturalHeight * state.scale;
+        const scaleX = state.naturalWidth / displayWidth;
+        const scaleY = state.naturalHeight / displayHeight;
+        const visibleX = (0 - state.offsetX) * scaleX;
+        const visibleY = (0 - state.offsetY) * scaleY;
+        const visibleWidth = state.containerSize * scaleX;
+        const visibleHeight = state.containerSize * scaleY;
+
+        const sx = Math.max(0, visibleX);
+        const sy = Math.max(0, visibleY);
+        const sw = Math.min(state.naturalWidth - sx, visibleWidth);
+        const sh = Math.min(state.naturalHeight - sy, visibleHeight);
+
+        ctx.drawImage(state.image, sx, sy, sw, sh, 0, 0, canvasSize, canvasSize);
+
+        return new Promise((resolve, reject) => {
+            canvas.toBlob((blob) => {
+                if (!blob) {
+                    reject(new Error('Falha ao gerar a imagem.'));
+                    return;
+                }
+                resolve(blob);
+            }, 'image/png', 0.92);
+        });
+    }
+
+    async function handleCropSave(state) {
+        if (!state || state.saving) return;
+        state.saving = true;
+        setButtonLoading(state.saveBtn, true, 'Salvando...');
+
+        try {
+            const blob = await finalizeImageCrop(state);
+            const extension = state.fileType && state.fileType.includes('png') ? 'png' : 'jpg';
+            const safeName = (state.fileName || 'imagem').replace(/[^a-z0-9_-]/gi, '_').slice(-40);
+            const uploadResult = await uploadEntityImage({
+                entityType: state.entityContext.entityType,
+                entityId: state.entityContext.entityId,
+                blob,
+                fileName: `${safeName || 'imagem'}.${extension}`
+            });
+
+            const imageUrl = uploadResult?.imageUrl || uploadResult?.url || uploadResult?.path;
+            if (state.entityContext?.data) {
+                state.entityContext.data.im = imageUrl || state.entityContext.data.im;
+            }
+            updateEntityImageCache(state.entityContext.entityType, state.entityContext.entityId, imageUrl);
+
+            const container = state.messageContainer || document.getElementById('message');
+            if (container) {
+                await showMessage(container, uploadResult?.message || 'Imagem atualizada com sucesso!', 'success', { dismissAfter: 2000 });
+            }
+            SidebarNav.back();
+        } catch (error) {
+            console.error('[image] upload error', error);
+            const container = state?.messageContainer || document.getElementById('message');
+            if (container) {
+                await showMessage(container, error?.message || 'Não foi possível atualizar a imagem.', 'error', { dismissAfter: 6000 });
+            }
+        } finally {
+            setButtonLoading(state.saveBtn, false);
+            state.saving = false;
+            destroyImageCropper();
+        }
+    }
+
+    async function uploadEntityImage({ entityType, entityId, blob, fileName }) {
+        const formData = new FormData();
+        formData.append('entity_type', entityType);
+        formData.append('entity_id', entityId);
+        formData.append('image', blob, fileName || 'imagem.png');
+
+        const response = await apiClient.upload('/upload-image', formData);
+        if (response?.error || response?.status === 'error') {
+            throw new Error(response?.message || response?.error || 'Não foi possível salvar a imagem.');
+        }
+        return response;
+    }
+
+    function updateEntityImageCache(entityType, entityId, imageUrl) {
+        if (!imageUrl) return;
+        const numericId = Number(entityId);
+
+        if (entityType === 'people') {
+            if (currentUserData && Number(currentUserData.id) === numericId) {
+                currentUserData.im = imageUrl;
+            }
+            if (viewData && viewType === ENTITY.PROFILE && Number(viewData?.id) === numericId) {
+                viewData.im = imageUrl;
+            }
+        }
+
+        if (entityType === 'businesses') {
+            if (Array.isArray(userBusinessesData)) {
+                userBusinessesData.forEach((item) => {
+                    if (item && Number(item.id) === numericId) {
+                        item.im = imageUrl;
+                    }
+                });
+            }
+            if (viewData && viewType === ENTITY.BUSINESS && Number(viewData?.id) === numericId) {
+                viewData.im = imageUrl;
+            }
+        }
+
+        if (entityType === 'teams') {
+            if (Array.isArray(userTeamsData)) {
+                userTeamsData.forEach((item) => {
+                    if (item && Number(item.id) === numericId) {
+                        item.im = imageUrl;
+                    }
+                });
+            }
+            if (viewData && viewType === ENTITY.TEAM && Number(viewData?.id) === numericId) {
+                viewData.im = imageUrl;
+            }
+        }
+    }
+    
+    // ===================================================================
     // 🏳️ TEMPLATES - Partes do HTML a ser renderizado
     // ===================================================================
 
@@ -282,16 +833,82 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `,
 
-        message: (data) => {
-            const { message, type = 'success' } = data;
-            if (type === 'success') {
-                return `<div class="bg-green-100 border border-green-400 rounded-3xl p-3 text-sm text-center">${message}</div>`;
-            } else if (type === 'error') {
-                return `<div class="bg-red-100 border border-red-400 rounded-3xl p-3 text-sm text-center">${message}</div>`;
-            }else if (type === 'warning') {
-                return `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">${message}</div>`;
+        message: (data = {}) => {
+            const {
+                message,
+                type = 'success',
+                autoDismiss = true,
+                dismissAfter = 4000
+            } = data;
+            
+            
+            const styles = {
+                success: {
+                    bg: 'bg-emerald-100',
+                    border: 'border-emerald-500',
+                    text: 'text-emerald-700'
+                },
+                error: {
+                    bg: 'bg-red-100',
+                    border: 'border-red-500',
+                    text: 'text-red-700'
+                },
+                warning: {
+                    bg: 'bg-amber-100',
+                    border: 'border-amber-500',
+                    text: 'text-amber-700'
+                }
+            };
+
+            const resolvedType = styles[type] ? type : 'error';
+            const style = styles[resolvedType];
+            const titleMap = { success: 'Sucesso', error: 'Erro', warning: 'Atenção' };
+            const title = titleMap[resolvedType] || 'Aviso';
+
+            const messageId = `message-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+            const fallbackCopy = {
+                success: 'Operação concluída com sucesso.',
+                error: 'Algo não saiu como esperado.',
+                warning: 'Verifique os dados informados.'
+            };
+            const resolvedMessage = (typeof message === 'string') ? message.trim() : '';
+            const safeMessage = resolvedMessage || fallbackCopy[resolvedType] || fallbackCopy.error;
+
+
+            if (autoDismiss && typeof window !== 'undefined') {
+                const timeout = Number.isFinite(dismissAfter) && dismissAfter >= 0 ? dismissAfter : 4000;
+                window.setTimeout(() => {
+                    const element = document.querySelector(`[data-message-id="${messageId}"]`);
+                    if (!element) return;
+
+                    const removeElement = () => {
+                        element.removeEventListener('transitionend', removeElement);
+                        if (element.parentElement) element.parentElement.removeChild(element);
+                    };
+
+                    const animateAndRemove = () => {
+                        element.addEventListener('transitionend', removeElement, { once: true });
+                        element.style.opacity = '0';
+                        element.style.transform = 'translateY(-6px)';
+                        window.setTimeout(removeElement, 700);
+                    };
+
+                    if (typeof window.requestAnimationFrame === 'function') {
+                        window.requestAnimationFrame(animateAndRemove);
+                    } else {
+                        animateAndRemove();
+                    }
+                }, timeout);
             }
-            return '';
+
+            // The message div now takes full width and has some vertical margin.
+            // It's not 'fixed' anymore, so it will appear within the natural flow of the sidebar content.
+            return `
+                <div data-message-id="${messageId}" class="w-full ${style.bg} ${style.border} ${style.text} border-l-4 p-4 rounded-lg shadow-md transition-all duration-500 ease-in-out my-3" role="alert" style="opacity: 1; transform: translateY(0);">
+                    <p class="font-bold">${title}</p>
+                    <p>${safeMessage}</p>
+                </div>
+            `;
         },
 
         notLoggedIn: `
@@ -353,7 +970,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <!-- Coluna da Esquerda (Menu de Navegação) -->
                 <aside class="w-full flex col-span-4 lg:col-span-3 flex flex-col gap-y-6">                        
                     <div class="aspect-square w-full rounded-full shadow-lg overflow-hidden">
-                        <img id="profile-image" class="w-full h-full object-cover" src="/images/no-image.jpg" alt="Imagem da página">
+                        <img id="profile-image" class="w-full h-full object-cover" src="${resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 240 })}" alt="Imagem da página">
                     </div>
                     <div class="bg-white p-3 rounded-3xl font-semibold shadow-lg grow">
                         <nav class="mt-1">
@@ -439,7 +1056,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             <h1 class="text-center text-gray-500 text-xl font-bold">${businessData.name}</h1>
             <div class="col-span-1 justify-center">
-                <img id="sidebar-profile-image" class="sm:w-1/4 md:w-1/6 lg:w-1/6 shadow-lg cursor-pointer rounded-full mx-auto" src="https://placehold.co/100x100/EFEFEF/333?text=${businessData.name.charAt(0)}" alt="Foto do Utilizador">
+                <img id="sidebar-profile-image" data-role="entity-image" class="sm:w-1/4 md:w-1/6 lg:w-1/6 shadow-lg cursor-pointer rounded-full mx-auto object-cover" src="${resolveImageSrc(businessData.im, businessData.name, { size: 160 })}" alt="Foto do Utilizador">
             </div>
             <form id="settings-form">
                 <div class="w-full shadow-lg rounded-2xl grid grid-cols-1">
@@ -486,7 +1103,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += `
                 <div class="list-item sm:col-span-12 md:col-span-6 lg:col-span-4 flex flex-col bg-white p-3 rounded-3xl shadow-lg bg-gray hover:bg-gray-100 cursor-pointer" data-item-id="${item.id}" data-name="${name.toLowerCase()}">
                     <div class="flex items-center gap-3">
-                        <img class="w-10 h-10 rounded-full" src="https://placehold.co/40x40/EFEFEF/333?text=${name.charAt(0)}" alt="${name}">
+                        <img class="w-10 h-10 rounded-full object-cover" src="${resolveImageSrc(item?.im, name, { size: 80 })}" alt="${name}">
                         <span class="font-semibold truncate">${name}</span>
                     </div>                    
                 </div> 
@@ -543,7 +1160,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ${page.map(app => `                
                 <button data-app-id="${app.id}" class="flex flex-col items-center gap-1">
                     <div class="relative rounded-full overflow-hidden bg-gray-300 aspect-square w-full shadow-lg">
-                        <div class="absolute inset-0 bg-center bg-cover" style="background-image:url('${'data:image/png;base64,' + app.im || '/images/app-default.png'}');"></div>
+                        <div class="absolute inset-0 bg-center bg-cover" style="background-image:${resolveBackgroundImage(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 160 })};"></div>
                     </div>
                     <span class="text-xs text-white text-shadow-lg truncate w-full text-center">${app.tt || 'App'}</span>
                 </button>
@@ -576,6 +1193,37 @@ document.addEventListener('DOMContentLoaded', () => {
         actionBtn: 'cursor-pointer text-center rounded-3xl text-white transition-colors truncate w-full p-2 mb-1'
     };
 
+    const CONTACT_OPTIONS = [
+        { value: '', label: 'Contato', disabled: true, placeholder: true },
+        { value: 'email', label: 'E-mail' },
+        { value: 'phone', label: 'Telefone' },
+        { value: 'site', label: 'Site' },
+        { value: 'behance', label: 'Behance' },
+        { value: 'discord', label: 'Discord' },
+        { value: 'facebook', label: 'Facebook' },
+        { value: 'flickr', label: 'Flickr' },
+        { value: 'instagram', label: 'Instagram' },
+        { value: 'linkedin', label: 'LinkedIn' },
+        { value: 'pinterest', label: 'Pinterest' },
+        { value: 'reddit', label: 'Reddit' },
+        { value: 'snapchat', label: 'Snapchat' },
+        { value: 'tiktok', label: 'TikTok' },
+        { value: 'tumblr', label: 'Tumblr' },
+        { value: 'twitch', label: 'Twitch' },
+        { value: 'twitter', label: 'X / Twitter' },
+        { value: 'vimeo', label: 'Vimeo' },
+        { value: 'wechat', label: 'WeChat' },
+        { value: 'whatsapp', label: 'WhatsApp' },
+        { value: 'youtube', label: 'YouTube' },
+        { value: 'other', label: 'Outro' }
+    ];
+
+    const COUNTRY_OPTIONS = [
+        { value: '', label: 'Selecione', disabled: true, placeholder: true },
+        { value: 'Brasil', label: 'Brasil' }
+    ];
+
+
     const UI = {
         renderHeader: ({ backAction = 'page-settings', backLabel, title }) => `
             <div data-sidebar-action="${backAction}" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
@@ -591,11 +1239,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 <i class="fas fa-chevron-right"></i>                
             </div>
         `,
-        renderHero: ({ tt, im }) => `
+        renderHero: ({ tt, im }) => {
+            const heroSrc = resolveImageSrc(im, tt, { size: 220 });
+            return `
             <div class="col-span-1 justify-center">
-                <img id="sidebar-profile-image" class="w-1/3 shadow-lg cursor-pointer rounded-full mx-auto" src="${im ? `data:image/png;base64,${im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(tt||'?').charAt(0)}`}" alt="${tt ?? 'Imagem'}">
+                <img id="sidebar-profile-image" data-role="entity-image" class="w-32 h-32 shadow-lg cursor-pointer rounded-full mx-auto object-cover" src="${heroSrc}" alt="${tt ?? 'Imagem'}">
             </div>
-        `,
+        `;
+        },
         sectionCard: (content, { roundedTop=true, roundedBottom=true } = {}) => `
             <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
                 ${content}
@@ -643,46 +1294,84 @@ document.addEventListener('DOMContentLoaded', () => {
                 </select>
             </div>
         `,
-        contactOptions: () => `
-            <option value="" class="text-gray-500" disabled selected>Contato</option>
-            <option value="email">E-mail</option>
-            <option value="phone">Telefone</option>
-            <option value="site">Site</option>
-            <option value="behance">Behance</option>
-            <option value="discord">Discord</option>
-            <option value="facebook">Facebook</option>
-            <option value="flickr">Flickr</option>
-            <option value="instagram">Instagram</option>
-            <option value="linkedin">LinkedIn</option>
-            <option value="pinterest">Pinterest</option>
-            <option value="reddit">Reddit</option>
-            <option value="snapchat">Snapchat</option>
-            <option value="tiktok">TikTok</option>
-            <option value="tumblr">Tumblr</option>
-            <option value="twitch">Twitch</option>
-            <option value="twitter">X / Twitter</option>
-            <option value="vimeo">Vimeo</option>
-            <option value="wechat">WeChat</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="youtube">YouTube</option>
-            <option value="other">Outro</option>
-        `,
-        contactBlock: (value='') => `
-        <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
-            <div id="input-container" class="rounded-t-2xl w-full">
-                <div title="Contato" class="rounded-t-2xl bg-white grid grid-cols-6" data-input-id="0">
-                    <select class="rounded-tl-2xl border-0 focus:outline-none col-span-2 p-4" id="url_type" name="url_type">
-                        ${UI.contactOptions()}
-                    </select>
-                    <input class="border-0 focus:outline-none col-span-4 rounded-tr-2xl p-4" type="text" id="url_value" name="url_value" value="${value ?? ''}">
+        contactOptions: (selected = '') => CONTACT_OPTIONS.map(({ value, label, disabled, placeholder }) => {
+            const isSelected = placeholder ? (selected === null || selected === undefined || selected === '') : selected === value;
+            const disabledAttr = disabled ? 'disabled' : '';
+            const selectedAttr = isSelected ? 'selected' : '';
+            const placeholderClass = placeholder ? 'text-gray-500' : '';
+            return `<option value="${value}" class="${placeholderClass}" ${disabledAttr} ${selectedAttr}>${label}</option>`;
+        }).join(''),
+        countryOptions: (selected = '') => {
+            let normalizedSelected = (selected ?? '').toString().trim().toLowerCase();
+            if (normalizedSelected === 'brazil') normalizedSelected = 'brasil';
+            const aliasMap = new Map([
+                ['br', 'brasil'],
+                ['brasil', 'br']
+            ]);
+            return COUNTRY_OPTIONS.map(({ value, label, disabled, placeholder }) => {
+                const normalizedValue = (value ?? '').toString().trim().toLowerCase();
+                const placeholderClass = placeholder ? 'text-gray-500' : '';
+                const disabledAttr = disabled ? 'disabled' : '';
+                let isSelected;
+                if (placeholder) {
+                    isSelected = !normalizedSelected;
+                } else {
+                    isSelected = normalizedSelected && (normalizedSelected === normalizedValue || aliasMap.get(normalizedSelected) === normalizedValue);
+                }
+                const selectedAttr = isSelected ? 'selected' : '';
+                return `<option value="${value}" class="${placeholderClass}" ${disabledAttr} ${selectedAttr}>${label}</option>`;
+            }).join('');
+        },
+        contactBlock: (contacts=null) => {
+            let parsed = [];
+            let fallbackValue = '';
+
+            if (Array.isArray(contacts)) {
+                parsed = normalizeContacts(contacts);
+            } else if (typeof contacts === 'string') {
+                const trimmed = contacts.trim();
+                if (trimmed.startsWith('[')) {
+                    parsed = normalizeContacts(trimmed);
+                    if (!parsed.length && trimmed && trimmed !== '[]') {
+                        fallbackValue = trimmed;
+                    }
+                } else if (trimmed) {
+                    fallbackValue = trimmed;
+                }
+            } else if (contacts) {
+                parsed = normalizeContacts(contacts);
+            }
+
+            if (!Array.isArray(parsed) || parsed.length === 0) {
+                parsed = fallbackValue ? [{ type:'', value:fallbackValue }] : [{ type:'', value:'' }];
+            }
+
+            const rows = parsed.map((contact, index) => {
+                const isFirst = index === 0;
+                const isLast = index === parsed.length - 1;
+                const borderClass = isLast ? '' : 'border-b border-gray-100';
+                return `
+                    <div title="Contato" class="${isFirst ? 'rounded-t-2xl' : ''} bg-white grid grid-cols-6 ${borderClass}" data-input-id="${index}">
+                        <select class="${isFirst ? 'rounded-tl-2xl' : ''} border-0 focus:outline-none col-span-2 p-4" name="url_type">
+                            ${UI.contactOptions(contact.type || '')}
+                        </select>
+                        <input class="border-0 focus:outline-none col-span-4 ${isFirst ? 'rounded-tr-2xl' : ''} p-4" type="text" name="url_value" value="${contact.value || ''}">
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
+                    <div id="input-container" class="rounded-t-2xl w-full">
+                        ${rows}
+                    </div>
+                    <div id="addButtonContainer" class="grid grid-cols-2 rounded-b-2xl border-t border-gray-200 bg-white">
+                        <div id="add-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-plus centered"></i></div>
+                        <div id="remove-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-minus centered"></i></div>
+                    </div>
                 </div>
-            </div>
-            <div id="addButtonContainer" class="grid grid-cols-2 rounded-b-2xl border-t border-gray-200 bg-white">
-                <div id="add-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-plus centered"></i></div>
-                <div id="remove-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-minus centered"></i></div>
-            </div>
-        </div>
-        `,
+            `;
+        },
         privacyRowsProfile: ({ page_privacy, feed_privacy }) => {
             const pageOpts = `
             <option value="" ${page_privacy==null?'selected':''} disabled>Selecione</option>
@@ -726,7 +1415,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `
     };
 
-    templates.sidebarPageSettings = async ({ view = null, data = null, type = null, origin = null, prevTitle = null, navTitle = null }) => {
+    templates.sidebarPageSettings = async ({ view = null, data = null, type = null, origin = null, prevTitle = null, navTitle = null, crop = null }) => {
         const sidebarContent = document.querySelector('.sidebar-content');
         if (sidebarContent) sidebarContent.dataset.currentView = view || 'root';
         let html = '';
@@ -747,7 +1436,8 @@ document.addEventListener('DOMContentLoaded', () => {
             'user-education': 'Formação Acadêmica',
             'user-jobs': 'Experiência Profissional',
             // 'business-shareholding': 'Estrutura Societária' // removido por ora
-            'apps': 'Aplicativos'
+            'apps': 'Aplicativos',
+            'password': 'Alterar Senha'
         };
 
         const headerBackLabel = (view !== null) ? (([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(view)) ? 'Ajustes' : (view.startsWith('user-') ? (currentUserData?.tt ?? '') : (data?.tt ?? ''))) : 'Fechar';
@@ -760,29 +1450,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Cabeçalho e navegação com suporte a stack
         const isStack = (origin === 'stack');
-        if ([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(view)) {
+        if (view === 'image-crop') {
+            const cropData = crop ?? {};
+            const previewSrc = cropData.imageDataUrl || resolveImageSrc(data?.im, data?.tt, { size: 320 });
+            const fileLabel = cropData.fileName ? `<span class="text-xs text-gray-500 truncate max-w-full">${cropData.fileName}</span>` : '';
             html += `
-                ${UI.renderHeader({ backAction: (isStack ? 'stack-back' : 'settings'), backLabel: (isStack ? (prevTitle || 'Ajustes') : 'Ajustes'), title: (data?.tt ?? '') })}
-                ${UI.renderHero({ tt: (data?.tt ?? ''), im: data?.im })}
-                <div id="message" class="w-full fixed"></div>
+                <div id="message" data-role="message" class="w-full"></div>
+                <div class="grid gap-4">
+                    <div class="flex flex-col gap-2 items-center">
+                        <div class="relative w-full max-w-[320px] aspect-square rounded-3xl overflow-hidden bg-gray-200" data-role="cropper-box">
+                            <img data-role="cropper-image" class="absolute top-0 left-0 select-none pointer-events-none" src="${previewSrc}" alt="${(data?.tt ?? 'Imagem')}">
+                        </div>
+                        ${fileLabel}
+                    </div>
+                    <label class="flex items-center gap-3">
+                        <span class="text-sm text-gray-600">Zoom</span>
+                        <input type="range" data-role="cropper-zoom" min="1" max="3" step="0.01" value="1" class="flex-1">
+                    </label>
+                    <div class="text-xs text-gray-500 text-center">Arraste a imagem para ajustar o enquadramento.</div>
+                    <div class="grid gap-2">
+                        <button data-action="crop-save" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
+                        <button data-action="crop-cancel" class="shadow-md w-full py-2 px-4 bg-gray-200 text-gray-700 font-semibold rounded-3xl hover:bg-gray-300 transition-colors">Cancelar</button>
+                    </div>
+                </div>
             `;
-            // Marcar tipo/identificador da entidade atual no dataset para navegação interna
-            sidebarContent.dataset.sidebarType = (view === ENTITY.PROFILE && data?.id === currentUserData?.id) ? 'current-user' : view;
-            if (data?.id) {
-                sidebarContent.dataset.entityType = view;
-                sidebarContent.dataset.entityId = String(data.id);
-            }
-        } else if (view === null) {
-            html += UI.renderCloseHeader();
-        } else {
-            const topShortcuts = ['people','businesses','teams','apps'];
-            const isTopShortcut = topShortcuts.includes(view);
-            const backAction = isStack ? 'stack-back' : (isTopShortcut ? 'settings' : 'page-settings');
-            const backLabel = isStack ? (prevTitle || 'Ajustes') : (isTopShortcut ? 'Ajustes' : (data?.tt ?? 'Ajustes'));
-            html += UI.renderHeader({ backAction, backLabel, title: titles[view] ?? '' });
+            return html;
         }
 
-        // VIEWS
         if (view === null) {
             const appearance = UI.shortcutList([
                 { id: 'desktop', icon: 'fa-th', label: 'Área de Trabalho' }
@@ -802,7 +1496,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div data-sidebar-type="current-user" class="pointer w-full bg-white shadow-md rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
                     <div data-sidebar-action="page-settings" class="grid grid-cols-4 items-center gap-3">
                         <div class="flex col-span-1 justify-center">
-                            <img id="sidebar-profile-image" class="w-full rounded-full" src="https://placehold.co/100x100/EFEFEF/333?text=${data.tt.charAt(0)}" alt="Foto do Utilizador">
+                            <img id="sidebar-profile-image" data-role="entity-image" class="w-full rounded-full object-cover" src="${resolveImageSrc(data?.im ?? currentUserData?.im, data?.tt ?? currentUserData?.tt, { size: 100 })}" alt="Foto do Utilizador">
                         </div>
                         <div class="flex col-span-3 flex-col gap-1">
                             <p class="truncate font-bold">${data.tt}</p>
@@ -823,6 +1517,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } else if (view === ENTITY.PROFILE) {
             sidebarContent.dataset.sidebarType = (data.id === currentUserData.id) ? 'current-user' : 'profile';
+
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
+            html += UI.renderHero({ tt: data.tt, im: data.im });
 
             const card1 = UI.sectionCard(
                 UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
@@ -857,7 +1554,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 UI.row('cpf','CPF', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="999.999.999-99" id="cpf" name="national_id" value="${currentUserData.national_id ?? ''}">`, {bottom:true})
             );
 
-            const contacts = UI.contactBlock(data.url ?? '');
+            const contacts = UI.contactBlock(data?.contacts ?? currentUserData?.contacts ?? '');
 
             const shortcuts = UI.shortcutList([
                 { id:'user-education', icon:'fa-graduation-cap', label:'Formação Acadêmica' },
@@ -885,8 +1582,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${financeShortcuts}
                 ${userChoices}                
             `;
+        } else if (view === 'password') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
+            const userId = data?.id ?? currentUserData?.id ?? '';
+            const passwordCard = UI.sectionCard(
+                UI.row('current_password','Senha Atual', `<input class="w-full border-0 focus:outline-none" type="password" id="current_password" name="current_password" placeholder="********" required>`, {top:true}) +
+                UI.row('new_password','Nova Senha', `<input class="w-full border-0 focus:outline-none" type="password" id="new_password" name="new_password" placeholder="********" required>`) +
+                UI.row('new_password_repeat','Confirmar Nova Senha', `<input class="w-full border-0 focus:outline-none" type="password" id="new_password_repeat" name="new_password_repeat" placeholder="********" required>`, {bottom:true})
+            );
+
+            html += `
+                <div id="message" data-role="message" class="w-full"></div>
+                <form id="change-password-form" method="post" novalidate data-view="${view}" class="grid grid-cols-1 gap-6">
+                    <input type="hidden" name="id" value="${userId}">
+                    ${passwordCard}
+                    <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Alterar Senha</button>
+                </form>
+            `;
         } else if (view === ENTITY.BUSINESS) {
             sidebarContent.id = 'business';
+
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
+            html += UI.renderHero({ tt: data.tt, im: data.im });
 
             const basics = UI.sectionCard(
                 UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
@@ -913,7 +1630,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const address = UI.sectionCard(
                 UI.row('zip_code','CEP', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99999-999" id="zip_code" name="zip_code" value="${data?.zip_code ?? ''}">`, {top:true}) +
-                UI.rowSelect('country','País', `<option value="" disabled ${!data?.country?'selected':''}>Selecione</option>`) +
+                UI.rowSelect('country','País', UI.countryOptions(data?.country ?? '')) +
                 UI.row('state','Estado', `<input class="w-full border-0 focus:outline-none" type="text" id="state" name="state" value="${data?.state ?? ''}">`) +
                 UI.row('city','Cidade', `<input class="w-full border-0 focus:outline-none" type="text" id="city" name="city" value="${data?.city ?? ''}">`) +
                 UI.row('district','Bairro', `<input class="w-full border-0 focus:outline-none" type="text" id="district" name="district" value="${data?.district ?? ''}">`) +
@@ -921,7 +1638,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 UI.row('complement','Complemento', `<input class="w-full border-0 focus:outline-none" type="text" id="complement" name="complement" value="${data?.complement ?? ''}">`, {bottom:true})
             );
 
-            const contacts = UI.contactBlock(data.url ?? '');
+            const contacts = UI.contactBlock(data?.contacts ?? data?.url ?? '');
 
             const shortcuts = UI.shortcutList([
                 // { id:'business-shareholding', icon:'fa-sitemap', label:'Estrutura Societária' },
@@ -948,6 +1665,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
         } else if (view === ENTITY.TEAM) {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
+            html += UI.renderHero({ tt: data.tt, im: data.im });
             // exemplo: reuso igual ao business/profile para campos
             // (mantém tua lógica de buscar businesses; só exibindo com os helpers)
             let mappedBusinesses = await Promise.all(userBusinesses.map(async (business) => {
@@ -974,7 +1693,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 `, {bottom:true})
             );
 
-            const contacts = UI.contactBlock(data.url ?? '');
+            const contacts = UI.contactBlock(data?.contacts ?? data?.url ?? '');
 
             const shortcuts = UI.shortcutList([
                 { id:'employees', icon:'fa-id-badge', label:'Colaboradores' },
@@ -1003,6 +1722,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${deleteTeamButton}
             `;
         } else if (view === 'employees') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const table = (type === 'business') ? 'employees' : 'teams_users';
             const idKey = (type === 'business') ? 'em' : 'cm';
             const conditions = { [idKey]: data.id };
@@ -1026,7 +1746,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     { v: 3, t: 'Moderador' },
                     { v: 4, t: 'Gestor' }
                 ];
-                return `<select name=\"nv\" class=\"border-0 focus:outline-none\">${options.map(o => `<option value=\"${o.v}\" ${Number(current)===o.v?'selected':''}>${o.t}</option>`).join('')}</select>`;
+                return `<select name="nv" class="border-0 focus:outline-none">${options.map(o => `<option value="${o.v}" ${Number(current)===o.v?'selected':''}>${o.t}</option>`).join('')}</select>`;
             };
 
             const activeRows = active.length
@@ -1034,33 +1754,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     const p = userMap.get(e.us) || { id: e.us, tt: 'Usuário' };
                     if (canManage) {
                         const controls = `
-                            <div class=\"flex gap-2 items-center\">
+                            <div class="flex gap-2 items-center">
                                 ${levelSelect(e.nv ?? 1)}
-                                <button data-action=\"update-member-level\" data-user-id=\"${p.id}\" data-scope-type=\"${type}\" data-scope-id=\"${data.id}\" class=\"p-2 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-md\">Atualizar</button>
+                                <button data-action="update-member-level" data-user-id="${p.id}" data-scope-type="${type}" data-scope-id="${data.id}" class="p-2 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-md">Atualizar</button>
                             </div>`;
                         return UI.row(`member-${p.id}`, p.tt, controls);
                     }
-                    return UI.row(`member-${p.id}`, p.tt, `<span class=\"text-gray-500\">Nível: ${Number(e.nv ?? 1)}</span>`);
+                    return UI.row(`member-${p.id}`, p.tt, `<span class="text-gray-500">Nível: ${Number(e.nv ?? 1)}</span>`);
                 }).join('')
-                : `<div class=\"p-3 text-sm text-gray-500\">Nenhum membro ativo.</div>`;
+                : `<div class="p-3 text-sm text-gray-500">Nenhum membro ativo.</div>`;
 
             const pendingRows = (pending.length && canManage)
                 ? pending.map(e => {
                     const p = userMap.get(e.us) || { id: e.us, tt: 'Usuário' };
                     const controls = `
-                        <div class=\"flex gap-2\">
-                            <button data-action=\"accept-member\" data-user-id=\"${p.id}\" data-scope-type=\"${type}\" data-scope-id=\"${data.id}\" class=\"p-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-md\">Aceitar</button>
-                            <button data-action=\"reject-member\" data-user-id=\"${p.id}\" data-scope-type=\"${type}\" data-scope-id=\"${data.id}\" class=\"p-2 bg-red-100 hover:bg-red-200 text-red-800 rounded-md\">Recusar</button>
+                        <div class="flex gap-2">
+                            <button data-action="accept-member" data-user-id="${p.id}" data-scope-type="${type}" data-scope-id="${data.id}" class="p-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-md">Aceitar</button>
+                            <button data-action="reject-member" data-user-id="${p.id}" data-scope-type="${type}" data-scope-id="${data.id}" class="p-2 bg-red-100 hover:bg-red-200 text-red-800 rounded-md">Recusar</button>
                         </div>`;
                     return UI.row(`pending-${p.id}`, p.tt, controls);
                 }).join('')
-                : `<div class=\"p-3 text-sm text-gray-500\">Sem solicitações pendentes.</div>`;
+                : `<div class="p-3 text-sm text-gray-500">Sem solicitações pendentes.</div>`;
 
             html += `
-                ${UI.sectionCard(`<div class=\"p-3 font-semibold\">Membros Ativos</div>` + activeRows)}
-                ${UI.sectionCard(`<div class=\"p-3 font-semibold\">Solicitações Pendentes</div>` + pendingRows)}
+                ${UI.sectionCard(`<div class="p-3 font-semibold">Membros Ativos</div>` + activeRows)}
+                ${UI.sectionCard(`<div class="p-3 font-semibold">Solicitações Pendentes</div>` + pendingRows)}
             `;
         } else if (view === 'people') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             // Pessoas seguidas pelo usuário logado
             const ids = Array.isArray(userPeople) ? userPeople : [];
             if (!ids.length) {
@@ -1074,7 +1795,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 );
 
                 const rows = list.map(u => {
-                    const img = u?.im ? `data:image/png;base64,${u.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(u?.tt||'?').charAt(0)}`;
+                    const img = resolveImageSrc(u?.im, u?.tt, { size: 100 });
                     const name = (u?.tt || 'Usuário');
                     return `
                     <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${u.id}" data-name="${name.toLowerCase()}">
@@ -1087,6 +1808,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += searchCard + UI.sectionCard(`<div id="people-list">${rows}</div>`);
             }
         } else if (view === 'businesses') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             // Negócios onde o usuário é membro com nível de moderação/gestão (nv >= 3)
             const managed = Array.isArray(userBusinessesData)
                 ? userBusinessesData.filter(r => Number(r?.nv ?? 0) >= 3 && Number(r?.st ?? 1) === 1).map(r => r.em)
@@ -1116,7 +1838,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 );
                 html += searchCardBiz;
                 const rows = list.map(b => {
-                    const img = b?.im ? `data:image/png;base64,${b.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(b?.tt||'?').charAt(0)}`;
+                    const img = resolveImageSrc(b?.im, b?.tt, { size: 100 });
                     const name = (b?.tt || 'Negócio');
                     return `
                     <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${b.id}" data-name="${name.toLowerCase()}">
@@ -1129,6 +1851,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += UI.sectionCard(`<div id="businesses-list">${rows}</div>`);
             }
         } else if (view === 'teams') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             // Equipes em que o usuário é criador (us) ou moderador (usmn contém id), ativas (st=1)
             // e cujo negócio (companies.em) também está ativo (companies.st=1)
             const res = await apiClient.post('/search', {
@@ -1194,7 +1917,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 );
                 html += searchCardTeams;
                 const rows = visible.map(t => {
-                    const img = t?.im ? `data:image/png;base64,${t.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(t?.tt||'?').charAt(0)}`;
+                    const img = resolveImageSrc(t?.im, t?.tt, { size: 100 });
                     const name = (t?.tt || 'Equipe');
                     return `
                     <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-id="${t.id}" data-name="${name.toLowerCase()}">
@@ -1207,6 +1930,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += UI.sectionCard(`<div id="teams-list">${rows}</div>`);
             }
         } else if (view === 'apps') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             // Lista de apps instalados do usuário logado
             let userApps = await apiClient.post('/search', {
                 db: 'workz_apps',
@@ -1225,7 +1949,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     UI.row('apps-search','Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="apps-search" placeholder="Digite para filtrar">`, { top:true, bottom:true })
                 );
                 const rows = list.map(app => {
-                    const img = app?.im ? `data:image/png;base64,${app.im}` : '/images/app-default.png';
+                    const img = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 120 });
                     const name = (app?.tt || 'App');
                     return `
                     <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-app-id="${app.id}" data-name="${name.toLowerCase()}">
@@ -1238,9 +1962,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += searchCardApps + UI.sectionCard(`<div id="apps-list">${rows}</div>`);
             }
         } else if (view === 'app-settings') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const app = data || {};
             const appId = app.id || payload?.appId || null;
-            const img = app?.im ? `data:image/png;base64,${app.im}` : '/images/app-default.png';
+            const img = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 120 });
             const notifyKey = `app_notify_${appId}`;
             const enabled = (localStorage.getItem(notifyKey) === '1');
             const header = `
@@ -1261,6 +1986,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
             html += header + actions;
         } else if (view === 'testimonials') {            
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const res = await apiClient.post('/search', { db:'workz_data', table:'testimonials', columns:['*'], conditions: { recipient: data.id, recipient_type: type }, fetchAll:true });
             const list = Array.isArray(res?.data) ? res.data : [];
             if (!list.length) {
@@ -1268,7 +1994,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 const cards = await Promise.all(list.map(async t => {
                     const author = await fetchByIds(t.author, 'people');
-                    const avatar = author?.im ? `data:image/png;base64,${author.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(author?.tt||'?').charAt(0)}`;
+                    const avatar = resolveImageSrc(author?.im, author?.tt, { size: 100 });
                     const primaryBtn = (t.status===0)
                         ? `<button title="Aceitar" data-action="accept-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-bl-2xl"><i class="fas fa-check"></i></button>`
                         : `<button title="Reverter" data-action="revert-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-bl-2xl"><i class="fas fa-undo"></i></button>`;
@@ -1291,11 +2017,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += cards.join('');
             }
         } else if (view === 'billing') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             console.log(data, view, type);            
             html += `<div class="bg-white rounded-2xl shadow-md p-4">Cobrança e Recebimento</div>`;
         } else if (view === 'transactions') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             html += `<div class="bg-white rounded-2xl shadow-md p-4">Transações</div>`;
         } else if (view === 'subscriptions') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const conditions = (type === 'business') ? { em: data.id, subscription: 1 } : { us: data.id, subscription: 1 };
 
             const exists = [{ table: 'apps', local: 'ap', remote: 'id'}];
@@ -1307,7 +2036,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 const cards = await Promise.all(list.map(async t => {                    
                     const app = await fetchByIds(t.ap, 'apps');
-                    const avatar = app?.im ? `data:image/png;base64,${app.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(app?.tt||'?').charAt(0)}`;
+                    const avatar = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 90 });
                     const actionBtn = (t.end_date === null)
                         ? `<button title="Cancelar" data-action="reject-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-b-2xl"><i class="fas fa-ban"></i> Cancelar Assinatura</button>`
                         : `<button title="Renovar" data-action="revert-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-b-2xl"><i class="fas fa-undo"></i> Renovar Assinatura</button>`
@@ -1332,15 +2061,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
         } else if (view === 'user-education') {
-        html += `<div class="bg-white rounded-2xl shadow-md p-4">Education content</div>`;
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
+            html += `<div class="bg-white rounded-2xl shadow-md p-4">Education content</div>`;
         } else if (view === 'user-jobs') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const userJobs = await apiClient.post('/search', { db: 'workz_companies', table: 'employees', columns: ['*'], conditions: { us: currentUserData.id }, order: { by: 'start_date', dir: 'DESC' }, fetchAll: true });
             const cards = await Promise.all(userJobs?.data?.map(async j => {
                 const business = await fetchByIds(j.em, 'businesses');
                 return `
                     <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
                         <div class="pt-4 px-4 col-span-4 flex items-center truncate">
-                            <img class="w-7 h-7 mr-2 rounded-full pointer" src="${business?.im ? `data:image/png;base64,${business.im}` : `https://placehold.co/100x100/EFEFEF/333?text=${(business?.tt||'?').charAt(0)}`}" />
+                            <img class="w-7 h-7 mr-2 rounded-full pointer" src="${resolveImageSrc(business?.im, business?.tt, { size: 100 })}" />
                             <a class="font-semibold">${business?.tt ?? 'Empresa'}</a>
                         </div>
                         <div class="col-span-4 px-4">
@@ -1382,7 +2113,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (count > 0) {            
             const cards = resolved?.map(p => `
             <div data-id="${p.id}" class="relative rounded-2xl overflow-hidden bg-gray-300 aspect-square cursor-pointer card-item">
-                <div class="absolute inset-0 bg-center bg-cover" style="background-image: url('${ (p.im) ? 'data:image/png;base64,' + p.im : `https://placehold.co/100x100/EFEFEF/333?text=${p.tt.charAt(0)}` }');"></div>
+                <div class="absolute inset-0 bg-center bg-cover" style="background-image:${resolveBackgroundImage(p?.im, p?.tt, { size: 100 })};"></div>
                 <div class="absolute h-full inset-x-0 bottom-0 bg-black/20 hover:bg-black/40 text-white font-medium px-2 py-1 truncate">
                     <div class="absolute bottom-0 left-0 right-0 p-2 text-xs text-shadow-lg truncate text-center">${p.tt || 'Usuário'}</div>
                 </div>
@@ -1540,6 +2271,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Notificações simples
     function notifySuccess(msg) { try { swal('Pronto', msg, 'success'); } catch(_) { try { alert(msg); } catch(__) {} } }
     function notifyError(msg) { try { swal('Ops', msg, 'error'); } catch(_) { try { alert(msg); } catch(__) {} } }
+
     async function confirmDialog(msg, { title='Confirmação', danger=false } = {}) {
         try {
             return await swal({
@@ -2205,18 +2937,36 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function renderTemplate(container, template, data = null, onRendered = null) {
-    await fadeTransition(container, async () => {
-        if (typeof template === 'string' && templates[template]) {
-        container.innerHTML = templates[template];
-        } else if (typeof template === 'function') {
-        const result = template.length >= 1 ? template(data) : template(); // chama
-        container.innerHTML = result instanceof Promise ? await result : result; // aguarda se for Promise
-        } else {
-        console.error('Template inválido.');
-        return;
+        await fadeTransition(container, async () => {
+            if (typeof template === 'string' && templates[template]) {
+                container.innerHTML = templates[template];
+            } else if (typeof template === 'function') {
+                const payload = data ?? {};
+                const result = template(payload);
+                container.innerHTML = result instanceof Promise ? await result : result;
+            } else {
+                console.error('Template inválido.');
+                return;
+            }
+            if (onRendered) await onRendered();
+        });
+    }
+
+    async function showMessage(container, message, type = 'info', { autoDismiss = true, dismissAfter } = {}) {
+        if (!container) {
+            console.error('[message] container not found');
+            return;
         }
-        if (onRendered) await onRendered();
-    });
+
+        container.dataset.messageType = type;
+        container.dataset.messageText = message;
+
+        await renderTemplate(container, templates.message, {
+            message,
+            type,
+            autoDismiss,
+            ...(typeof dismissAfter === 'number' ? { dismissAfter } : {})
+        });
     }
 
     // Helpers de animação (com fallback para quem prefere menos movimento)
@@ -2270,11 +3020,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Opcional: manter os cantos arredondados só na 1ª e última linhas
     function fixRoundings(container) {
-    [...container.children].forEach((row, i, arr) => {
-        row.classList.remove('rounded-t-2xl', 'rounded-b-2xl');
-        if (i === 0) row.classList.add('rounded-t-2xl');
-        if (i === arr.length - 1) row.classList.add('rounded-b-2xl');
-    });
+        const rows = [...container.children];
+        rows.forEach((row, i) => {
+            row.classList.remove('rounded-t-2xl', 'rounded-b-2xl', 'border-b', 'border-gray-100');
+            const select = row.querySelector('select[name="url_type"]');
+            const input = row.querySelector('input[name="url_value"]');
+            select?.classList.remove('rounded-tl-2xl');
+            input?.classList.remove('rounded-tr-2xl');
+
+            if (i === 0) {
+                row.classList.add('rounded-t-2xl');
+                select?.classList.add('rounded-tl-2xl');
+                input?.classList.add('rounded-tr-2xl');
+            }
+            if (i === rows.length - 1) {
+                row.classList.add('rounded-b-2xl');
+            } else {
+                row.classList.add('border-b', 'border-gray-100');
+            }
+        });
     }
 
     async function toggleSidebar(el = null, toggle = true) {
@@ -2410,12 +3174,15 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             settingsForm.addEventListener('click', clickHandler);
             settingsForm._clickHandler = clickHandler;
+            setupCepAutofill(settingsForm);
         }
+
+        setupHeroImageUpload(sidebarContent, pageSettingsData, pageSettingsView);
 
         // atalhos da subview (via stack)
         if (sidebarContent._shortcutsHandler) sidebarContent.removeEventListener('click', sidebarContent._shortcutsHandler);
         const shortcutsHandler = (e) => {
-            const shortcut = e.target.closest('#employees, #user-jobs, #testimonials, #billing, #transactions, #subscriptions');
+            const shortcut = e.target.closest('#employees, #user-jobs, #testimonials, #billing, #transactions, #subscriptions, #password');
             if (!shortcut) return;
             const id = shortcut.id;
             const title = pageSettingsData?.tt || 'Ajustes';
@@ -2428,10 +3195,117 @@ document.addEventListener('DOMContentLoaded', () => {
         sidebarContent.addEventListener('click', shortcutsHandler);
         sidebarContent._shortcutsHandler = shortcutsHandler;
 
+        
+
+
         document?.getElementById('settings-form')?.addEventListener('submit', handleUpdate);
         initMasks();
     }
     
+    function setupCepAutofill(form) {
+        if (!form) return;
+        const zipInput = form.querySelector('input[name="zip_code"]');
+        if (!zipInput || zipInput.dataset.cepAutofill === '1') return;
+
+        let lookupTimeout = null;
+        let inFlightCep = '';
+
+        const resolveMessageContainer = () => form.querySelector('[data-role="message"]') || document.getElementById('message');
+
+        const scheduleLookup = () => {
+            clearTimeout(lookupTimeout);
+            lookupTimeout = setTimeout(async () => {
+                const sanitized = onlyNumbers(zipInput.value || '');
+                if (sanitized.length !== 8) {
+                    delete zipInput.dataset.lastCepFetched;
+                    inFlightCep = '';
+                    return;
+                }
+
+                if (sanitized === zipInput.dataset.lastCepFetched || sanitized === inFlightCep) {
+                    return;
+                }
+
+                inFlightCep = sanitized;
+                const result = await fetchCepData(sanitized);
+                inFlightCep = '';
+
+                if (!result.ok) {
+                    const container = resolveMessageContainer();
+                    if (container && result.message) {
+                        await showMessage(container, result.message, 'warning', { dismissAfter: 6000 });
+                    }
+                    return;
+                }
+
+                applyCepData(form, result.data);
+                zipInput.dataset.lastCepFetched = sanitized;
+            }, 400);
+        };
+
+        zipInput.addEventListener('input', scheduleLookup);
+        zipInput.addEventListener('blur', scheduleLookup);
+        zipInput.dataset.cepAutofill = '1';
+    }
+
+    async function fetchCepData(cep) {
+        const sanitized = onlyNumbers(cep || '');
+        if (sanitized.length !== 8) {
+            return { ok: false, message: 'Informe um CEP com 8 digitos.' };
+        }
+
+        const supportsAbort = typeof AbortController !== 'undefined';
+        const controller = supportsAbort ? new AbortController() : null;
+        let timeoutId = null;
+
+        if (controller) {
+            timeoutId = setTimeout(() => controller.abort(), 7000);
+        }
+
+        try {
+            const options = controller ? { signal: controller.signal } : {};
+            const response = await fetch('https://viacep.com.br/ws/' + sanitized + '/json/', options);
+            if (!response.ok) {
+                return { ok: false, message: 'Nao foi possivel consultar o CEP.' };
+            }
+            const data = await response.json();
+            if (data && data.erro) {
+                return { ok: false, message: 'CEP nao encontrado.' };
+            }
+            return { ok: true, data };
+        } catch (error) {
+            console.error('[cep] lookup error', error);
+            const message = error && error.name === 'AbortError'
+                ? 'Tempo excedido ao consultar o CEP.'
+                : 'Nao foi possivel consultar o CEP.';
+            return { ok: false, message };
+        } finally {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        }
+    }
+
+    function applyCepData(form, cepData) {
+        if (!cepData || !form) return;
+        const mapping = [
+            ['address', cepData.logradouro || ''],
+            ['district', cepData.bairro || ''],
+            ['city', cepData.localidade || ''],
+            ['state', cepData.uf || ''],
+            ['country', 'Brasil'],
+            ['complement', cepData.complemento || ''],
+        ];
+
+        mapping.forEach(([name, value]) => {
+            const field = form.querySelector('[name="' + name + '"]');
+            if (!field) return;
+            field.value = value || '';
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            field.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    }
+
     // OUTRAS FUNÇÕES
 
     function renderOutsourcedRow(typeSelectEl, { selected = '', disabled = false } = {}) {
@@ -2766,7 +3640,7 @@ document.addEventListener('DOMContentLoaded', () => {
             widgetBusinessesCount = approvedBizIds.length;
             widgetTeamsCount = approvedTeamIds.length;
 
-            entityImage = (currentUserData.im) ? 'data:image/png;base64,' + currentUserData.im : `https://placehold.co/100x100/EFEFEF/333?text=${currentUserData.tt.charAt(0)}`;            
+            entityImage = resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 100 });
 
         // OUTRAS ROTAS: define o que buscar
         } else {
@@ -2922,7 +3796,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             Object.assign(entityData.data[0], results);            
 
-            entityImage = (entityData.data[0].im) ? 'data:image/png;base64,' + entityData.data[0].im : `https://placehold.co/100x100/EFEFEF/333?text=${entityData.data[0].tt.charAt(0)}`;
+            entityImage = resolveImageSrc(entityData.data[0].im, entityData.data[0].tt, { size: 100 });
 
             if (viewType === ENTITY.PROFILE && results?.teams) {
                 // 1) Colete os IDs dos teams (cm) e busque todos de uma vez
@@ -3077,7 +3951,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const pageThumbs = document.getElementsByClassName('page-thumb');
             for (let i = 0; i < pageThumbs.length; i++) {
-                pageThumbs[i].src = 'data:image/png;base64,' + currentUserData.im;
+                pageThumbs[i].src = resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 100 });
             }
 
             // Reseta o estado do feed
@@ -3309,30 +4183,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function handleUpdate(e) {
         e.preventDefault();
-        const view = e.target.dataset.view;
-        const form = new FormData(e.target);
-        const data = Object.fromEntries(form.entries());
+        const formEl = e.target;
+        const view = formEl.dataset.view;
+        const form = new FormData(formEl);
+        const rawData = Object.fromEntries(form.entries());
         const messageContainer = document.getElementById('message');
 
-        if (data.phone) {
-            data.phone = onlyNumbers(data.phone);
-        }
-        if (data.national_id) {
-            data.national_id = onlyNumbers(data.national_id);
+        if (view === ENTITY.PROFILE) {
+            await handleProfileUpdate({ formEl, rawData, messageContainer });
+            return;
         }
 
-        const changedData = getChangedFields(data, currentUserData);
+        if (view === ENTITY.BUSINESS) {
+            await handleBusinessUpdate({ formEl, rawData, messageContainer });
+            return;
+        }
+
+        if (view === ENTITY.TEAM) {
+            await handleTeamUpdate({ formEl, rawData, messageContainer });
+            return;
+        }
+
+        if (rawData.phone) rawData.phone = onlyNumbers(rawData.phone);
+        if (rawData.national_id) rawData.national_id = onlyNumbers(rawData.national_id);
+
+        const changedData = getChangedFields(rawData, currentUserData);
 
         if (Object.keys(changedData).length === 0) {
             renderTemplate(messageContainer, templates.message, { message: 'Nenhuma alteração detectada.', type: 'warning' });
             return;
         }
 
-        if (changedData.tt !== undefined && changedData.tt.trim() === '') { renderTemplate(messageContainer, templates.message, { message: 'Nome é obrigatório.', type: 'error' }); return; }
-        if (changedData.ml !== undefined && changedData.ml.trim() === '') { 
+        if (changedData.tt !== undefined && changedData.tt.trim() === '') {
+            renderTemplate(messageContainer, templates.message, { message: 'Nome é obrigatório.', type: 'error' });
+            return;
+        }
+
+        if (changedData.ml !== undefined && changedData.ml.trim() === '') {
             renderTemplate(messageContainer, templates.message, { message: 'E-mail é obrigatório.', type: 'error' });
-            return; 
-        } else if (changedData.ml !== undefined) {
+            return;
+        }
+
+        if (changedData.ml !== undefined) {
             const result = await apiClient.post('/change-email', {
                 userId: currentUserData.id,
                 newEmail: changedData.ml
@@ -3342,36 +4234,505 @@ document.addEventListener('DOMContentLoaded', () => {
                     renderTemplate(messageContainer, templates.message, { message: 'Um pedido de confirmação foi encaminhado ao novo endereço de e-mail.', type: 'warning' });
                 } else {
                     renderTemplate(messageContainer, templates.message, { message: result.message || 'Ocorreu um erro.', type: 'error' });
-                }                
+                }
             } else {
                 renderTemplate(messageContainer, templates.message, { message: 'Ocorreu um erro ao alterar o e-mail.', type: 'error' });
             }
-            return;
+            delete changedData.ml;
+            if (Object.keys(changedData).length === 0) return;
         }
 
-        const entityType = (view === ENTITY.PROFILE) ? 'people' 
-                         : (view === ENTITY.BUSINESS) ? 'businesses' 
-                         : 'teams';
+        const entityType = (view === ENTITY.BUSINESS) ? 'businesses'
+                         : (view === ENTITY.TEAM) ? 'teams'
+                         : 'people';
 
-        if (data.id) {            
+        if (rawData.id) {
             const result = await apiClient.post('/update', {
                 db: typeMap[entityType].db,
                 table: typeMap[entityType].table,
                 data: changedData,
-                conditions: {
-                    id: data.id
-                }
+                conditions: { id: rawData.id }
             });
             if (result) {
-                await initializeCurrentUserData();                
+                await initializeCurrentUserData();
                 renderTemplate(messageContainer, templates.message, { message: 'Dados atualizados com sucesso!', type: 'success' });
-                if (viewType === view) {
-                    loadPage();
-                }                
+                if (viewType === view) loadPage();
             } else {
                 console.error('Falha na atualização.');
             }
-        }                            
+        }
+    }
+
+    async function handleProfileUpdate({ formEl, rawData, messageContainer }) {
+        const userId = rawData.id || currentUserData.id;
+        const baseContacts = normalizeContacts(currentUserData?.contacts);
+        const newContacts = collectContactsFromForm(formEl);
+
+        const profileNew = {
+            tt: (rawData.tt || '').trim(),
+            ml: (rawData.ml || '').trim(),
+            cf: rawData.cf ?? '',
+            un: (rawData.un || '').trim(),
+            page_privacy: normalizeNumber(rawData.page_privacy),
+            feed_privacy: normalizeNumber(rawData.feed_privacy),
+            gender: normalizeStringOrNull(rawData.gender),
+            birth: normalizeStringOrNull(rawData.birth),
+            contacts: newContacts.length ? JSON.stringify(newContacts) : null
+        };
+
+        const profileBaseline = {
+            tt: (currentUserData?.tt || '').trim(),
+            ml: (currentUserData?.ml || '').trim(),
+            cf: currentUserData?.cf ?? '',
+            un: (currentUserData?.un || '').trim(),
+            page_privacy: normalizeNumber(currentUserData?.page_privacy),
+            feed_privacy: normalizeNumber(currentUserData?.feed_privacy),
+            gender: normalizeStringOrNull(currentUserData?.gender),
+            birth: normalizeBirth(currentUserData?.birth),
+            contacts: baseContacts.length ? JSON.stringify(baseContacts) : null
+        };
+
+        const changed = {};
+        for (const key of Object.keys(profileNew)) {
+            if (profileNew[key] !== profileBaseline[key]) {
+                changed[key] = profileNew[key];
+            }
+        }
+
+        if (Object.keys(changed).length === 0) {
+            renderTemplate(messageContainer, templates.message, { message: 'Nenhuma alteração detectada.', type: 'warning' });
+            return;
+        }
+
+        if (changed.tt !== undefined && changed.tt.trim() === '') {
+            renderTemplate(messageContainer, templates.message, { message: 'Nome é obrigatório.', type: 'error' });
+            return;
+        }
+
+        let emailChange = null;
+        if (changed.ml !== undefined) {
+            if (changed.ml.trim() === '') {
+                renderTemplate(messageContainer, templates.message, { message: 'E-mail é obrigatório.', type: 'error' });
+                return;
+            }
+            emailChange = changed.ml;
+            delete changed.ml;
+        }
+
+        if (changed.un !== undefined) {
+            const available = await ensureNicknameAvailable({
+                nickname: profileNew.un,
+                entityType: ENTITY.PROFILE,
+                entityId: userId,
+                messageContainer
+            });
+            if (!available) return;
+        }
+
+        if (emailChange) {
+            const result = await apiClient.post('/change-email', {
+                userId,
+                newEmail: emailChange
+            });
+            if (result) {
+                if (result.status === 'success') {
+                    renderTemplate(messageContainer, templates.message, { message: 'Um pedido de confirmação foi encaminhado ao novo endereço de e-mail.', type: 'warning' });
+                } else {
+                    renderTemplate(messageContainer, templates.message, { message: result.message || 'Ocorreu um erro.', type: 'error' });
+                    return;
+                }
+            } else {
+                renderTemplate(messageContainer, templates.message, { message: 'Ocorreu um erro ao alterar o e-mail.', type: 'error' });
+                return;
+            }
+        }
+
+        if (Object.keys(changed).length === 0) {
+            await initializeCurrentUserData();
+            if (!emailChange) renderTemplate(messageContainer, templates.message, { message: 'Nenhuma alteração detectada.', type: 'warning' });
+            return;
+        }
+
+        const result = await apiClient.post('/update', {
+            db: 'workz_data',
+            table: 'hus',
+            data: changed,
+            conditions: { id: userId }
+        });
+
+        if (result) {
+            await initializeCurrentUserData();
+            renderTemplate(messageContainer, templates.message, { message: 'Dados atualizados com sucesso!', type: 'success' });
+            if (viewType === ENTITY.PROFILE) loadPage();
+        } else {
+            console.error('Falha na atualização do perfil.');
+            renderTemplate(messageContainer, templates.message, { message: 'Não foi possível salvar as alterações.', type: 'error' });
+        }
+    }
+
+    async function handleBusinessUpdate({ formEl, rawData, messageContainer }) {
+        const businessId = rawData.id;
+        if (!businessId) {
+            console.error('Business ID não informado.');
+            renderTemplate(messageContainer, templates.message, { message: 'Não foi possível identificar o negócio.', type: 'error' });
+            return;
+        }
+
+        const contacts = collectContactsFromForm(formEl);
+        const baselineData = getEntityBaseline(ENTITY.BUSINESS, businessId) || {};
+        const newModel = buildBusinessModel(rawData, contacts);
+        const baselineModel = buildBusinessModel(baselineData, extractContactsData(baselineData));
+
+        const changed = diffModels(newModel, baselineModel);
+
+        if (!Object.keys(changed).length) {
+            renderTemplate(messageContainer, templates.message, { message: 'Nenhuma alteração detectada.', type: 'warning' });
+            return;
+        }
+
+        if (!newModel.tt) {
+            renderTemplate(messageContainer, templates.message, { message: 'Nome é obrigatório.', type: 'error' });
+            return;
+        }
+
+        if (changed.un !== undefined) {
+            const available = await ensureNicknameAvailable({
+                nickname: newModel.un,
+                entityType: ENTITY.BUSINESS,
+                entityId: businessId,
+                messageContainer
+            });
+            if (!available) return;
+        }
+
+        const result = await apiClient.post('/update', {
+            db: 'workz_companies',
+            table: 'companies',
+            data: changed,
+            conditions: { id: businessId }
+        });
+
+        if (result) {
+            const updated = await refreshEntityState(ENTITY.BUSINESS, businessId);
+            renderTemplate(messageContainer, templates.message, { message: 'Dados atualizados com sucesso!', type: 'success' });
+            if (!updated) return;
+        } else {
+            console.error('Falha na atualização do negócio.');
+            renderTemplate(messageContainer, templates.message, { message: 'Não foi possível salvar as alterações.', type: 'error' });
+        }
+    }
+
+    async function handleTeamUpdate({ formEl, rawData, messageContainer }) {
+        const teamId = rawData.id;
+        if (!teamId) {
+            console.error('Team ID não informado.');
+            renderTemplate(messageContainer, templates.message, { message: 'Não foi possível identificar a equipe.', type: 'error' });
+            return;
+        }
+
+        const contacts = collectContactsFromForm(formEl);
+        const baselineData = getEntityBaseline(ENTITY.TEAM, teamId) || {};
+        const newModel = buildTeamModel(rawData, contacts);
+        const baselineModel = buildTeamModel(baselineData, extractContactsData(baselineData));
+
+        const changed = diffModels(newModel, baselineModel);
+
+        if (!Object.keys(changed).length) {
+            renderTemplate(messageContainer, templates.message, { message: 'Nenhuma alteração detectada.', type: 'warning' });
+            return;
+        }
+
+        if (!newModel.tt) {
+            renderTemplate(messageContainer, templates.message, { message: 'Nome é obrigatório.', type: 'error' });
+            return;
+        }
+
+        if (changed.un !== undefined) {
+            const available = await ensureNicknameAvailable({
+                nickname: newModel.un,
+                entityType: ENTITY.TEAM,
+                entityId: teamId,
+                messageContainer
+            });
+            if (!available) return;
+        }
+
+        const result = await apiClient.post('/update', {
+            db: 'workz_companies',
+            table: 'teams',
+            data: changed,
+            conditions: { id: teamId }
+        });
+
+        if (result) {
+            const updated = await refreshEntityState(ENTITY.TEAM, teamId);
+            renderTemplate(messageContainer, templates.message, { message: 'Dados atualizados com sucesso!', type: 'success' });
+            if (!updated) return;
+        } else {
+            console.error('Falha na atualização da equipe.');
+            renderTemplate(messageContainer, templates.message, { message: 'Não foi possível salvar as alterações.', type: 'error' });
+        }
+    }
+
+    function normalizeNumber(value) {
+        if (value === undefined || value === null || value === '') return null;
+        const num = Number(value);
+        return Number.isNaN(num) ? null : num;
+    }
+
+    function normalizeStringOrNull(value) {
+        if (value === undefined || value === null) return null;
+        const trimmed = String(value).trim();
+        return trimmed === '' ? null : trimmed;
+    }
+
+    function normalizeBirth(value) {
+        if (!value) return null;
+        try {
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return null;
+            return date.toISOString().split('T')[0];
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function normalizeRequiredString(value) {
+        return String(value ?? '').trim();
+    }
+
+    function sanitizeDocument(value) {
+        const normalized = normalizeStringOrNull(value);
+        if (!normalized) return null;
+        const digits = onlyNumbers(normalized);
+        return digits || null;
+    }
+
+    function extractContactsData(source) {
+        if (!source) return [];
+        if (Array.isArray(source)) return canonicalizeContacts(source);
+        if (typeof source === 'string') {
+            const trimmed = source.trim();
+            if (!trimmed) return [];
+            if (trimmed.startsWith('[')) {
+                return normalizeContacts(trimmed);
+            }
+            return canonicalizeContacts([{ type: '', value: trimmed }]);
+        }
+        if (typeof source === 'object') {
+            if (source.contacts !== undefined) return extractContactsData(source.contacts);
+            if (source.url !== undefined) return extractContactsData(source.url);
+        }
+        return [];
+    }
+
+    function buildBusinessModel(source = {}, contactsList = []) {
+        const normalizedContacts = canonicalizeContacts(contactsList);
+        return {
+            tt: normalizeRequiredString(source.tt ?? source.name),
+            national_id: sanitizeDocument(source.national_id ?? source.cnpj),
+            cf: normalizeStringOrNull(source.cf),
+            un: normalizeStringOrNull(source.un),
+            page_privacy: normalizeNumber(source.page_privacy ?? source.pg),
+            feed_privacy: normalizeNumber(source.feed_privacy ?? source.pc),
+            zip_code: normalizeStringOrNull(source.zip_code ?? source.zp),
+            country: normalizeStringOrNull(source.country),
+            state: normalizeStringOrNull(source.state),
+            city: normalizeStringOrNull(source.city),
+            district: normalizeStringOrNull(source.district),
+            address: normalizeStringOrNull(source.address),
+            complement: normalizeStringOrNull(source.complement),
+            contacts: normalizedContacts.length ? JSON.stringify(normalizedContacts) : null
+        };
+    }
+
+    function buildTeamModel(source = {}, contactsList = []) {
+        const normalizedContacts = canonicalizeContacts(contactsList);
+        return {
+            tt: normalizeRequiredString(source.tt ?? source.name),
+            cf: normalizeStringOrNull(source.cf),
+            un: normalizeStringOrNull(source.un),
+            feed_privacy: normalizeNumber(source.feed_privacy ?? source.pc),
+            em: normalizeNumber(source.em ?? source.business),
+            contacts: normalizedContacts.length ? JSON.stringify(normalizedContacts) : null
+        };
+    }
+
+    function diffModels(current = {}, baseline = {}) {
+        const diff = {};
+        const keys = new Set([...Object.keys(current), ...Object.keys(baseline)]);
+        keys.forEach((key) => {
+            const currentValue = current[key] ?? null;
+            const baselineValue = baseline[key] ?? null;
+            if (currentValue !== baselineValue) {
+                diff[key] = currentValue;
+            }
+        });
+        return diff;
+    }
+
+    function getEntityBaseline(view, entityId) {
+        const idStr = String(entityId ?? '');
+        if (!idStr) return null;
+
+        if (typeof SidebarNav !== 'undefined' && Array.isArray(SidebarNav.stack)) {
+            for (let i = SidebarNav.stack.length - 1; i >= 0; i--) {
+                const state = SidebarNav.stack[i];
+                const payloadData = state?.payload?.data;
+                if (payloadData && String(payloadData.id ?? '') === idStr) {
+                    return payloadData;
+                }
+            }
+        }
+
+        if (viewType === view && viewData && String(viewData.id ?? '') === idStr) {
+            return viewData;
+        }
+
+        if (view === ENTITY.PROFILE && currentUserData && String(currentUserData.id ?? '') === idStr) {
+            return currentUserData;
+        }
+
+        return null;
+    }
+
+    async function refreshEntityState(view, entityId) {
+        const idStr = String(entityId ?? '');
+        if (!idStr) return null;
+
+        let dbCfg = null;
+        if (view === ENTITY.BUSINESS) dbCfg = { db: 'workz_companies', table: 'companies' };
+        else if (view === ENTITY.TEAM) dbCfg = { db: 'workz_companies', table: 'teams' };
+        else if (view === ENTITY.PROFILE) dbCfg = { db: 'workz_data', table: 'hus' };
+        if (!dbCfg) return null;
+
+        try {
+            const res = await apiClient.post('/search', {
+                db: dbCfg.db,
+                table: dbCfg.table,
+                columns: ['*'],
+                conditions: { id: entityId },
+                fetchAll: true,
+                limit: 1
+            });
+            const updated = Array.isArray(res?.data) ? res.data[0] : res?.data || null;
+            if (updated) updateSidebarStateData(view, entityId, updated);
+            return updated;
+        } catch (error) {
+            console.error('[refreshEntityState] erro', error);
+            return null;
+        }
+    }
+
+    function updateSidebarStateData(view, entityId, updated) {
+        if (!updated) return;
+        const idStr = String(entityId ?? updated.id ?? '');
+        if (!idStr) return;
+
+        if (typeof SidebarNav !== 'undefined' && Array.isArray(SidebarNav.stack)) {
+            SidebarNav.stack.forEach((state) => {
+                if (state?.payload?.data && String(state.payload.data.id ?? '') === idStr) {
+                    state.payload = { ...(state.payload || {}), data: updated };
+                }
+            });
+        }
+
+        if (viewType === view && viewData && String(viewData.id ?? '') === idStr) {
+            viewData = updated;
+        }
+
+        if (view === ENTITY.PROFILE && currentUserData && String(currentUserData.id ?? '') === idStr) {
+            currentUserData = { ...currentUserData, ...updated };
+        }
+    }
+
+    function collectContactsFromForm(formEl) {
+        const container = formEl.querySelector('#input-container');
+        if (!container) return [];
+        const rows = [...container.querySelectorAll('[data-input-id]')];
+        const entries = rows.map((row) => {
+            const type = row.querySelector('select[name="url_type"]')?.value || '';
+            const value = row.querySelector('input[name="url_value"]')?.value || '';
+            return { type: type.trim(), value: value.trim() };
+        }).filter(item => item.type && item.value);
+        return canonicalizeContacts(entries);
+    }
+
+    function normalizeContacts(raw) {
+        if (!raw) return [];
+        let source = raw;
+        if (typeof raw === 'string') {
+            try { source = JSON.parse(raw); }
+            catch (_) { return []; }
+        }
+        if (!Array.isArray(source)) return [];
+        return canonicalizeContacts(source);
+    }
+
+    function canonicalizeContacts(list) {
+        if (!Array.isArray(list)) return [];
+        return list
+            .map((item) => {
+                const type = normalizeStringOrNull(item?.type ?? item?.url_type);
+                const value = normalizeStringOrNull(item?.value ?? item?.url_value);
+                if (!type || !value) return null;
+                return { type, value };
+            })
+            .filter(Boolean);
+    }
+
+    async function ensureNicknameAvailable({ nickname, entityType, entityId, messageContainer }) {
+        const value = normalizeStringOrNull(nickname);
+        if (!value) return true;
+
+        const available = await isNicknameAvailable(value, entityType, entityId);
+        if (!available) {
+            renderTemplate(messageContainer, templates.message, { message: 'Esse apelido já está sendo utilizado. Escolha outro.', type: 'error' });
+            return false;
+        }
+        return true;
+    }
+
+    async function isNicknameAvailable(nickname, entityType, entityId) {
+        const value = normalizeStringOrNull(nickname);
+        if (!value) return true;
+
+        const checks = [
+            { entity: ENTITY.PROFILE, db: 'workz_data', table: 'hus' },
+            { entity: ENTITY.BUSINESS, db: 'workz_companies', table: 'companies' },
+            { entity: ENTITY.TEAM, db: 'workz_companies', table: 'teams' }
+        ];
+
+        const idStr = String(entityId ?? '');
+        const requests = checks.map(({ db, table }) => apiClient.post('/search', {
+            db,
+            table,
+            columns: ['id', 'un'],
+            conditions: { un: value },
+            fetchAll: true,
+            limit: 5
+        }).catch(() => null));
+
+        const responses = await Promise.all(requests);
+
+        for (let i = 0; i < checks.length; i++) {
+            const { entity } = checks[i];
+            const res = responses[i];
+            const rows = Array.isArray(res?.data) ? res.data : res?.data ? [res.data] : [];
+            if (!rows.length) continue;
+
+            const conflict = rows.find((row) => {
+                if (!row) return false;
+                const rowId = String(row.id ?? '');
+                if (!rowId) return true;
+                if (entity === entityType && rowId === idStr) return false;
+                return true;
+            });
+
+            if (conflict) return false;
+        }
+
+        return true;
     }
 
     function getChangedFields(newData, oldData) {
@@ -3388,45 +4749,118 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleLogin(event) {
         event.preventDefault();
         const loginForm = event.target;
-        const messageContainer = document.getElementById('message');        
+        const messageContainer = loginForm.previousElementSibling?.id === 'message'
+            ? loginForm.previousElementSibling
+            : document.getElementById('message');
 
-        let data = {
-            email: loginForm.email.value,
-            password: loginForm.password.value
+        const email = (loginForm.email.value || '').trim();
+        const password = loginForm.password.value || '';
+
+        if (!email || !password) {
+            await showMessage(messageContainer, 'Informe e-mail e senha para continuar.', 'error', { dismissAfter: 6000 });
+            if (!email) loginForm.email.focus();
+            else loginForm.password.focus();
+            return;
         }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            await showMessage(messageContainer, 'Informe um e-mail válido.', 'error', { dismissAfter: 6000 });
+            loginForm.email.focus();
+            return;
+        }
+
+        let data = { email, password };
+
+        const submitBtn = loginForm.querySelector('button[type="submit"]');
+        setButtonLoading(submitBtn, true, 'Entrando...');
         
-        const result = await apiClient.post('/login', data);
-        if (result.token) {
-            localStorage.setItem('jwt_token', result.token);
-            $('#loading').fadeIn();
-            startup();            
-        } else {
-            renderTemplate(messageContainer, templates.message, { message: result.error || 'Ocorreu um erro.', type: 'error' });            
-        }        
+        try {
+            const result = await apiClient.post('/login', data);
+            if (result?.token) {
+                localStorage.setItem('jwt_token', result.token);
+                $('#loading').fadeIn();
+                startup();
+            } else {
+                await showMessage(messageContainer, result?.error || 'Credenciais inválidas. Verifique seus dados.', 'error', { dismissAfter: 6000 });
+            }
+        } catch (error) {
+            console.error('[login] error', error);
+            await showMessage(messageContainer, 'Não foi possível fazer login agora. Tente novamente.', 'error', { dismissAfter: 6000 });
+        } finally {
+            setButtonLoading(submitBtn, false);
+        }
     }
 
     async function handleRegister(event) {
         event.preventDefault();
         const registerForm = event.target;
-        const messageContainer = document.getElementById('message');
+        const messageContainer = registerForm.previousElementSibling?.id === 'message'
+            ? registerForm.previousElementSibling
+            : document.getElementById('message');
 
-        const result = await apiClient.post('/register', {
-            name: registerForm.name.value,
-            email: registerForm.email.value,
-            password: registerForm.password.value,
-            'password-repeat': registerForm['password-repeat'].value
-        });
-    
-        if (result) {
-            if (result.token) {
+        const formValues = {
+            name: (registerForm.name.value || '').trim(),
+            email: (registerForm.email.value || '').trim(),
+            password: registerForm.password.value || '',
+            repeat: registerForm['password-repeat'].value || ''
+        };
+
+        if (!formValues.name) {
+            await showMessage(messageContainer, 'Informe seu nome completo.', 'error', { dismissAfter: 6000 });
+            registerForm.name.focus();
+            return;
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(formValues.email)) {
+            await showMessage(messageContainer, 'Informe um e-mail válido.', 'error', { dismissAfter: 6000 });
+            registerForm.email.focus();
+            return;
+        }
+
+        if (!passwordMeetsRules(formValues.password)) {
+            await showMessage(
+                messageContainer,
+                'A senha deve ter pelo menos 8 caracteres, incluindo letras maiúsculas, minúsculas, números e um caractere especial.',
+                'error',
+                { dismissAfter: 7000 }
+            );
+            registerForm.password.focus();
+            return;
+        }
+
+        if (formValues.password !== formValues.repeat) {
+            await showMessage(messageContainer, 'As senhas não coincidem.', 'error', { dismissAfter: 6000 });
+            registerForm['password-repeat'].focus();
+            return;
+        }
+
+        const submitBtn = registerForm.querySelector('button[type="submit"]');
+        setButtonLoading(submitBtn, true, 'Criando conta...');
+
+        try {
+            const result = await apiClient.post('/register', {
+                name: formValues.name,
+                email: formValues.email,
+                password: formValues.password,
+                'password-repeat': formValues.repeat
+            });
+
+            if (result?.token) {
                 localStorage.setItem('jwt_token', result.token);
                 $('#loading').fadeIn();
                 startup();
-            } else {
-                renderTemplate(messageContainer, templates.message, { message: result.error || 'Ocorreu um erro ao logar após criar a conta.', type: 'error' });            
+                return;
             }
-        } else {
-            renderTemplate(messageContainer, templates.message, { message: result.error || 'Ocorreu um erro ao criar a conta.', type: 'error' });
+
+            const message = result?.error || result?.message || 'Não foi possível criar a conta. Tente novamente.';
+            await showMessage(messageContainer, message, 'error', { dismissAfter: 6000 });
+        } catch (error) {
+            console.error('[register] error', error);
+            await showMessage(messageContainer, 'Não foi possível criar a conta no momento. Tente novamente.', 'error', { dismissAfter: 6000 });
+        } finally {
+            setButtonLoading(submitBtn, false);
         }
     }
 
@@ -3443,7 +4877,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const mainWrapperInit = document.getElementById('main-wrapper-init');        
         await renderTemplate(mainWrapperInit, 'register', null, () => {
             // Adiciona os listeners aos elementos de registo
-            document.getElementById('register-form').addEventListener('submit', handleRegister);
+            const registerForm = document.getElementById('register-form');
+            if (registerForm) {
+                const submitHandler = (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    if (typeof ev.stopImmediatePropagation === 'function') {
+                        ev.stopImmediatePropagation();
+                    }
+                    handleRegister(ev);
+                };
+                registerForm.addEventListener('submit', submitHandler, true);
+                registerForm.onsubmit = submitHandler;
+                registerForm.dataset.jsVersion = '2024-02-15-1';
+            }
             document.getElementById('show-login-link').addEventListener('click', (e) => {
                 e.preventDefault();
                 renderLoginUI();
@@ -3455,7 +4902,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const mainWrapperInit = document.getElementById('main-wrapper-init');
         await renderTemplate(mainWrapperInit, 'login', null, () => {
             // Adiciona os listeners APENAS depois de renderizar a UI de login.
-            document.getElementById('login-form').addEventListener('submit', handleLogin);
+            const loginForm = document.getElementById('login-form');
+            if (loginForm) {
+                const submitHandler = (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    if (typeof ev.stopImmediatePropagation === 'function') {
+                        ev.stopImmediatePropagation();
+                    }
+                    handleLogin(ev);
+                };
+                loginForm.addEventListener('submit', submitHandler, true);
+                loginForm.onsubmit = submitHandler;
+                loginForm.dataset.jsVersion = '2024-02-15-1';
+            }
             document.getElementById('google-login-btn').addEventListener('click', () => window.location.href = '/api/auth/google/redirect');
             document.getElementById('microsoft-login-btn').addEventListener('click', () => window.location.href = '/api/auth/microsoft/redirect');
             document.getElementById('show-register-link').addEventListener('click', (e) => {
@@ -3519,9 +4979,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     startup();
 
+    setupSidebarFormConfirmation();
+
+    
+
+    document.addEventListener('submit', (event) => {
+        if (!event.target?.matches?.('#change-password-form')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') {
+            event.stopImmediatePropagation();
+        }
+        handleChangePassword(event);
+    }, true);
+
     document.addEventListener('click', function(event) {
         const target = event.target;
-        
+        const activeSwal = document.querySelector('.swal-overlay:not(.swal-hidden)');
+        if (activeSwal && activeSwal.contains(target)) {
+            return;
+        }
         const isSidebarOpen = !sidebarWrapper.classList.contains('w-0');
         const clickedInsideSidebar = sidebarWrapper.contains(target);
         const clickedSidebarTrigger = !!target.closest('#sidebarTrigger');
@@ -3575,20 +5052,160 @@ document.addEventListener('DOMContentLoaded', () => {
         ]
     };
 
+    const cepMaskOptions = {
+        mask: '00000-000'
+    };
+
     // Função segura para aplicar IMask
     function applyMask(id, options) {
         const el = document.getElementById(id);
         if (!el) {
-            console.warn(`[mask] elemento #${id} não encontrado no DOM no momento da aplicação`);
+            console.warn('[mask] elemento #' + id + ' nao encontrado no DOM no momento da aplicacao');
             return null;
         }
-        return IMask(el, options);
+        if (el.dataset.maskInitialized === '1') {
+            return el._imaskInstance || null;
+        }
+        const instance = IMask(el, options);
+        el.dataset.maskInitialized = '1';
+        el._imaskInstance = instance;
+        return instance;
     }
 
-    // Inicializa quando o DOM está pronto
     function initMasks() {
         applyMask('phone', phoneMaskOptions);
         applyMask('cpf', cpfMaskOptions);
+        applyMask('zip_code', cepMaskOptions);
+    }
+
+    function passwordMeetsRules(password) {
+        if (!password) return false;
+        return password.length >= 8
+            && /[a-z]/.test(password)
+            && /[A-Z]/.test(password)
+            && /\d/.test(password)
+            && /[@$!%*?&.#]/.test(password);
+    }
+
+    async function handleChangePassword(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const form = event.target;
+        const getField = (name) => form.querySelector(`[name="${name}"]`);
+        const fields = {
+            current: getField('current_password'),
+            next: getField('new_password'),
+            repeat: getField('new_password_repeat'),
+            id: getField('id')
+        };
+
+        const values = {
+            current: (fields.current?.value ?? '').trim(),
+            next: (fields.next?.value ?? '').trim(),
+            repeat: (fields.repeat?.value ?? '').trim(),
+            id: fields.id?.value ?? ''
+        };
+
+
+        let messageContainer = form.previousElementSibling;
+        if (!messageContainer?.matches?.('[data-role="message"]')) {
+            messageContainer = form.parentElement?.querySelector('[data-role="message"]') ?? null;
+        }
+
+        if (!messageContainer) {
+            console.error('[password] message container not found for change-password form');
+            return;
+        }
+
+        const missingField = Object.entries({
+            'Senha atual': values.current,
+            'Nova senha': values.next,
+            'Confirmação da nova senha': values.repeat
+        }).find(([, value]) => !value);
+
+        if (missingField) {
+            await showMessage(messageContainer, `Preencha o campo "${missingField[0]}" antes de continuar.`, 'error', { dismissAfter: 6000 });
+            const key = missingField[0] === 'Senha atual' ? 'current' : missingField[0] === 'Nova senha' ? 'next' : 'repeat';
+            fields[key]?.focus?.();
+            return;
+        }
+
+        if (values.next === values.current) {
+            await showMessage(messageContainer, 'A nova senha deve ser diferente da senha atual.', 'error', { dismissAfter: 6000 });
+            fields.next?.focus?.();
+            return;
+        }
+
+        if (values.next !== values.repeat) {
+            await showMessage(messageContainer, 'As senhas não coincidem.', 'error', { dismissAfter: 6000 });
+            fields.repeat?.focus?.();
+            return;
+        }
+
+        if (!passwordMeetsRules(values.next)) {
+            await showMessage(messageContainer, 'A nova senha deve ter pelo menos 8 caracteres, incluir letras maiúsculas e minúsculas, números e um caractere especial.', 'error', { dismissAfter: 7000 });
+            fields.next?.focus?.();
+            return;
+        }
+
+        const submitButton = form.querySelector('button[type="submit"]');
+        setButtonLoading(submitButton, true, 'Alterando...');
+
+        try {
+            const payload = {
+                userId: values.id,
+                currentPassword: values.current,
+                newPassword: values.next
+            };
+
+            const result = await apiClient.post('/change-password', payload);
+
+            if (result?.status === 'success') {
+                await showMessage(messageContainer, result.message || 'Senha alterada com sucesso!', 'success', { dismissAfter: 4000 });
+                form.reset();
+            } else {
+                const errorMessage = result?.message || result?.error || 'Falha ao alterar a senha. Verifique os dados informados.';
+                await showMessage(messageContainer, errorMessage, 'error', { dismissAfter: 6000 });
+            }
+        } catch (error) {
+            console.error('[password] change error', error);
+            await showMessage(messageContainer, 'Não foi possível alterar a senha no momento. Tente novamente.', 'error', { dismissAfter: 6000 });
+        } finally {
+            setButtonLoading(submitButton, false);
+        }
+    }
+
+    function setupSidebarFormConfirmation() {
+        if (!sidebarWrapper || typeof confirmDialog !== 'function') return;
+
+        const confirmationText = 'Você tem certeza de que deseja continuar?';
+
+        sidebarWrapper.addEventListener('submit', async (event) => {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+
+            if (form.dataset.skipConfirm === '1') {
+                delete form.dataset.skipConfirm;
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            if (typeof event.stopImmediatePropagation === 'function') {
+                event.stopImmediatePropagation();
+            }
+
+            const confirmed = await confirmDialog(confirmationText, { title: 'Confirmar ação', danger: true });
+            if (!confirmed) return;
+
+            form.dataset.skipConfirm = '1';
+            if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+            } else {
+                form.submit();
+            }
+        }, true);
     }
 
     function onlyNumbers(str) {
@@ -3596,3 +5213,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
+
+
+
+
+
+
+
+
+
+
+
+
