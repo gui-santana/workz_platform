@@ -534,6 +534,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Define a origem da transformação. A imagem usará seu tamanho intrínseco.
             currentState.imageEl.style.transformOrigin = 'top left';
+            currentState.imageEl.style.width = `${currentState.naturalWidth}px`;
+            currentState.imageEl.style.height = `${currentState.naturalHeight}px`;
+            currentState.imageEl.style.maxWidth = 'none';
 
             currentState.containerSize = currentState.container.getBoundingClientRect().width || currentState.containerSize;
             const minScale = Math.max(
@@ -609,11 +612,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyCropperState(state) {
         if (!state.imageEl) return;
         state.imageEl.style.transform = `translate(${state.offsetX}px, ${state.offsetY}px) scale(${state.scale})`;
-        state.imageEl.style.maxWidth = '';
-        state.imageEl.style.width = '';
-        state.imageEl.style.height = '';
-        state.imageEl.style.left = '';
-        state.imageEl.style.top = '';
     }
 
     function setCropperScale(state, newScale, anchorX, anchorY) {
@@ -1477,7 +1475,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return html;
         }
 
-        if (view === null) {
+        if (view === null) {            
+            html += UI.renderCloseHeader();
+            
             const appearance = UI.shortcutList([
                 { id: 'desktop', icon: 'fa-th', label: 'Área de Trabalho' }
             ]);
@@ -4011,6 +4011,36 @@ document.addEventListener('DOMContentLoaded', () => {
     function initAppLibrary(root = '#app-library') {
         const el = typeof root === 'string' ? document.querySelector(root) : root;
         if (!el) return;
+
+        el.addEventListener('click', async (event) => {
+            const appButton = event.target.closest('[data-app-id]');
+            if (appButton) {
+                const appId = appButton.dataset.appId;
+                const res = await apiClient.post('/search', { db: 'workz_apps', table: 'apps', columns: ['*'], conditions: { id: appId } });
+                const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
+                
+                if (app && app.src) { 
+                    newWindow(app.src, `app_${app.id}`, app.ic, app.tt);
+                } else {
+                    console.warn('App does not have a URL (src) to open.', app);
+                }
+            }
+        });
+
+        el.addEventListener('click', async (event) => {
+            const appButton = event.target.closest('[data-app-id]');
+            if (appButton) {
+                const appId = appButton.dataset.appId;
+                const res = await apiClient.post('/search', { db: 'workz_apps', table: 'apps', columns: ['*'], conditions: { id: appId } });
+                const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
+                
+                if (app && app.pg) { 
+                    newWindow(app.pg, `app_${app.id}`, app.ic, app.tt);
+                } else {
+                    console.warn('App does not have a URL (pg) to open.', app);
+                }
+            }
+        });
 
         const track = el.querySelector('[data-role="track"]');
         const dotEls = [...el.querySelectorAll('[data-role="dots"] button')];

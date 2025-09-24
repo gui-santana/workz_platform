@@ -5,12 +5,12 @@
  */
 const isValidUrl = (urlString) => {
   var urlPattern = new RegExp(
-    '^(https?:\\/\\/)?' + // validate protocol
-      '((([a-z\\d]([a-z\\d-]*[a-z\\d])*)\\.)+[a-z]{2,}|' + // validate domain name
-      '((\\d{1,3}\\.){3}\\d{1,3}))' + // validate OR ip (v4) address
-      '(\\:\\d+)?(\\/[-a-z\\d%_.~+]*)*' + // validate port and path
-      '(\\?[;&a-z\\d%_.~+=-]*)?' + // validate query string
-      '(\\#[-a-z\\d_]*)?$',
+    '^https?:\/\/)?' + // validate protocol
+      '((([a-z\d]([a-z\d-]*[a-z\d])*)\.)+[a-z]{2,}|' + // validate domain name
+      '((\d{1,3}\.){3}\d{1,3}))' + // validate OR ip (v4) address
+      '(\:\d+)?(\/[-a-z\d%_.~+]*)*' + // validate port and path
+      '(\?[;&a-z\d%_.~+=-]*)?' + // validate query string
+      '(\#[-a-z\d_]*)?$',
     'i'
   ); // validate fragment locator
 
@@ -36,10 +36,11 @@ function enableSelection() {
  * @param {String} icon - Ícone da janela.
  */
 function newWindow(target, id, icon, title) {
+  let iconSrc;
   if (icon === undefined) {
-    icon = 'https://workz.com.br/images/no-image.jpg';
+    iconSrc = 'https://workz.com.br/images/no-image.jpg';
   } else {
-    icon = 'data:image/jpeg;base64,' + decodeURIComponent(atob(icon));
+    iconSrc = 'data:image/jpeg;base64,' + decodeURIComponent(atob(icon));
   }
 
   var created = document.getElementsByClassName('window');
@@ -57,64 +58,36 @@ function newWindow(target, id, icon, title) {
     var windowEl = document.createElement("div");
     windowEl.setAttribute("name", id);
     windowEl.id = "window_" + (n + 1);
-    windowEl.classList.add("window", "background-white");
+    windowEl.classList.add("window", "bg-white");
     document.getElementById("desktop").appendChild(windowEl);
     interactive(windowEl.id, {
       resize: true,
       drag: true,
       close: true,
       minMax: true,
+      title: title,
+      iconSrc: iconSrc
     });
-
-	var appElements = document.createElement("div");
-	appElements.classList.add(
-		"display-center-general-container",
-		"position-absolute",
-		"abs-t-5",
-		"abs-l-5"
-	);	
-
-    var imgIcon = document.createElement("img");
-    imgIcon.setAttribute("src", icon);
-    imgIcon.id = "windowIcon_" + id;
-    imgIcon.style.height = "25px";
-    imgIcon.style.width = "25px";
-    imgIcon.classList.add(     
-      "w-rounded-5",
-	  "cm-mg-5-r",
-      "windowIcon"
-    );
-    appElements.appendChild(imgIcon);
-	
-	var appTitle = document.createElement("a");
-	appTitle.textContent = title;
-	appElements.appendChild(appTitle);	
-
-	windowEl.appendChild(appElements);
 
     desktop();
     if (target !== null) {
       var root = document.createElement("div");
       root.classList.add(
-        "cm-mg-5-t",
-        "large-12",
-        "medium-12",
-        "small-12",
-        "w-rounded-10",
-        "border-like-input"
+        "mt-1",
+        "w-full",
+        "rounded-lg",
+        "border"
       );
-      root.style.height = "calc(100% - 40px)";
+      root.style.height = "calc(100% - 30px)"; // Adjust height for new header
       windowEl.appendChild(root);
 
       var iframe = document.createElement("iframe");
       iframe.src = target;
       iframe.classList.add(
-        "w-rounded-10",
+        "rounded-lg",
         "border-none",
-        "large-12",
-        "medium-12",
-        "small-12",
-        "height-100"
+        "w-full",
+        "h-full"
       );
       root.appendChild(iframe);
 
@@ -144,7 +117,7 @@ function interactive(id, config) {
       resizable(element);
     }
     if (config.drag !== false) {
-      draggable(element);
+      draggable(element, config.title, config.iconSrc);
     }
     if (config.close !== false) {
       close(element);
@@ -181,12 +154,14 @@ function resizable(element) {
   resizeParent.style.zIndex = 1;
   resizeParent.classList.add(
     "opacity-0",
-    "ease-all-1s",
-    "w-rounded-5",
-    "border-like-input",
+    "transition-opacity", // Tailwind for transition: opacity
+    "duration-300",     // A faster duration
+    "ease-in-out",      // A nice easing function
+    "rounded-md",
+    "border",
     "overflow-hidden",
-    "position-absolute",
-    "display-grid"
+    "absolute",
+    "grid"
   );
 
   element.parentElement.appendChild(resizeParent);
@@ -196,7 +171,7 @@ function resizable(element) {
   addResizePoints(element, resizeParent);
 
   setTimeout(() => {
-    resizeParent.classList.remove("opacity-0", "ease-all-1s");
+    resizeParent.classList.remove("opacity-0");
   }, 100);
 }
 
@@ -263,8 +238,8 @@ function initialResizeCssProperties(element, parent) {
 
   parent.style.top = computed.getPropertyValue("top");
   parent.style.left = computed.getPropertyValue("left");
-  parent.style.gridTemplateRows = "5px " + h + " 5px";
-  parent.style.gridTemplateColumns = "5px " + w + " 5px";
+  parent.style.gridTemplateRows = "4px " + h + " 4px";
+  parent.style.gridTemplateColumns = "4px " + w + " 4px";
   parent.style.backgroundColor = computed.getPropertyValue("background-color");
 
   element.style.top = "0px";
@@ -282,12 +257,12 @@ function initialResizeCssProperties(element, parent) {
  * @param {HTMLElement} resizePoint 
  */
 function addResizePointFunctionality(element, parent, resizePoint) {
-  resizePoint.onmousedown = function () {
+  resizePoint.onmousedown = function (event) {
     if (event.which == 1) {
       trackMouseDragPlusAction({
         action: "resize",
         param: [element, parent, resizePoint.className],
-      });
+      }, event);
     }
   };
 }
@@ -438,7 +413,7 @@ function changeVerticalMeasures(element, parent, mouseDrag, zone) {
  * 
  * @param {HTMLElement} element
  */
-function draggable(element) {
+function draggable(element, title, iconSrc) { // Receive data
   element.classList.add("draggable");
 
   // Adiciona header que atuará como ponto de arrasto.
@@ -449,6 +424,24 @@ function draggable(element) {
   );
   dragPoint.classList.add("w-rounded-5-t");
   initialDragPointStyling(dragPoint);
+
+  let titleArea = createElementWithClassName('div', 'window-title-area');
+  if (iconSrc) {
+      let imgIcon = document.createElement("img");
+      imgIcon.src = iconSrc;
+      imgIcon.id = "windowIcon_" + element.getAttribute("name"); // Use window name for ID
+      imgIcon.style.height = "20px";
+      imgIcon.style.width = "20px";
+      imgIcon.classList.add("rounded-md", "mr-2");
+      titleArea.appendChild(imgIcon);
+  }
+  if (title) {
+      let windowTitle = document.createElement("span");
+      windowTitle.classList.add("font-semibold", "text-sm", "text-gray-700");
+      windowTitle.textContent = title;
+      titleArea.appendChild(windowTitle);
+  }
+  dragPoint.appendChild(titleArea);
 
   // Insere o dragPoint como primeiro filho do elemento
   let firstChild = element.firstChild;
@@ -467,21 +460,11 @@ function draggable(element) {
     }
   }
 
-  dragPoint.onmousedown = function () {
+  dragPoint.onmousedown = function (event) {
     if (event.which == 1) {
-      trackMouseDragPlusAction({ action: "drag", param: [element] });
+      trackMouseDragPlusAction({ action: "drag", param: [element] }, event);
     }
   };
-
-  var windowTitle = document.createElement("div");
-  windowTitle.classList.add(
-    "float-left",
-    "uppercase",
-    "font-weight-600",
-    "fs-c",
-    "dark"
-  );
-  dragPoint.appendChild(windowTitle);
 }
 
 /**
@@ -489,15 +472,7 @@ function draggable(element) {
  * @param {HTMLElement} dragPoint 
  */
 function initialDragPointStyling(dragPoint) {
-  dragPoint.classList.add(
-    "large-12",
-    "medium-12",
-    "small-12",
-    "background-gray",
-    "cm-pad-5",
-    "dark",
-    "clear"
-  );
+  
 }
 
 /**
@@ -615,16 +590,10 @@ function close(element) {
  * @param {HTMLElement} element 
  */
 function addCloseFunctionality(element) {
-  let closeBtn = getButton(element, "closeBtn");
-  closeBtn.onclick = function () {
-    let parent = element.parentNode;
-    if (element.classList.contains("resizable")) {
-      parent.parentNode.removeChild(parent);
-    } else {
-      parent.removeChild(element);
-    }
-    desktop();
-  };
+  let closeBtn = element.querySelector('.closeBtn');
+  if (closeBtn) {
+    closeBtn.onclick = minimize;
+  }
 }
 
 /**
@@ -687,12 +656,7 @@ function addFunctionButton(element, svgPath) {
     div.appendChild(svg);
     container.appendChild(div);
   }
-  let firstElement = element.firstChild;
-  if (firstElement != null) {
-    element.insertBefore(container, firstElement);
-  } else {
-    element.appendChild(container);
-  }
+  element.appendChild(container);
 }
 
 /**
@@ -701,8 +665,8 @@ function addFunctionButton(element, svgPath) {
  * @returns {HTMLElement} Container
  */
 function createButtonsContainer(element) {
-  let container = element.firstElementChild;
-  if (container === null || container.className !== "btnContainer") {
+  let container = element.querySelector('.btnContainer');
+  if (container === null) {
     container = createElementWithClassName("div", "btnContainer");
   }
   return container;
@@ -718,14 +682,17 @@ function createButtonsContainer(element) {
 function addMinimizeFunction(element, minZone, icons, doubleClick) {
   addMinimizeArea(minZone);
   if (doubleClick !== false) {
-    if (element.classList.contains("draggable")) {
-      element = element.firstElementChild;
+    let targetElement = element;
+    if (targetElement.classList.contains("draggable")) {
+      targetElement = targetElement.firstElementChild; // This is the .dragPoint header
     }
-    element.ondblclick = minimize;
+    targetElement.ondblclick = function() { toggleMaximize(element) };
   }
   if (icons !== false) {
-    let minBtn = getButton(element, "minBtn");
-    minBtn.onclick = minimize;
+    let minBtn = element.querySelector('.minBtn');
+    if (minBtn) {
+        minBtn.onclick = minimize;
+    }
   }
 }
 
@@ -763,7 +730,6 @@ function minimize() {
     return;
   }
   minimizeUI(element);
-  desktop();
 }
 
 /**
@@ -771,34 +737,37 @@ function minimize() {
  */
 function desktop() {
   var windows = document.getElementsByClassName("parentResize");
-  var buttons = document.getElementsByClassName("minimizedItem");
   var desktop = document.getElementById("desktop");
+  var scrim = document.getElementById("desktop-scrim");
+  var minimizeZone = document.getElementById("minimizeZone");
   var length = windows.length;
   var n_minimized = 0;
-  setTimeout(() => {
-    for (var i = 0; i < length; i++) {
-      if (windows[i].getAttribute("style").indexOf("display: none;") != -1) {
-        n_minimized++;
-      }
+
+  for (var i = 0; i < length; i++) {
+    if (windows[i].style.display === 'none') {
+      n_minimized++;
     }
-    if (length == 0 || n_minimized == length) {
-      desktop.style.backdropFilter = "blur(0px)";
-      desktop.style.background = null;
-      for (var n = 0; n < buttons.length; n++) {
-        buttons[n].disabled = true;
+  }
+
+  if (length > 0 && n_minimized < length) { // Case 1: Some windows are open
+      desktop.classList.add("h-screen");
+      if (scrim) scrim.classList.add("active");
+      desktop.style.pointerEvents = "auto";
+      if (minimizeZone) {
+          minimizeZone.style.pointerEvents = "auto";
       }
-      setTimeout(() => {
-        desktop.classList.remove("height-100");
-        for (var n = 0; n < buttons.length; n++) {
-          buttons[n].disabled = false;
-        }
-      }, 1000);
-    } else {
-      desktop.classList.add("height-100");
-      desktop.style.backdropFilter = "blur(5px)";
-      desktop.style.background = "rgba(0,0,0,0.25)";
-    }
-  }, 200);
+  } else if (length > 0 && n_minimized === length) { // Case 2: All windows minimized
+      desktop.classList.add("h-screen"); // Keep the height
+      if (scrim) scrim.classList.remove("active");
+      desktop.style.pointerEvents = "none"; // Allow interaction with content behind
+      if (minimizeZone) {
+          minimizeZone.style.pointerEvents = "auto"; // But keep taskbar interactive
+      }
+  } else { // Case 3: No windows
+      desktop.classList.remove("h-screen");
+      if (scrim) scrim.classList.remove("active");
+      desktop.style.pointerEvents = "none";
+  }
 }
 
 /**
@@ -907,6 +876,7 @@ function createMinimizedElementRep(id, title) {
 let dropdown, numItems;
 function minimizeUI(element) {
   let minimizeArea = document.getElementById("minimizeZone");
+  let minRep;
 
   if (dropdown === undefined) {
     numItems = getItemCountToFitElementByWidth(
@@ -917,7 +887,7 @@ function minimizeUI(element) {
       horizontalRepToDropdownList(numItems, minimizeArea);
       dropdown = true;
     } else {
-      let minRep = createMinimizedElementRep("" + count, minStorage[count].title);
+      minRep = createMinimizedElementRep("" + count, minStorage[count].title);
       minimizeArea.appendChild(minRep);
       minRep.onclick = maximize;
       minimizeArea.classList.remove("opacity-0");
@@ -926,58 +896,114 @@ function minimizeUI(element) {
     let ddList = document.getElementById("dropdownList");
     addDropdownItem("" + count, minStorage[count].title, ddList);
   }
-  element.classList.add("opacity-0");
-  setTimeout(() => {
-    element.style.display = "none";
-    element.classList.remove("opacity-0");
-  }, 150);
+
+  if (minRep) {
+    const windowRect = element.getBoundingClientRect();
+    const iconRect = minRep.getBoundingClientRect();
+
+    const translateX = iconRect.left - windowRect.left + (iconRect.width / 2) - (windowRect.width / 2);
+    const translateY = iconRect.top - windowRect.top + (iconRect.height / 2) - (windowRect.height / 2);
+
+    element.style.transition = 'transform 0.3s ease-in-out, opacity 0.3s ease-in-out';
+    element.style.transformOrigin = 'center center';
+    
+    element.style.transform = `translate(${translateX}px, ${translateY}px) scale(0.1)`;
+    element.style.opacity = '0';
+
+    setTimeout(() => {
+      element.style.display = 'none';
+      element.style.transform = '';
+      element.style.opacity = '';
+      element.style.transition = '';
+      desktop();
+    }, 300); 
+
+  } else {
+    element.classList.add("opacity-0");
+    setTimeout(() => {
+      element.style.display = "none";
+      element.classList.remove("opacity-0");
+      desktop();
+    }, 150);
+  }
 }
 
 /**
  * Maximiza o elemento a partir do clique na representação minimizada.
  */
 function maximize() {
-  this.childNodes[0].style.width = "0px";
-  this.childNodes[0].classList.add("opacity-0");
+  const minimizedItem = this;
+  const index = parseInt(minimizedItem.id);
+  const windowInfo = minStorage[index];
+
+  if (!windowInfo) return;
+
+  const element = document.getElementById(windowInfo.id);
+  if (!element) return;
+
+  const container = element.classList.contains("resizable")
+    ? element.parentElement
+    : element;
+
+  const iconRect = minimizedItem.getBoundingClientRect();
+
+  // Animate the icon disappearing
+  minimizedItem.style.transition = 'transform 0.2s, opacity 0.2s';
+  minimizedItem.style.transform = 'scale(0.5)';
+  minimizedItem.style.opacity = '0';
+
   setTimeout(() => {
-    this.parentNode.removeChild(this);
-    let index = parseInt(this.id);
-    let element = document.getElementById(minStorage[index].id);
-    if (element.classList.contains("resizable")) {
-      element.parentElement.classList.add("opacity-0", "ease-all-1s");
-      element.parentElement.style.display = "grid";
-      setTimeout(() => {
-        element.parentElement.classList.remove("opacity-0", "ease-all-1s");
-      }, 100);
-    } else {
-      element.style.display = "block";
+    if (minimizedItem.parentNode) {
+      minimizedItem.parentNode.removeChild(minimizedItem);
     }
-    minStorage[index] = "";
-    if (dropdown === true) {
-      let ddList = document.getElementById("dropdownList");
-      if (ddList.childElementCount <= numItems) {
-        fromDropdownToHorizontalMinimized(ddList);
-      }
+    // Re-index remaining items after removing one
+    const minimizeArea = document.getElementById("minimizeZone");
+    if (minimizeArea) {
+      const items = minimizeArea.querySelectorAll('.minimizedItem');
+      items.forEach((item, i) => {
+        item.id = i;
+      });
     }
-    if (dropdown === undefined) {
-      let minArea = document.getElementById("minimizeZone");
-      if (minArea.childElementCount == 0) {
-        minStorage.length = 0;
-        minArea.classList.add("opacity-0");
-      } else {
-        let children = minArea.childNodes;
-        for (let i = 0, len = children.length; i < len; i++) {
-          children[i].id = i;
-        }
-        for (let j = 0, len = minStorage.length; j < len; j++) {
-          if (minStorage[len - 1 - j] == "") {
-            minStorage.splice(len - 1 - j, 1);
-          }
-        }
-      }
-    }
+  }, 200);
+
+  // Clean up minStorage
+  minStorage = minStorage.filter(item => item.id !== windowInfo.id);
+
+
+  // Restore window with animation
+  const windowRect = container.getBoundingClientRect();
+  const translateX = iconRect.left - windowRect.left + (iconRect.width / 2) - (windowRect.width / 2);
+  const translateY = iconRect.top - windowRect.top + (iconRect.height / 2) - (windowRect.height / 2);
+  
+  container.style.transform = `translate(${translateX}px, ${translateY}px) scale(0.1)`;
+  container.style.display = element.classList.contains("resizable") ? "grid" : "block";
+  container.style.opacity = '0';
+
+  setTimeout(() => {
+    container.style.transition = 'transform 0.3s ease-in-out, opacity 0.3s ease-in-out';
+    container.style.transform = 'translate(0, 0) scale(1)';
+    container.style.opacity = '1';
+    changeStackOrder.call(element);
+  }, 10);
+
+  setTimeout(() => {
+    container.style.transition = '';
     desktop();
-  }, 100);
+  }, 310);
+
+  if (dropdown === true) {
+    let ddList = document.getElementById("dropdownList");
+    if (ddList.childElementCount <= numItems) {
+      fromDropdownToHorizontalMinimized(ddList);
+    }
+  }
+  if (dropdown === undefined) {
+    let minArea = document.getElementById("minimizeZone");
+    if (minArea && minArea.childElementCount == 0) {
+      minStorage.length = 0;
+      minArea.classList.add("opacity-0");
+    }
+  }
 }
 
 /**
@@ -1086,12 +1112,7 @@ function addDropdownItem(id, title, dropdown) {
  * @param {HTMLElement} element 
  */
 let maxStorage = {};
-function addFullScreenMaximizeFunction(element) {
-  let maxBtn = getButton(element, "maxBtn");
-  if (maxBtn == undefined || maxBtn == null) {
-    return;
-  }
-  maxBtn.onclick = function () {
+function toggleMaximize(element) {
     let index = "" + element.id;
     let isResizable;
     if (element.classList.contains("resizable")) {
@@ -1142,7 +1163,13 @@ function addFullScreenMaximizeFunction(element) {
       }
       delete maxStorage[index];
     }
-  };
+}
+
+function addFullScreenMaximizeFunction(element) {
+  let maxBtn = getButton(element, "maxBtn");
+  if (maxBtn) {
+    maxBtn.onclick = function() { toggleMaximize(element) };
+  }
 }
 
 /**
@@ -1152,17 +1179,14 @@ function addFullScreenMaximizeFunction(element) {
  * @returns {HTMLElement} Botão
  */
 function getButton(element, btn) {
-  let buttons;
-  if (element.classList.contains("draggable")) {
-    buttons = element.firstElementChild.firstElementChild.childNodes;
-  } else {
-    buttons = element.firstElementChild.childNodes;
-  }
-  for (let i = 0, len = buttons.length; i < len; i++) {
-    if (buttons[i].classList.contains(btn)) {
-      return buttons[i];
-    }
-  }
+    // element is the window
+    const dragPoint = element.querySelector('.dragPoint');
+    if (!dragPoint) return;
+
+    const btnContainer = dragPoint.querySelector('.btnContainer');
+    if (!btnContainer) return;
+
+    return btnContainer.querySelector('.' + btn);
 }
 
 /**
@@ -1190,18 +1214,15 @@ function getElementSizeAndPosition(element) {
 function changeStackOrder() {
   let all = document.getElementsByClassName("interactive");
   for (let i = 0, len = all.length; i < len; i++) {
+    let isResizable = all[i].classList.contains("resizable");
+    let container = isResizable ? all[i].parentElement : all[i];
+
     if (all[i] == this) {
-      if (all[i].classList.contains("resizable")) {
-        all[i].parentElement.style.zIndex = 2;
-      } else {
-        all[i].style.zIndex = 2;
-      }
+      container.style.zIndex = 2;
+      container.classList.add("active");
     } else {
-      if (all[i].classList.contains("resizable")) {
-        all[i].parentElement.style.zIndex = 1;
-      } else {
-        all[i].style.zIndex = "inherit";
-      }
+      container.style.zIndex = 1;
+      container.classList.remove("active");
     }
   }
 }
@@ -1333,7 +1354,7 @@ function getDocumentBodyLimits() {
  * Rastreia o arrasto do mouse e executa a ação correspondente.
  * @param {Object} action 
  */
-function trackMouseDragPlusAction(action) {
+function trackMouseDragPlusAction(action, mousedownEvent) {
   // Desabilita a seleção enquanto o movimento ocorrer
   disableSelection();
 
@@ -1341,16 +1362,26 @@ function trackMouseDragPlusAction(action) {
   const iframes = document.querySelectorAll("iframe");
   iframes.forEach(iframe => iframe.style.pointerEvents = "none");
 
-  let x1 = event.clientX;
-  let y1 = event.clientY;
+  let x1 = mousedownEvent.clientX;
+  let y1 = mousedownEvent.clientY;
+  let ticking = false;
+  let latestEvent;
 
   const onMouseMove = function(e) {
-    let x2 = e.clientX;
-    let y2 = e.clientY;
-    let mouseDrag = { x: x1 - x2, y: y1 - y2 };
-    dragAction(action, mouseDrag);
-    x1 = x2;
-    y1 = y2;
+    latestEvent = e;
+    if (!ticking) {
+      window.requestAnimationFrame(function() {
+        if (!latestEvent) return;
+        let x2 = latestEvent.clientX;
+        let y2 = latestEvent.clientY;
+        let mouseDrag = { x: x1 - x2, y: y1 - y2 };
+        dragAction(action, mouseDrag);
+        x1 = x2;
+        y1 = y2;
+        ticking = false;
+      });
+      ticking = true;
+    }
   };
 
   const onMouseUp = function() {

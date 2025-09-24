@@ -12,9 +12,7 @@
 
 /* RESIZABLE */
 .parentResize{	
-	-webkit-box-shadow: 0px 0px 35px 0px rgba(0,0,0,0.3);
-	-moz-box-shadow: 0px 0px 35px 0px rgba(0,0,0,0.3);
-	box-shadow: 0px 0px 35px 0px rgba(0,0,0,0.3);    
+	box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
     grid-template-areas:
         "d c b"
         "a i e"
@@ -33,7 +31,12 @@
 .lowerRight { grid-area: h; }
 
 .resizable,.left,.right,.top,.bottom,.upperLeft,.upperRight,.lowerLeft,.lowerRight{
-	background-color: #F5F5F5;
+	background-color: transparent;
+	transition: background-color 0.2s ease;
+}
+
+.left:hover, .right:hover, .top:hover, .bottom:hover, .upperLeft:hover, .upperRight:hover, .lowerLeft:hover, .lowerRight:hover {
+	background-color: rgba(0, 0, 0, 0.2);
 }
 
 .left:hover, .right:hover { cursor: ew-resize; }
@@ -42,46 +45,92 @@
 .upperRight:hover, .lowerLeft:hover, .lowerLeft:active { cursor: nesw-resize; }
 
 /* MIN MAX CLOSE */
-.btnContainer { float: right; }
-
-.dragPoint::after{
-	content: '';
-    display: block;
-    clear: both;
+.dragPoint {
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start; /* Align buttons to the left */
+    padding: 0 8px;
+    background-color: #f0f0f0;
+    border-bottom: 1px solid #dcdcdc;
+    position: relative;
 }
 
-.mmcBtn{	
-    float: right;
-    width: 25px;
-    height: 25px;    
-    border: none;
-    background: #F5F5F5;
-    outline: none;
-	border-radius: 2.5px;
-	cursor: pointer;
-	transition: background .15s ease;		
-	display: -webkit-box;
-	display: -moz-box;
-	display: -ms-flexbox;
-	display: -webkit-flex;
-	display: flex;
-	align-items:center;
-}
-.mmcBtn:hover{
-	background: #C1C1C1;
-}
-.mmcBtn:hover .dragPath{
-	fill: #222;
+.window-title-area {
+    position: absolute;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none; /* Allow dragging through the title */
 }
 
-.svgIcon { width: 55%; height: 55%; margin: auto;}
-.path { fill: rgb(255, 255, 255); }
-
-.dragPath{ 
-	fill: #222;
-	cursor: pointer;
-	transition: fill .15s ease;
+.btnContainer {
+    display: flex;
+    gap: 6px;
 }
+
+.mmcBtn {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.1);
+    background-color: #ddd;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: transform 0.1s ease;
+    position: relative; /* For pseudo-element positioning */
+}
+
+/* Hide the old SVG icons */
+.svgIcon {
+    display: none;
+}
+
+/* Style for the new symbols */
+.mmcBtn::after {
+    content: '';
+    position: absolute;
+    font-family: Arial, sans-serif;
+    font-size: 10px;
+    font-weight: bold;
+    line-height: 12px; /* Center vertically */
+    color: rgba(0,0,0,0.4);
+    opacity: 0;
+    transition: opacity 0.1s ease-in-out;
+}
+
+/* Show symbol on hover */
+.mmcBtn:hover::after {
+    opacity: 1;
+}
+
+/* Specific symbols for each button */
+.closeBtn::after {
+    content: '×';
+}
+
+.minBtn::after {
+    content: '−';
+}
+
+.maxBtn::after {
+    content: '+';
+    font-size: 12px; /* Make plus slightly larger */
+}
+
+
+.mmcBtn:hover {
+    transform: scale(1.1);
+}
+
+.closeBtn:hover { background-color: #ff5f57; }
+.minBtn:hover { background-color: #ffbd2e; }
+.maxBtn:hover { background-color: #28c940; }
+
 
 
 #minimizeZone{
@@ -90,6 +139,7 @@
     width: 100%;
     overflow: hidden;
 	text-align: center;
+    z-index: 10; /* Ensure it's on top */
 }
 
 #minimizeZone > button{
@@ -142,3 +192,7 @@
 .dropdownItem, .dropdownList, .dropdownItemx { cursor: default; }
 
 .dropdownItem:hover { background-color: rgba(62, 68, 102, 0.473); }
+
+.parentResize.active {
+  box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22);
+}
