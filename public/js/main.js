@@ -1000,15 +1000,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         mainContent: `
             <div class="w-full grid grid-cols-12 gap-6 rounded-3xl p-6" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
-                <div class="col-span-12 lg:col-span-8 grid grid-cols-12 gap-4">
+                <div class="col-span-12 grid grid-cols-12 gap-4">
                     <div class="col-span-12 text-white font-bold content-center text-shadow-lg flex items-center justify-between">
                         <div id="wClock" class="text-md">00:00</div>
-                        <div id="wSearch" class="p-1"><i class="fas fa-search"></i></div>
                     </div>
                     <div id="app-library" class="col-span-12"></div> 
-                </div>
-                <div class="shadow-lg rounded-3xl hidden lg:block col-span-4 lg:h-full bg-white/50 backdrop-blur p-3">
-                    <p class="truncate">Terça-feira, 12 de agosto</p>
                 </div>
             </div>
         `,
@@ -1145,44 +1141,27 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
 
     templates.appLibrary = async ({ appsList }) => {
-        const resolved = await fetchByIds(appsList, 'apps'); // cada app: { id, tt, ic } etc.
-        const pageSize = 8; // 4 col x 2 linhas
+        const resolved = Array.isArray(appsList) ? appsList : (appsList ? [appsList] : []);
 
-        const pages = [];
-        for (let i = 0; i < resolved.length; i += pageSize) {
-            pages.push(resolved.slice(i, i + pageSize));
-        }
-
-        const pageSlides = pages.map(page => `
-            <div class="min-w-full grid grid-cols-3 grid-rows-3 sm:grid-cols-4 sm:grid-rows-2 gap-4 p-4">
-            ${page.map(app => `                
-                <button data-app-id="${app.id}" class="flex flex-col items-center gap-1">
-                    <div class="relative rounded-full overflow-hidden bg-gray-300 aspect-square w-full shadow-lg">
-                        <div class="absolute inset-0 bg-center bg-cover" style="background-image:${resolveBackgroundImage(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 160 })};"></div>
-                    </div>
-                    <span class="text-xs text-white text-shadow-lg truncate w-full text-center">${app.tt || 'App'}</span>
-                </button>
-            `).join('')}
-            </div>
+        const appItems = resolved.map(app => `
+            <button data-app-id="${app.id}" data-app-name="${(app.tt || 'App').toLowerCase()}" class="app-item-button group">
+                <div class="app-icon-container">
+                    <img src="${resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 160 })}" alt="${app.tt || 'App'}" class="app-icon-image">
+                </div>
+                <span class="app-name">${app.tt || 'App'}</span>
+            </button>
         `).join('');
 
-        const dots = pages.map((_, i) =>
-            `<button data-idx="${i}" class="w-2 h-2 rounded-full ${i===0?'bg-white':'bg-gray-300'}"></button>`
-        ).join('');        
-        
-        // container raiz com track deslizante
         return `
-            <div id="app-carousel" class="relative select-none">
-                <div class="overflow-hidden rounded-3xl bg-white/50 backdrop-blur">
-                    <div class="flex transition-transform duration-300 will-change-transform" data-role="track" style="transform:translateX(0%)">
-                    ${pageSlides}
-                    </div>
-                    <div class="flex justify-center gap-2 3 mb-4" data-role="dots">
-                        ${dots}
-                    </div>
-                </div>            
+            <div id="app-grid-container" class="app-launcher">
+                <div class="app-search-container">
+                    <input type="text" id="app-search-input" placeholder="Buscar aplicativos..." class="app-search-input">
+                </div>
+                <div id="app-grid" class="app-grid">
+                    ${appItems}
+                </div>
             </div>
-        `;        
+        `;
     };
 
     // Classes padronizadas para itens de menu/botões
@@ -3877,8 +3856,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? 
                 // Conteúdo principal (Dashboard)
                 renderTemplate(document.querySelector('#main-content'), 'mainContent', null, async () => {                    
+                    startClock();
                     // Aplicativos
-                    let userApps = await apiClient.post('/search', {
+                    let userAppsRaw = await apiClient.post('/search', {
                         db: 'workz_apps',
                         table: 'gapp',
                         columns: ['ap'],
@@ -3888,9 +3868,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         },
                         fetchAll: true
                     });
-                    userApps = userApps.data.map(o => o.ap);                
-                    await renderTemplate(document.querySelector('#app-library'), templates.appLibrary, { appsList: userApps }, () => {
-                        initAppLibrary('#app-library');
+                    const appIds = userAppsRaw.data.map(o => o.ap);
+                    const resolvedApps = await fetchByIds(appIds, 'apps'); // Fetch full app data here
+
+                    await renderTemplate(document.querySelector('#app-library'), templates.appLibrary, { appsList: resolvedApps }, () => {
+                        initAppLibrary('#app-library', resolvedApps); // Pass resolvedApps to initAppLibrary
                     });
                 })
                 : Promise.resolve(),              
@@ -3997,7 +3979,7 @@ document.addEventListener('DOMContentLoaded', () => {
             limit: uniqueIds.length
         });
 
-        const list = Array.isArray(res?.data) ? res.data : res;
+        const list = Array.isArray(res?.data) ? res.data : [];
 
         // 2) Reordena pra manter a mesma ordem de entrada
         const byId = new Map(list.map(item => [item.id, item]));
@@ -4012,6 +3994,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const el = typeof root === 'string' ? document.querySelector(root) : root;
         if (!el) return;
 
+        // Combined click listener for opening apps
         el.addEventListener('click', async (event) => {
             const appButton = event.target.closest('[data-app-id]');
             if (appButton) {
@@ -4019,91 +4002,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await apiClient.post('/search', { db: 'workz_apps', table: 'apps', columns: ['*'], conditions: { id: appId } });
                 const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
                 
-                if (app && app.src) { 
-                    newWindow(app.src, `app_${app.id}`, app.im, app.tt);
+                const appUrl = app?.src || app?.pg;
+                if (app && appUrl) { 
+                    // Assuming newWindow is a global function
+                    newWindow(appUrl, `app_${app.id}`, app.im, app.tt);
                 } else {
-                    console.warn('App does not have a URL (src) to open.', app);
+                    console.warn('App does not have a URL (src or pg) to open.', app);
                 }
             }
         });
 
-        el.addEventListener('click', async (event) => {
-            const appButton = event.target.closest('[data-app-id]');
-            if (appButton) {
-                const appId = appButton.dataset.appId;
-                const res = await apiClient.post('/search', { db: 'workz_apps', table: 'apps', columns: ['*'], conditions: { id: appId } });
-                const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
-                
-                if (app && app.pg) { 
-                    newWindow(app.pg, `app_${app.id}`, app.im, app.tt);
-                } else {
-                    console.warn('App does not have a URL (pg) to open.', app);
-                }
-            }
-        });
-
-        const track = el.querySelector('[data-role="track"]');
-        const dotEls = [...el.querySelectorAll('[data-role="dots"] button')];
-        const prev = el.querySelector('[data-role="prev"]');
-        const next = el.querySelector('[data-role="next"]');
-
-        let page = 0;
-        const total = dotEls.length;
-
-        const go = (idx) => {
-            page = Math.max(0, Math.min(idx, total - 1));
-            track.style.transform = `translateX(-${page * 100}%)`;
-            dotEls.forEach((d, i) => {
-            d.classList.toggle('bg-white', i === page);
-            d.classList.toggle('bg-gray-300', i !== page);
+        // Search filter logic
+        const searchInput = el.querySelector('#app-search-input');
+        const appGrid = el.querySelector('#app-grid');
+        if (searchInput && appGrid) {
+            searchInput.addEventListener('input', (e) => {
+                const searchTerm = e.target.value.toLowerCase().trim();
+                const appItems = appGrid.querySelectorAll('.app-item-button');
+                appItems.forEach(item => {
+                    const appName = item.dataset.appName || '';
+                    if (appName.includes(searchTerm)) {
+                        item.style.display = 'flex';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
             });
-        };
-
-        // Dots
-        dotEls.forEach(d => d.addEventListener('click', () => go(+d.dataset.idx)));
-
-        // Setas
-        prev?.addEventListener('click', () => go(page - 1));
-        next?.addEventListener('click', () => go(page + 1));
-
-        // Swipe (touch/drag)
-        let startX = 0, deltaX = 0, isDown = false;
-
-        const onStart = (x) => { isDown = true; startX = x; deltaX = 0; };
-        const onMove = (x) => {
-            if (!isDown) return;
-            deltaX = x - startX;
-            track.style.transitionDuration = '0ms';
-            track.style.transform = `translateX(calc(${-page*100}% + ${deltaX}px))`;
-        };
-        const onEnd = () => {
-            if (!isDown) return;
-            isDown = false;
-            track.style.transitionDuration = '';
-            const threshold = 50; // px
-            if (deltaX > threshold) go(page - 1);
-            else if (deltaX < -threshold) go(page + 1);
-            else go(page); // volta
-        };
-
-        // Touch
-        track.addEventListener('touchstart', e => onStart(e.touches[0].clientX), {passive:true});
-        track.addEventListener('touchmove',  e => onMove(e.touches[0].clientX), {passive:true});
-        track.addEventListener('touchend', onEnd);
-
-        // Mouse (opcional)
-        track.addEventListener('mousedown', e => onStart(e.clientX));
-        window.addEventListener('mousemove', e => onMove(e.clientX));
-        window.addEventListener('mouseup', onEnd);
-
-        // Teclado
-        el.tabIndex = 0;
-        el.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowLeft') go(page - 1);
-            if (e.key === 'ArrowRight') go(page + 1);
-        });
-
-        go(0);
+        }
     }
 
     async function loadFeed() {
@@ -4961,15 +4886,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===================================================================
 
     function startClock() {
-        const today = new Date();
         const clock = document.querySelector('#wClock');
-
+        if (!clock) {
+            return; // Stop if clock element is not on the page
+        }
+        const today = new Date();
 		let h = today.getHours();
 		let m = today.getMinutes();
-		let s = today.getSeconds();
-		h = checkTime(h); // <- aqui está a mudança
+		h = checkTime(h);
 		m = checkTime(m);
-		s = checkTime(s);
 		
         clock.innerHTML =  h + ":" + m;
 
