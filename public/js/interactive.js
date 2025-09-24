@@ -845,9 +845,9 @@ function getItemCountToFitElementByWidth(item, element) {
  */
 function createMinimizedElementRep(id, title) {
   let element = createElementWithIdAndClassName("button", id, "minimizedItem");
-  let appIcon = createElementWithIdAndClassName("img", "icon_" + id, "w-rounded-10");
-  element.name = title;
-  appIcon.classList.add("opacity-0", "ease-all-15s", "w-shadow");
+  let appIcon = createElementWithIdAndClassName("img", "icon_" + id, "rounded-md");
+  element.name = title;  
+  appIcon.classList.add("opacity-0", "duration-150", "ease-in-out", "shadow-md");
   setTimeout(() => {
     appIcon.src = document.getElementById("window_icon_" + title).src;
     appIcon.classList.remove("opacity-0");
@@ -858,11 +858,13 @@ function createMinimizedElementRep(id, title) {
   element.style.width = "0px";
   element.classList.add(
     "pointer",
-    "ease-all-15s",
+    "transition",
+    "duration-150",
+    "ease-in-out",
+    "hover:scale-105",
     "border-none",
-    "background-transparent",
-    "cm-mg-15-b",
-    "cm-mg-15-t",
+    "bg-transparent",
+    "my-3",    
     "opacity-0"
   );
   setTimeout(() => {
