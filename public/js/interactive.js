@@ -978,13 +978,31 @@ function maximize() {
 
 
   // Restore window with animation
-  const windowRect = container.getBoundingClientRect();
-  const translateX = iconRect.left - windowRect.left + (iconRect.width / 2) - (windowRect.width / 2);
-  const translateY = iconRect.top - windowRect.top + (iconRect.height / 2) - (windowRect.height / 2);
+  // Make container visible but hidden to get dimensions
+  container.style.visibility = 'hidden';
+  container.style.display = element.classList.contains("resizable") ? "grid" : "block";
+
+  const windowWidth = container.offsetWidth;
+  const windowHeight = container.offsetHeight;
+
+  // Calculate the center of the minimized icon
+  const iconCenterX = iconRect.left + (iconRect.width / 2);
+  const iconCenterY = iconRect.top + (iconRect.height / 2);
+
+  // Calculate the initial position of the window so its center aligns with the icon's center
+  const initialWindowLeft = iconCenterX - (windowWidth / 2);
+  const initialWindowTop = iconCenterY - (windowHeight / 2);
+
+  // Calculate the difference from its final position (container.offsetLeft, container.offsetTop)
+  const finalX = container.offsetLeft;
+  const finalY = container.offsetTop;
+
+  const translateX = initialWindowLeft - finalX;
+  const translateY = initialWindowTop - finalY;
   
   container.style.transform = `translate(${translateX}px, ${translateY}px) scale(0.1)`;
-  container.style.display = element.classList.contains("resizable") ? "grid" : "block";
   container.style.opacity = '0';
+  container.style.visibility = 'visible'; // Now make it visible
 
   setTimeout(() => {
     container.style.transition = 'transform 0.3s ease-in-out, opacity 0.3s ease-in-out';
