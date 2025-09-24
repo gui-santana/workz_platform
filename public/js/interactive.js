@@ -592,7 +592,9 @@ function close(element) {
 function addCloseFunctionality(element) {
   let closeBtn = element.querySelector('.closeBtn');
   if (closeBtn) {
-    closeBtn.onclick = minimize;
+    closeBtn.onclick = function() {
+      closeWindow(this.closest('.interactive'));
+    };
   }
 }
 
@@ -1447,12 +1449,14 @@ function checkParent(parent, child) {
  * Fecha o elemento especificado.
  * @param {HTMLElement} el 
  */
-function closeThis(el) {
-  var parents = document.getElementsByClassName("parentResize");
-  for (var i = 0; i < parents.length; i++) {
-    if (parents[i].contains(document.getElementById(el.id))) {
-      parents[i].parentNode.removeChild(parents[i]);
-      desktop();
+function closeWindow(el) {
+    if (!el) return; // Element not found
+    let elementToRemove = el;
+    if (el.parentElement && el.parentElement.classList.contains('parentResize')) {
+        elementToRemove = el.parentElement;
     }
-  }
+    if (elementToRemove.parentNode) {
+        elementToRemove.parentNode.removeChild(elementToRemove);
+    }
+    desktop();
 }
