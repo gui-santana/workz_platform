@@ -18,15 +18,11 @@
 		<script src="https://www.youtube.com/iframe_api"></script>								
 	</head>
 	<body class="w-full text-gray-700 bg-gray-100">		
-		<div id="loading" class="w-full bg-gray-100 "><div class="la-ball-scale-pulse"><div class="w-shadow"></div></div></div>
-		<div id="window-container" class="w-full sticky top-0 z-50"></div>
-		
-				<div id="desktop" class="w-full fixed top-0 left-0 z-50 grid desktop-area pointer-events-none"></div>
-
+		<div id="loading" class="w-full bg-gray-100 "><div class="la-ball-scale-pulse"><div class="w-shadow"></div></div></div>		
+		<div id="desktop" class="w-full fixed top-0 left-0 z-50 grid desktop-area pointer-events-none h-screen" style="pointer-events: none;"></div>
 		<div id="main-wrapper" class="w-full h-screen overflow-y-auto overflow-x-hidden snap-y"></div>
 		<div id="sidebar-wrapper" class="fixed p-0 m-0 top-0 right-0 z-3 w-0 h-full bg-gray-100 overflow-y-auto transition-all ease-in-out duration-500"></div>
-
 		<script src="https://unpkg.com/imask"></script>
-		<script type="module" src="/js/main.js"></script>		
+		<script type="module" src="/js/main.js"></script> 		
 	</body>
 </html>

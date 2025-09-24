@@ -4020,7 +4020,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
                 
                 if (app && app.src) { 
-                    newWindow(app.src, `app_${app.id}`, app.ic, app.tt);
+                    newWindow(app.src, `app_${app.id}`, app.im, app.tt);
                 } else {
                     console.warn('App does not have a URL (src) to open.', app);
                 }
@@ -4035,7 +4035,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
                 
                 if (app && app.pg) { 
-                    newWindow(app.pg, `app_${app.id}`, app.ic, app.tt);
+                    newWindow(app.pg, `app_${app.id}`, app.im, app.tt);
                 } else {
                     console.warn('App does not have a URL (pg) to open.', app);
                 }

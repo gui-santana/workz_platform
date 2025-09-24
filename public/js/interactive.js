@@ -36,12 +36,7 @@ function enableSelection() {
  * @param {String} icon - Ícone da janela.
  */
 function newWindow(target, id, icon, title) {
-  let iconSrc;
-  if (icon === undefined) {
-    iconSrc = 'https://workz.com.br/images/no-image.jpg';
-  } else {
-    iconSrc = 'data:image/jpeg;base64,' + decodeURIComponent(atob(icon));
-  }
+  let iconSrc = resolveIconSrc(icon);
 
   var created = document.getElementsByClassName('window');
   var n = created.length;
@@ -1477,4 +1472,41 @@ function closeWindow(el) {
         elementToRemove.parentNode.removeChild(elementToRemove);
     }
     desktop();
+}
+
+/**
+ * Resolve a URL da imagem do ícone, tratando diferentes formatos.
+ * @param {String} iconValue - Valor do ícone (URL, base64, etc.).
+ * @returns {String} URL da imagem resolvida.
+ */
+function resolveIconSrc(iconValue) {
+    const trimmed = typeof iconValue === 'string' ? iconValue.trim() : String(iconValue).trim();
+
+    if (!trimmed) {
+        return 'https://workz.com.br/images/no-image.jpg'; // Fallback
+    }
+
+    // 1. Check for full URLs (http/https)
+    if (/^https?:\/\//i.test(trimmed)) {
+        return trimmed;
+    }
+    // 2. Check for relative paths (e.g., /images/, /users/)
+    if (trimmed.startsWith('/images/') || trimmed.startsWith('/users/')) {
+        return trimmed;
+    }
+    // 3. Check for data URIs (e.g., data:image/png;base64,...)
+    if (/^data:image\//i.test(trimmed)) {
+        return trimmed;
+    }
+    // 4. Assume it's raw base64 data if it doesn't match other patterns
+    try {
+        // If the base64 string starts with the PNG signature, assume PNG.
+        // Otherwise, default to JPEG.
+        const isPng = trimmed.startsWith('iVBORw0KGgoAAA');
+        const mimeType = isPng ? 'image/png' : 'image/jpeg';
+        return `data:${mimeType};base64,${trimmed}`;
+    } catch (e) {
+        console.error("Error processing base64 icon:", e);
+        return 'https://workz.com.br/images/no-image.jpg'; // Fallback on error
+    }
 }
