@@ -739,6 +739,11 @@ function desktop() {
   var windows = document.getElementsByClassName("parentResize");
   var desktop = document.getElementById("desktop");
   var scrim = document.getElementById("desktop-scrim");
+  if (!scrim) {
+    scrim = document.createElement('div');
+    scrim.id = 'desktop-scrim';
+    document.body.appendChild(scrim);
+  }
   var minimizeZone = document.getElementById("minimizeZone");
   var length = windows.length;
   var n_minimized = 0;
