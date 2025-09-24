@@ -73,10 +73,8 @@ function newWindow(target, id, icon, title) {
     if (target !== null) {
       var root = document.createElement("div");
       root.classList.add(
-        "mt-1",
         "w-full",
-        "rounded-lg",
-        "border"
+        "rounded-lg"
       );
       root.style.height = "calc(100% - 30px)"; // Adjust height for new header
       windowEl.appendChild(root);
@@ -238,7 +236,7 @@ function initialResizeCssProperties(element, parent) {
 
   parent.style.top = computed.getPropertyValue("top");
   parent.style.left = computed.getPropertyValue("left");
-  parent.style.gridTemplateRows = "4px " + h + " 4px";
+  parent.style.gridTemplateRows = "5px " + h + " 5px";
   parent.style.gridTemplateColumns = "4px " + w + " 4px";
   parent.style.backgroundColor = computed.getPropertyValue("background-color");
 
@@ -389,7 +387,7 @@ function changeVerticalMeasures(element, parent, mouseDrag, zone) {
   }
   let height = parseInt(element.style.height.slice(0, -2)) + mouseDrag;
   let offsetTop = parent.offsetTop;
-  if (zone == 3 && offsetTop + height + 6 > document.body.clientHeight) {
+  if (zone == 3 && offsetTop + height + 5 > document.body.clientHeight) {
     return;
   }
   if (height >= 5) {
@@ -419,7 +417,7 @@ function draggable(element, title, iconSrc) { // Receive data
   // Adiciona header que atuará como ponto de arrasto.
   let dragPoint = createElementWithIdAndClassName(
     "div",
-    element.id + "Header",
+    element.id + "_header",
     "dragPoint"
   );
   dragPoint.classList.add("w-rounded-5-t");
@@ -429,7 +427,7 @@ function draggable(element, title, iconSrc) { // Receive data
   if (iconSrc) {
       let imgIcon = document.createElement("img");
       imgIcon.src = iconSrc;
-      imgIcon.id = "windowIcon_" + element.getAttribute("name"); // Use window name for ID
+      imgIcon.id = "window_icon_" + element.getAttribute("name"); // Use window name for ID
       imgIcon.style.height = "20px";
       imgIcon.style.width = "20px";
       imgIcon.classList.add("rounded-md", "mr-2");
@@ -851,7 +849,7 @@ function createMinimizedElementRep(id, title) {
   element.name = title;
   appIcon.classList.add("opacity-0", "ease-all-15s", "w-shadow");
   setTimeout(() => {
-    appIcon.src = document.getElementById("windowIcon_" + title).src;
+    appIcon.src = document.getElementById("window_icon_" + title).src;
     appIcon.classList.remove("opacity-0");
   }, 150);
   appIcon.style.height = "50px";
