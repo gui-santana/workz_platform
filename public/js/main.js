@@ -959,16 +959,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button id="sidebarTrigger" data-sidebar-action="settings"><img class="page-thumb h-11 w-11 shadow-lg object-cover rounded-full" src="/images/no-image.jpg" /></button>
                 </div>
             </div>                                         
-            <div id="workz-content" class="mt-[132px] max-w-screen-xl px-3 xl:px-0 mx-auto clearfix grid grid-cols-12 gap-6">                               
+            <div id="workz-content" class="max-w-screen-xl mx-auto clearfix grid grid-cols-12 gap-6">                               
             </div>        
         `,
-
+        
         workzContent: `
-            <div class="col-span-12 sm:col-span-8 lg:col-span-9 flex flex-col grid grid-cols-12 gap-x-6">
+            <div class="col-span-12 rounded-b-3xl h-48 bg-cover bg-center"></div>
+            <div class="col-span-12 sm:col-span-8 lg:col-span-9 flex flex-col grid grid-cols-12 gap-x-6 -mt-24 ml-6">
                 <!-- Coluna da Esquerda (Menu de Navegação) -->
-                <aside class="w-full flex col-span-4 lg:col-span-3 flex flex-col gap-y-6">                        
-                    <div class="aspect-square w-full rounded-full shadow-lg overflow-hidden">
-                        <img id="profile-image" class="w-full h-full object-cover" src="${resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 240 })}" alt="Imagem da página">
+                <aside class="w-full flex col-span-4 lg:col-span-3 flex flex-col gap-y-6">                                        
+                    <div class="aspect-square w-full rounded-full shadow-lg border-4 border-white overflow-hidden">                        
+                        <img id="profile-image" class="w-full h-full object-cover" src="${resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 240 })}" alt="${currentUserData?.tt}">                        
                     </div>
                     <div class="bg-white p-3 rounded-3xl font-semibold shadow-lg grow">
                         <nav class="mt-1">
@@ -994,7 +995,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div id="timeline" class="col-span-12 flex flex-col grid grid-cols-12 gap-6 pt-6"></div>
                 <div id="feed-sentinel" class="h-10"></div>
             </div>
-            <aside id="widget-wrapper" class="col-span-12 sm:col-span-4 lg:col-span-3 flex flex-col gap-y-6">                    
+            <aside id="widget-wrapper" class="col-span-12 sm:col-span-4 lg:col-span-3 flex flex-col gap-y-6 -mt-24 mr-6">                    
             </aside>        
         `,
 
@@ -1109,22 +1110,69 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Removido: lógica antiga baseada em sidebarHistory/sidebar-back
-    templates.entityContent = async ({ data }) => {        
+templates.entityContent = async ({ data }) => {
+        // Fallback for cover image - using a dynamic placeholder
+        const coverUrl = data.cover || `https://source.unsplash.com/1600x900/?abstract,${viewType},${data.id}`;
+        
+        let statsHtml = '';
+        if (viewType === 'profile') {
+            statsHtml = `
+                <div class="flex items-center gap-1">
+                    <span class="font-bold text-gray-800">${data.postsCount || 0}</span>
+                    <span>Publicações</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span id="followers-count" class="font-bold text-gray-800">${data.followersCount || 0}</span>
+                    <span>Seguidores</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span class="font-bold text-gray-800">${data.peopleCount || 0}</span>
+                    <span>Seguindo</span>
+                </div>
+            `;
+        } else if (viewType === 'business') {
+            statsHtml = `
+                <div class="flex items-center gap-1">
+                    <span class="font-bold text-gray-800">${data.postsCount || 0}</span>
+                    <span>Publicações</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span class="font-bold text-gray-800">${data.peopleCount || 0}</span>
+                    <span>Membros</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span class="font-bold text-gray-800">${data.teamsCount || 0}</span>
+                    <span>Equipes</span>
+                </div>
+            `;
+        } else if (viewType === 'team') {
+            statsHtml = `
+                <div class="flex items-center gap-1">
+                    <span class="font-bold text-gray-800">${data.postsCount || 0}</span>
+                    <span>Publicações</span>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span class="font-bold text-gray-800">${data.peopleCount || 0}</span>
+                    <span>Membros</span>
+                </div>
+            `;
+        }
+
         const content = `
-            <div class="rounded-3xl w-full p-4 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1),0_-4px_6px_-2px_rgba(0,0,0,0.05)]">
-                <h2 class="text-2xl font-semibold">${data.tt}</h2>
-                <div class="grid grid-cols-3 flex-wrap gap-4 mt-6 mb-6">
-                    <div class="col-span-1 flex items-center text-center justify-center">
-                        <p><small class="text-gray-500">Publicações</small><br>${data.postsCount}</p>
+            <div class="w-full bg-gray-100 rounded-t-3xl shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1),0_-4px_6px_-2px_rgba(0,0,0,0.05)]" overflow-hidden">                
+                <!-- Profile Info -->
+                <div class="p-4 sm:p-6">                    
+                    <div class="mt-4">
+                        <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">${data.tt}</h1>
+                        ${data.un ? `<p class="text-sm text-gray-500 mt-1">@${data.un}</p>` : ''}
                     </div>
-                    <div class="col-span-1 flex items-center text-center justify-center">                        
-				        <p><small class="text-gray-500">Seguidores</small><br><span id="followers-count">${data.followersCount}</span></p>
-                    </div>
-                    <div class="col-span-1 flex items-center text-center justify-center">
-                        <p><small class="text-gray-500">Seguindo</small><br>${data.peopleCount}</p>
+
+                    ${data.cf ? `<p class="mt-4 text-gray-700">${data.cf}</p>` : ''}
+
+                    <div class="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-600">
+                        ${statsHtml}
                     </div>
                 </div>
-                ${data.cf}
             </div>
         `;
 
@@ -3555,7 +3603,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderList('teams');
             return;
         } else {
-            if (profileMatch) {
+            if (profileMatch) {                                
                 renderTemplate(workzContent, 'workzContent', null, () => {
                     viewType = 'profile';
                     viewId = parseInt(profileMatch[1], 10);
