@@ -221,6 +221,7 @@ class GeneralController
     {
         $entityType = $_POST['entity_type'] ?? '';
         $entityId = $_POST['entity_id'] ?? '';
+        $imageType = $_POST['image_type'] ?? 'im';
 
         $allowedTypes = ['people', 'businesses', 'teams'];
         if (!in_array($entityType, $allowedTypes, true)) {
@@ -309,8 +310,10 @@ class GeneralController
             'teams' => ['db' => 'workz_companies', 'table' => 'teams']
         ];
 
+        $columnToUpdate = ($imageType === 'bk') ? 'bk' : 'im';
+
         $config = $mapping[$entityType];
-        $updated = $this->generalModel->update($config['db'], $config['table'], ['im' => $relativePath], ['id' => $entityId]);
+        $updated = $this->generalModel->update($config['db'], $config['table'], [$columnToUpdate => $relativePath], ['id' => $entityId]);
 
         if (!$updated) {
             http_response_code(500);

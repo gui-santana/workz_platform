@@ -250,6 +250,12 @@ document.addEventListener('DOMContentLoaded', () => {
         [ENTITY.TEAM]: 'teams'
     });
 
+    const ENTITY_TYPE_TO_TABLE_MAP = {
+        'people': { db: 'workz_data', table: 'hus' },
+        'businesses': { db: 'workz_companies', table: 'companies' },
+        'teams': { db: 'workz_companies', table: 'teams' }
+    };
+
     function resolveImageSrc(imValue, label = '', options = {}) {
         const { size = 100, fallbackUrl = null } = options ?? {};
         const raw = imValue ?? '';
@@ -276,8 +282,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function resolveBackgroundImage(imValue, label = '', options = {}) {
         const src = resolveImageSrc(imValue, label, options);
-        return `url('${src}')`;
+        const sanitized = String(src || '').replace(/['\\]/g, '\\$&');
+        return `url('${sanitized}')`;
     }
+
+    function applyEntityBackgroundImage(entityData = null) {
+        const coverEl = document.querySelector('#workz-content > div.col-span-12.rounded-b-3xl.h-48.bg-cover.bg-center');
+        if (!coverEl) return;
+
+        const hasImage = !!(entityData && entityData.bk);
+        if (hasImage) {
+            coverEl.style.backgroundImage = resolveBackgroundImage(entityData.bk, entityData.tt, { size: 1280 });
+        } else {
+            coverEl.style.backgroundImage = '';
+        }
+    }
+
+    function updateEntityBackgroundImageCache(entityType, entityId, imageUrl) {
+        const normalizedId = Number(entityId);
+        const resolvedUrl = imageUrl || null;
+        if (!Number.isFinite(normalizedId)) return;
+
+        if (entityType === 'people' && currentUserData && Number(currentUserData.id) === normalizedId) {
+            currentUserData.bk = resolvedUrl;
+        }
+
+        if (viewData && Number(viewData.id) === normalizedId) {
+            viewData.bk = resolvedUrl;
+        }
+
+        const matchesCurrentView =
+            (viewType === ENTITY.PROFILE && entityType === 'people') ||
+            (viewType === ENTITY.BUSINESS && entityType === 'businesses') ||
+            (viewType === ENTITY.TEAM && entityType === 'teams');
+
+        if (matchesCurrentView && viewData && Number(viewData.id) === normalizedId) {
+            applyEntityBackgroundImage(viewData);
+            return;
+        }
+
+        const isDashboardCurrentUser = viewType === 'dashboard' && entityType === 'people' && currentUserData && Number(currentUserData.id) === normalizedId;
+        if (isDashboardCurrentUser) {
+            applyEntityBackgroundImage(null);
+            return;
+        }
+
+        if (!viewData && viewType !== 'dashboard' && entityType === 'people' && currentUserData && Number(currentUserData.id) === normalizedId) {
+            applyEntityBackgroundImage(currentUserData);
+        }
+    }
+
        const IMAGE_UPLOAD_STATE = {
         input: null,
         context: null,
@@ -301,6 +355,74 @@ document.addEventListener('DOMContentLoaded', () => {
         if (IMAGE_UPLOAD_STATE.input) {
             IMAGE_UPLOAD_STATE.input.value = '';
         }
+    }
+
+    function setupBackgroundImageUpload(sidebarContent, pageSettingsData, pageSettingsView) {
+        const changeBackgroundBtn = sidebarContent?.querySelector('[data-action="change-background"]');
+        if (!changeBackgroundBtn) return;
+
+        const entityType = ENTITY_TO_TYPE_MAP[pageSettingsView] || 'people';
+        const entityId = pageSettingsData?.id ?? currentUserData?.id;
+        if (!entityId) return;
+
+        const clickHandler = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const input = getImageUploadInput();
+            IMAGE_UPLOAD_STATE.context = {
+                entityType,
+                entityId,
+                view: pageSettingsView,
+                data: pageSettingsData,
+                messageContainer: sidebarContent.querySelector('#message') || document.getElementById('message'),
+                imageType: 'bk',
+                aspectRatio: 1280 / 240,
+                outputWidth: 1280,
+                outputHeight: 240
+            };
+            input.value = '';
+            input.click();
+        };
+
+        if (changeBackgroundBtn._uploadHandler) {
+            changeBackgroundBtn.removeEventListener('click', changeBackgroundBtn._uploadHandler);
+        }
+        changeBackgroundBtn.addEventListener('click', clickHandler);
+        changeBackgroundBtn._uploadHandler = clickHandler;
+    }
+
+    function setupRemoveBackgroundImage(sidebarContent, pageSettingsData, pageSettingsView) {
+        const removeBtn = sidebarContent?.querySelector('[data-action="remove-background"]');
+        if (!removeBtn) return;
+
+        const entityType = ENTITY_TO_TYPE_MAP[pageSettingsView] || 'people';
+        const entityId = pageSettingsData?.id ?? currentUserData?.id;
+
+        const clickHandler = async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (await confirmDialog('Tem certeza que deseja remover a imagem de fundo?', { danger: true })) {
+                try {
+                    const { db, table } = ENTITY_TYPE_TO_TABLE_MAP[entityType];
+                    await apiClient.post('/update', { db, table, data: { bk: null }, conditions: { id: entityId } });
+
+                    if (pageSettingsData) pageSettingsData.bk = null;
+                    updateEntityBackgroundImageCache(entityType, entityId, null);
+
+                    SidebarNav.render();
+                    notifySuccess('Imagem de fundo removida.');
+                } catch (error) {
+                    console.error('[background] remove error', error);
+                    notifyError('Não foi possível remover a imagem de fundo.');
+                }
+            }
+        };
+
+        if (removeBtn._removeHandler) {
+            removeBtn.removeEventListener('click', removeBtn._removeHandler);
+        }
+        removeBtn.addEventListener('click', clickHandler);
+        removeBtn._removeHandler = clickHandler;
     }
 
     function setupHeroImageUpload(sidebarContent, pageSettingsData, pageSettingsView) {
@@ -416,13 +538,24 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const aspectRatio = Number(cropData?.entityContext?.aspectRatio) || 1;
+        const outputWidth = Number(cropData?.entityContext?.outputWidth) || 600;
+        const outputHeight = Number(cropData?.entityContext?.outputHeight) || Math.round(outputWidth / aspectRatio) || 600;
+        const isBackgroundCrop = cropData?.entityContext?.imageType === 'bk';
+
         container.style.position = 'relative';
         container.style.touchAction = 'none';
+        container.style.aspectRatio = `${outputWidth} / ${outputHeight}`;
+        container.style.minHeight = isBackgroundCrop ? '120px' : '160px';
         imageEl.style.position = 'absolute';
         imageEl.draggable = false;
 
         const bounds = container.getBoundingClientRect();
-        const containerSize = Math.max(bounds.width, bounds.height) || container.clientWidth || container.clientHeight || 0;
+        let viewportWidth = bounds.width || container.clientWidth || outputWidth;
+        let viewportHeight = bounds.height || (viewportWidth / aspectRatio);
+        if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) {
+            viewportHeight = outputHeight;
+        }
 
         const onPointerDown = (event) => {
             const state = IMAGE_UPLOAD_STATE.cropper; // Get the latest state
@@ -464,9 +597,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!state) return;
             const newScale = parseFloat(event.target.value);
             if (!Number.isFinite(newScale)) return;
-            const rect = container.getBoundingClientRect();
-            const anchorX = rect.width / 2;
-            const anchorY = rect.height / 2;
+            const anchorX = state.viewportWidth / 2;
+            const anchorY = state.viewportHeight / 2;
             setCropperScale(state, newScale, anchorX, anchorY);
         };
 
@@ -505,7 +637,9 @@ document.addEventListener('DOMContentLoaded', () => {
             fileType: cropData.fileType || 'image/png',
             naturalWidth: 0,
             naturalHeight: 0,
-            containerSize: containerSize || 300,
+            viewportWidth,
+            viewportHeight,
+            aspectRatio,
             scale: 1,
             minScale: 1,
             maxScale: 4,
@@ -532,22 +666,24 @@ document.addEventListener('DOMContentLoaded', () => {
             currentState.naturalWidth = loader.naturalWidth || 1;
             currentState.naturalHeight = loader.naturalHeight || 1;
 
-            // Define a origem da transformação. A imagem usará seu tamanho intrínseco.
             currentState.imageEl.style.transformOrigin = 'top left';
             currentState.imageEl.style.width = `${currentState.naturalWidth}px`;
             currentState.imageEl.style.height = `${currentState.naturalHeight}px`;
             currentState.imageEl.style.maxWidth = 'none';
 
-            currentState.containerSize = currentState.container.getBoundingClientRect().width || currentState.containerSize;
+            const latestBounds = currentState.container.getBoundingClientRect();
+            currentState.viewportWidth = latestBounds.width || currentState.viewportWidth || 1;
+            currentState.viewportHeight = latestBounds.height || currentState.viewportHeight || (currentState.viewportWidth / currentState.aspectRatio);
+
             const minScale = Math.max(
-                currentState.containerSize / currentState.naturalWidth,
-                currentState.containerSize / currentState.naturalHeight
+                currentState.viewportWidth / currentState.naturalWidth,
+                currentState.viewportHeight / currentState.naturalHeight
             ) || 1;
             currentState.minScale = minScale;
             currentState.maxScale = minScale * 4;
             currentState.scale = minScale;
-            currentState.offsetX = (currentState.containerSize - currentState.naturalWidth * currentState.scale) / 2;
-            currentState.offsetY = (currentState.containerSize - currentState.naturalHeight * currentState.scale) / 2;
+            currentState.offsetX = (currentState.viewportWidth - currentState.naturalWidth * currentState.scale) / 2;
+            currentState.offsetY = (currentState.viewportHeight - currentState.naturalHeight * currentState.scale) / 2;
             clampCropperOffsets(currentState);
             applyCropperState(currentState);
             currentState.zoomInput.min = String(minScale);
@@ -556,9 +692,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentState.zoomInput.value = String(currentState.scale);
         };
         loader.src = cropData.imageDataUrl;
-    }
-
-    function destroyImageCropper({ keepContext = false } = {}) {
+    }    function destroyImageCropper({ keepContext = false } = {}) {
         const state = IMAGE_UPLOAD_STATE.cropper;
         if (!state) {
             if (!keepContext) resetImageUploadState();
@@ -592,19 +726,20 @@ document.addEventListener('DOMContentLoaded', () => {
     function clampCropperOffsets(state) {
         const displayWidth = state.naturalWidth * state.scale;
         const displayHeight = state.naturalHeight * state.scale;
-        const containerSize = state.containerSize;
+        const viewportWidth = state.viewportWidth;
+        const viewportHeight = state.viewportHeight;
 
-        if (displayWidth <= containerSize) {
-            state.offsetX = (containerSize - displayWidth) / 2;
+        if (displayWidth <= viewportWidth) {
+            state.offsetX = (viewportWidth - displayWidth) / 2;
         } else {
-            const minX = containerSize - displayWidth;
+            const minX = viewportWidth - displayWidth;
             state.offsetX = Math.min(0, Math.max(minX, state.offsetX));
         }
 
-        if (displayHeight <= containerSize) {
-            state.offsetY = (containerSize - displayHeight) / 2;
+        if (displayHeight <= viewportHeight) {
+            state.offsetY = (viewportHeight - displayHeight) / 2;
         } else {
-            const minY = containerSize - displayHeight;
+            const minY = viewportHeight - displayHeight;
             state.offsetY = Math.min(0, Math.max(minY, state.offsetY));
         }
     }
@@ -621,15 +756,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const displayWidth = state.naturalWidth * state.scale;
         const displayHeight = state.naturalHeight * state.scale;
-        const relX = ((anchorX ?? state.containerSize / 2) - state.offsetX) / displayWidth;
-        const relY = ((anchorY ?? state.containerSize / 2) - state.offsetY) / displayHeight;
+        const relX = ((anchorX ?? state.viewportWidth / 2) - state.offsetX) / displayWidth;
+        const relY = ((anchorY ?? state.viewportHeight / 2) - state.offsetY) / displayHeight;
 
         state.scale = scale;
         const newDisplayWidth = state.naturalWidth * state.scale;
         const newDisplayHeight = state.naturalHeight * state.scale;
 
-        state.offsetX = (anchorX ?? state.containerSize / 2) - relX * newDisplayWidth;
-        state.offsetY = (anchorY ?? state.containerSize / 2) - relY * newDisplayHeight;
+        state.offsetX = (anchorX ?? state.viewportWidth / 2) - relX * newDisplayWidth;
+        state.offsetY = (anchorY ?? state.viewportHeight / 2) - relY * newDisplayHeight;
 
         clampCropperOffsets(state);
         applyCropperState(state);
@@ -640,29 +775,29 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!state?.image) {
             throw new Error('Imagem não carregada.');
         }
-
-        const canvasSize = 600;
+    
+        const { outputWidth = 600, outputHeight = 600 } = state.entityContext || {};
         const canvas = document.createElement('canvas');
-        canvas.width = canvasSize;
-        canvas.height = canvasSize;
+        canvas.width = outputWidth;
+        canvas.height = outputHeight;
         const ctx = canvas.getContext('2d');
-
+    
         const displayWidth = state.naturalWidth * state.scale;
         const displayHeight = state.naturalHeight * state.scale;
         const scaleX = state.naturalWidth / displayWidth;
         const scaleY = state.naturalHeight / displayHeight;
         const visibleX = (0 - state.offsetX) * scaleX;
         const visibleY = (0 - state.offsetY) * scaleY;
-        const visibleWidth = state.containerSize * scaleX;
-        const visibleHeight = state.containerSize * scaleY;
-
+        const visibleWidth = state.viewportWidth * scaleX;
+        const visibleHeight = state.viewportHeight * scaleY;
+    
         const sx = Math.max(0, visibleX);
         const sy = Math.max(0, visibleY);
         const sw = Math.min(state.naturalWidth - sx, visibleWidth);
         const sh = Math.min(state.naturalHeight - sy, visibleHeight);
-
-        ctx.drawImage(state.image, sx, sy, sw, sh, 0, 0, canvasSize, canvasSize);
-
+    
+        ctx.drawImage(state.image, sx, sy, sw, sh, 0, 0, outputWidth, outputHeight);
+    
         return new Promise((resolve, reject) => {
             canvas.toBlob((blob) => {
                 if (!blob) {
@@ -683,18 +818,30 @@ document.addEventListener('DOMContentLoaded', () => {
             const blob = await finalizeImageCrop(state);
             const extension = state.fileType && state.fileType.includes('png') ? 'png' : 'jpg';
             const safeName = (state.fileName || 'imagem').replace(/[^a-z0-9_-]/gi, '_').slice(-40);
+            const imageType = state.entityContext?.imageType || 'im'; // Default to 'im'
+
             const uploadResult = await uploadEntityImage({
                 entityType: state.entityContext.entityType,
                 entityId: state.entityContext.entityId,
+                imageType: imageType,
                 blob,
                 fileName: `${safeName || 'imagem'}.${extension}`
             });
 
             const imageUrl = uploadResult?.imageUrl || uploadResult?.url || uploadResult?.path;
             if (state.entityContext?.data) {
-                state.entityContext.data.im = imageUrl || state.entityContext.data.im;
+                if (imageType === 'bk') {
+                    state.entityContext.data.bk = imageUrl || state.entityContext.data.bk;
+                } else {
+                    state.entityContext.data.im = imageUrl || state.entityContext.data.im;
+                }
             }
-            updateEntityImageCache(state.entityContext.entityType, state.entityContext.entityId, imageUrl);
+
+            if (imageType === 'bk') {
+                updateEntityBackgroundImageCache(state.entityContext.entityType, state.entityContext.entityId, imageUrl);
+            } else {
+                updateEntityImageCache(state.entityContext.entityType, state.entityContext.entityId, imageUrl);
+            }
 
             const container = state.messageContainer || document.getElementById('message');
             if (container) {
@@ -714,10 +861,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function uploadEntityImage({ entityType, entityId, blob, fileName }) {
+    async function uploadEntityImage({ entityType, entityId, imageType = 'im', blob, fileName }) {
         const formData = new FormData();
         formData.append('entity_type', entityType);
         formData.append('entity_id', entityId);
+        formData.append('image_type', imageType || 'im');
         formData.append('image', blob, fileName || 'imagem.png');
 
         const response = await apiClient.upload('/upload-image', formData);
@@ -964,7 +1112,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
         
         workzContent: `
-            <div class="col-span-12 rounded-b-3xl h-48 bg-cover bg-center"></div>
+            <div class="col-span-12 rounded-b-3xl h-48 bg-gray-200 bg-cover bg-center"></div>
             <div class="col-span-12 sm:col-span-8 lg:col-span-9 flex flex-col grid grid-cols-12 gap-x-6 -mt-24 ml-6">
                 <!-- Coluna da Esquerda (Menu de Navegação) -->
                 <aside class="w-full flex col-span-4 lg:col-span-3 flex flex-col gap-y-6">                                        
@@ -1441,6 +1589,28 @@ templates.entityContent = async ({ data }) => {
     };
 
     templates.sidebarPageSettings = async ({ view = null, data = null, type = null, origin = null, prevTitle = null, navTitle = null, crop = null }) => {
+        const personalizationCard = (d) => {
+            const hasBk = d?.bk;
+            const changeLabel = hasBk ? 'Substituir' : 'Adicionar';
+            
+            let removeButton = '';
+            if (hasBk) {
+                removeButton = `<button data-action="remove-background" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fas fa-trash-alt"></i> Remover</button>`;
+            }
+
+            const gridCols = hasBk ? 'grid-cols-2' : 'grid-cols-1';
+
+            return `
+                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 mt-6">
+                    <div class="p-3 bg-white rounded-t-2xl font-semibold border-b border-gray-200">Personalização</div>
+                    <div class="p-3 bg-white rounded-b-2xl grid ${gridCols} gap-2">
+                        <button data-action="change-background" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fas fa-image"></i> ${changeLabel}</button>
+                        ${removeButton}
+                    </div>
+                </div>
+            `;
+        };
+
         const sidebarContent = document.querySelector('.sidebar-content');
         if (sidebarContent) sidebarContent.dataset.currentView = view || 'root';
         let html = '';
@@ -1479,11 +1649,15 @@ templates.entityContent = async ({ data }) => {
             const cropData = crop ?? {};
             const previewSrc = cropData.imageDataUrl || resolveImageSrc(data?.im, data?.tt, { size: 320 });
             const fileLabel = cropData.fileName ? `<span class="text-xs text-gray-500 truncate max-w-full">${cropData.fileName}</span>` : '';
+            const isBackgroundImage = cropData.entityContext?.imageType === 'bk';
+            const cropAspectRatio = Number(cropData.entityContext?.aspectRatio) || 1;
+            const cropOutputWidth = Number(cropData.entityContext?.outputWidth) || 600;
+            const cropOutputHeight = Number(cropData.entityContext?.outputHeight) || Math.round(cropOutputWidth / cropAspectRatio) || 600;
             html += `
                 <div id="message" data-role="message" class="w-full"></div>
                 <div class="grid gap-4">
                     <div class="flex flex-col gap-2 items-center">
-                        <div class="relative w-full max-w-[320px] aspect-square rounded-3xl overflow-hidden bg-gray-200" data-role="cropper-box">
+                        <div class="${isBackgroundImage ? 'relative w-full max-w-[720px] rounded-3xl overflow-hidden bg-gray-200 border border-gray-300' : 'relative w-full max-w-[320px] rounded-3xl overflow-hidden bg-gray-200 border border-gray-200'}" data-role="cropper-box" style="aspect-ratio: ${cropOutputWidth} / ${cropOutputHeight};">
                             <img data-role="cropper-image" class="absolute top-0 left-0 select-none pointer-events-none" src="${previewSrc}" alt="${(data?.tt ?? 'Imagem')}">
                         </div>
                         ${fileLabel}
@@ -1604,6 +1778,7 @@ templates.entityContent = async ({ data }) => {
                     ${contacts}
                     <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
                 </form>
+                ${personalizationCard(data)}
                 <hr>
                 ${shortcuts}
                 ${financeShortcuts}
@@ -1684,6 +1859,7 @@ templates.entityContent = async ({ data }) => {
                 ${contacts}
                 <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
                 </form>
+                ${personalizationCard(data)}
                 <hr>
                 ${shortcuts}
                 ${financeShortcuts}
@@ -1745,6 +1921,7 @@ templates.entityContent = async ({ data }) => {
                 ${contacts}
                 <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
                 </form>
+                ${personalizationCard(data)}
                 ${shortcuts}
                 ${deleteTeamButton}
             `;
@@ -3205,6 +3382,8 @@ templates.entityContent = async ({ data }) => {
         }
 
         setupHeroImageUpload(sidebarContent, pageSettingsData, pageSettingsView);
+        setupBackgroundImageUpload(sidebarContent, pageSettingsData, pageSettingsView);
+        setupRemoveBackgroundImage(sidebarContent, pageSettingsData, pageSettingsView);
 
         // atalhos da subview (via stack)
         if (sidebarContent._shortcutsHandler) sidebarContent.removeEventListener('click', sidebarContent._shortcutsHandler);
@@ -3605,6 +3784,7 @@ templates.entityContent = async ({ data }) => {
         } else {
             if (profileMatch) {                                
                 renderTemplate(workzContent, 'workzContent', null, () => {
+                    applyEntityBackgroundImage(null);
                     viewType = 'profile';
                     viewId = parseInt(profileMatch[1], 10);
                     renderView(viewId);
@@ -3612,6 +3792,7 @@ templates.entityContent = async ({ data }) => {
                 return;
             } else if (businessMatch) {
                 renderTemplate(workzContent, 'workzContent', null, () => {
+                    applyEntityBackgroundImage(null);
                     viewType = 'business';
                     viewId = parseInt(businessMatch[1], 10);
                     renderView(viewId);
@@ -3619,6 +3800,7 @@ templates.entityContent = async ({ data }) => {
                 return;                
             } else if (teamMatch) {
                 renderTemplate(workzContent, 'workzContent', null, () => {
+                    applyEntityBackgroundImage(null);
                     viewType = 'team';
                     viewId = parseInt(teamMatch[1], 10);                    
                     renderView(viewId);
@@ -3626,6 +3808,7 @@ templates.entityContent = async ({ data }) => {
                 return;                
             } else {
                 renderTemplate(workzContent, 'workzContent', null, () => {
+                    applyEntityBackgroundImage(null);
                     viewType = 'dashboard';                    
                     renderView();
                 });
@@ -3650,6 +3833,7 @@ templates.entityContent = async ({ data }) => {
 
         // DASHBOARD: usa caches/globais já carregados
         if (viewType === 'dashboard') {            
+
 
             const ppl = Array.isArray(userPeople) ? userPeople : [];
             // Somente vínculos aprovados para widgets do dashboard
@@ -3779,6 +3963,7 @@ templates.entityContent = async ({ data }) => {
             Object.assign(entityData.data[0], results);
 
             viewData = entityData.data[0];
+            applyEntityBackgroundImage(viewData);
 
             // Restrição de acesso para páginas de Equipe: somente membros aprovados da equipe
             if (viewType === ENTITY.TEAM) {
@@ -5216,15 +5401,5 @@ templates.entityContent = async ({ data }) => {
     }
 
 });
-
-
-
-
-
-
-
-
-
-
 
 
