@@ -376,9 +376,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 data: pageSettingsData,
                 messageContainer: sidebarContent.querySelector('#message') || document.getElementById('message'),
                 imageType: 'bk',
-                aspectRatio: 1280 / 240,
-                outputWidth: 1280,
-                outputHeight: 240
+                aspectRatio: 20 / 3,
+                outputWidth: 1920,
+                outputHeight: 288
             };
             input.value = '';
             input.click();
@@ -526,6 +526,9 @@ document.addEventListener('DOMContentLoaded', () => {
         destroyImageCropper({ keepContext: true });
         if (!sidebarMount || !cropData?.imageDataUrl) return;
 
+        sidebarMount.style.maxWidth = '100%';
+        sidebarMount.style.overflowX = 'hidden';
+
         const container = sidebarMount.querySelector('[data-role="cropper-box"]');
         const imageEl = sidebarMount.querySelector('[data-role="cropper-image"]');
         const zoomInput = sidebarMount.querySelector('[data-role="cropper-zoom"]');
@@ -545,8 +548,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         container.style.position = 'relative';
         container.style.touchAction = 'none';
+        container.style.width = '100%';
+        container.style.maxWidth = '100%';
         container.style.aspectRatio = `${outputWidth} / ${outputHeight}`;
-        container.style.minHeight = isBackgroundCrop ? '120px' : '160px';
+        if (isBackgroundCrop) {
+            container.style.minHeight = '0px';
+            container.style.height = 'auto';
+        } else {
+            container.style.minHeight = '160px';
+            container.style.height = '';
+        }
         imageEl.style.position = 'absolute';
         imageEl.draggable = false;
 
@@ -1591,18 +1602,17 @@ templates.entityContent = async ({ data }) => {
     templates.sidebarPageSettings = async ({ view = null, data = null, type = null, origin = null, prevTitle = null, navTitle = null, crop = null }) => {
         const personalizationCard = (d) => {
             const hasBk = d?.bk;
-            const changeLabel = hasBk ? 'Substituir' : 'Adicionar';
-            
+            const changeLabel = hasBk ? 'Substituir' : 'Adicionar';            
             let removeButton = '';
             if (hasBk) {
                 removeButton = `<button data-action="remove-background" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fas fa-trash-alt"></i> Remover</button>`;
             }
-
             const gridCols = hasBk ? 'grid-cols-2' : 'grid-cols-1';
-
             return `
-                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 mt-6">
-                    <div class="p-3 bg-white rounded-t-2xl font-semibold border-b border-gray-200">Personalização</div>
+                <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
+                    <div class="p-3 bg-white rounded-t-2xl font-semibold border-b border-gray-200">                            
+                        <img src="${hasBk ? hasBk : '#'}" class="h-auto w-full rounded-xl object-cover"></img>
+                    </div>
                     <div class="p-3 bg-white rounded-b-2xl grid ${gridCols} gap-2">
                         <button data-action="change-background" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fas fa-image"></i> ${changeLabel}</button>
                         ${removeButton}
@@ -1653,21 +1663,25 @@ templates.entityContent = async ({ data }) => {
             const cropAspectRatio = Number(cropData.entityContext?.aspectRatio) || 1;
             const cropOutputWidth = Number(cropData.entityContext?.outputWidth) || 600;
             const cropOutputHeight = Number(cropData.entityContext?.outputHeight) || Math.round(cropOutputWidth / cropAspectRatio) || 600;
+            const cropContainerStyle = `width: 100%; max-width: 100%; margin-left: auto; margin-right: auto; aspect-ratio: ${cropOutputWidth} / ${cropOutputHeight};`;
+            const cropWrapperClass = isBackgroundImage
+                ? 'relative w-full rounded-3xl overflow-hidden bg-gray-200 border border-gray-300'
+                : 'relative w-full rounded-3xl overflow-hidden bg-gray-200 border border-gray-200';
             html += `
                 <div id="message" data-role="message" class="w-full"></div>
-                <div class="grid gap-4">
-                    <div class="flex flex-col gap-2 items-center">
-                        <div class="${isBackgroundImage ? 'relative w-full max-w-[720px] rounded-3xl overflow-hidden bg-gray-200 border border-gray-300' : 'relative w-full max-w-[320px] rounded-3xl overflow-hidden bg-gray-200 border border-gray-200'}" data-role="cropper-box" style="aspect-ratio: ${cropOutputWidth} / ${cropOutputHeight};">
+                <div class="grid gap-4 w-full" style="max-width: 100%; overflow-x: hidden;">
+                    <div class="flex flex-col gap-2 items-center w-full" style="max-width: 100%;">
+                        <div class="${cropWrapperClass}" data-role="cropper-box" style="${cropContainerStyle}">
                             <img data-role="cropper-image" class="absolute top-0 left-0 select-none pointer-events-none" src="${previewSrc}" alt="${(data?.tt ?? 'Imagem')}">
                         </div>
                         ${fileLabel}
                     </div>
-                    <label class="flex items-center gap-3">
+                    <label class="flex items-center gap-3 w-full" style="max-width: 100%;">
                         <span class="text-sm text-gray-600">Zoom</span>
                         <input type="range" data-role="cropper-zoom" min="1" max="3" step="0.01" value="1" class="flex-1">
                     </label>
-                    <div class="text-xs text-gray-500 text-center">Arraste a imagem para ajustar o enquadramento.</div>
-                    <div class="grid gap-2">
+                    <div class="text-xs text-gray-500 text-center w-full" style="max-width: 100%;">Arraste a imagem para ajustar o enquadramento.</div>
+                    <div class="grid gap-2 w-full" style="max-width: 100%;">
                         <button data-action="crop-save" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
                         <button data-action="crop-cancel" class="shadow-md w-full py-2 px-4 bg-gray-200 text-gray-700 font-semibold rounded-3xl hover:bg-gray-300 transition-colors">Cancelar</button>
                     </div>
@@ -1769,6 +1783,7 @@ templates.entityContent = async ({ data }) => {
             ]);
 
             html += `
+                ${personalizationCard(data)}
                 <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
                     <input type="hidden" name="id" value="${data.id}">
                     ${card1}
@@ -1777,8 +1792,7 @@ templates.entityContent = async ({ data }) => {
                     ${cardPersonal}
                     ${contacts}
                     <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
-                </form>
-                ${personalizationCard(data)}
+                </form>                
                 <hr>
                 ${shortcuts}
                 ${financeShortcuts}
@@ -1817,16 +1831,16 @@ templates.entityContent = async ({ data }) => {
             const privacy = UI.sectionCard(
                 UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}) +
                 UI.rowSelect('page_privacy','Página', `
-                <option value="" ${data.pg==null?'selected':''} disabled>Selecione</option>
-                <option value="0" ${data.pg===0?'selected':''}>Usuários logados</option>
-                <option value="1" ${data.pg===1?'selected':''}>Toda a internet</option>
+                <option value="" ${data.page_privacy==null?'selected':''} disabled>Selecione</option>
+                <option value="0" ${data.page_privacy===0?'selected':''}>Usuários logados</option>
+                <option value="1" ${data.page_privacy===1?'selected':''}>Toda a internet</option>
                 `) +
                 UI.rowSelect('feed_privacy','Conteúdo', `
-                <option value="" ${data.pc==null?'selected':''} disabled>Selecione</option>
-                <option value="0" ${data.pc===0?'selected':''}>Moderadores</option>
-                <option value="1" ${data.pc===1?'selected':''}>Usuários membros</option>
-                <option value="2" ${data.pc===2?'selected':''}>Usuários logados</option>
-                <option value="3" ${data.pc===3 && (data.pg>0)?'selected':''} ${data.pg<1?'disabled':''}>Toda a internet</option>
+                <option value="" ${data.feed_privacy==null?'selected':''} disabled>Selecione</option>
+                <option value="0" ${data.feed_privacy===0?'selected':''}>Moderadores</option>
+                <option value="1" ${data.feed_privacy===1?'selected':''}>Usuários membros</option>
+                <option value="2" ${data.feed_privacy===2?'selected':''}>Usuários logados</option>
+                <option value="3" ${data.feed_privacy===3 && (data.page_privacy>0)?'selected':''} ${data.page_privacy<1?'disabled':''}>Toda a internet</option>
                 `, {bottom:true})
             );
 
@@ -1850,6 +1864,7 @@ templates.entityContent = async ({ data }) => {
 
             
             html += `
+                ${personalizationCard(data)}
                 <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
                 <input type="hidden" name="id" value="${data.id}">
                 ${basics}
@@ -1858,8 +1873,7 @@ templates.entityContent = async ({ data }) => {
                 ${address}
                 ${contacts}
                 <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
-                </form>
-                ${personalizationCard(data)}
+                </form>                
                 <hr>
                 ${shortcuts}
                 ${financeShortcuts}
@@ -1889,10 +1903,10 @@ templates.entityContent = async ({ data }) => {
 
             const feedPrivacy = UI.sectionCard(
                 UI.rowSelect('feed_privacy','Conteúdo', `
-                <option value="" ${data.pc==null?'selected':''} disabled>Selecione</option>
-                <option value="0" ${data.pc===0?'selected':''}>Moderadores</option>
-                <option value="1" ${data.pc===1?'selected':''}>Membros da equipe</option>
-                <option value="2" ${data.pc===2?'selected':''}>Todos do negócio</option>
+                <option value="" ${data.feed_privacy==null?'selected':''} disabled>Selecione</option>
+                <option value="0" ${data.feed_privacy===0?'selected':''}>Moderadores</option>
+                <option value="1" ${data.feed_privacy===1?'selected':''}>Membros da equipe</option>
+                <option value="2" ${data.feed_privacy===2?'selected':''}>Todos do negócio</option>
                 `, {bottom:true})
             );
 
@@ -1912,6 +1926,7 @@ templates.entityContent = async ({ data }) => {
                 : '';
 
             html += `
+                ${personalizationCard(data)}
                 <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
                 <input type="hidden" name="id" value="${data.id}">
                 ${basics}
@@ -1920,8 +1935,7 @@ templates.entityContent = async ({ data }) => {
                 ${feedPrivacy}
                 ${contacts}
                 <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
-                </form>
-                ${personalizationCard(data)}
+                </form>                
                 ${shortcuts}
                 ${deleteTeamButton}
             `;
@@ -4235,7 +4249,7 @@ templates.entityContent = async ({ data }) => {
                 const res = await apiClient.post('/search', { db: 'workz_apps', table: 'apps', columns: ['*'], conditions: { id: appId } });
                 const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
                 
-                const appUrl = app?.src || app?.pg;
+                const appUrl = app?.src || app?.page_privacy;
                 if (app && appUrl) { 
                     // Assuming newWindow is a global function
                     newWindow(appUrl, `app_${app.id}`, app.im, app.tt);
@@ -4721,8 +4735,8 @@ templates.entityContent = async ({ data }) => {
             national_id: sanitizeDocument(source.national_id ?? source.cnpj),
             cf: normalizeStringOrNull(source.cf),
             un: normalizeStringOrNull(source.un),
-            page_privacy: normalizeNumber(source.page_privacy ?? source.pg),
-            feed_privacy: normalizeNumber(source.feed_privacy ?? source.pc),
+            page_privacy: normalizeNumber(source.page_privacy ?? source.page_privacy),
+            feed_privacy: normalizeNumber(source.feed_privacy ?? source.feed_privacy),
             zip_code: normalizeStringOrNull(source.zip_code ?? source.zp),
             country: normalizeStringOrNull(source.country),
             state: normalizeStringOrNull(source.state),
@@ -4740,7 +4754,7 @@ templates.entityContent = async ({ data }) => {
             tt: normalizeRequiredString(source.tt ?? source.name),
             cf: normalizeStringOrNull(source.cf),
             un: normalizeStringOrNull(source.un),
-            feed_privacy: normalizeNumber(source.feed_privacy ?? source.pc),
+            feed_privacy: normalizeNumber(source.feed_privacy ?? source.feed_privacy),
             em: normalizeNumber(source.em ?? source.business),
             contacts: normalizedContacts.length ? JSON.stringify(normalizedContacts) : null
         };
@@ -5401,5 +5415,4 @@ templates.entityContent = async ({ data }) => {
     }
 
 });
-
 
