@@ -37,6 +37,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let feedLoading = false;
     let feedFinished = false;
 
+    const feedUserCache = new Map();
+    let feedInteractionsAttached = false;
+
+
     // Navegação estilo iOS para o sidebar (stack)
     const SidebarNav = {
         stack: [],
@@ -2512,19 +2516,423 @@ templates.entityContent = async ({ data }) => {
         
         // Delegação global do roteador cobre cliques com data-action
     }
+    
+    function normalizeNumericId(value) {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : null;
+    }
+
+    function formatFeedTimestamp(input) {
+        if (!input) return '';
+        try {
+            const date = new Date(input);
+            if (Number.isNaN(date.getTime())) return '';
+            const now = new Date();
+            const diffMs = now.getTime() - date.getTime();
+            const diffMinutes = Math.floor(diffMs / 60000);
+            if (diffMinutes < 1) return 'Agora';
+            if (diffMinutes < 60) return diffMinutes + ' min';
+            const diffHours = Math.floor(diffMinutes / 60);
+            if (diffHours < 24) return diffHours + 'h';
+            const diffDays = Math.floor(diffHours / 24);
+            if (diffDays < 7) return diffDays + 'd';
+            if (date.getFullYear() === now.getFullYear()) {
+                return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' }).format(date);
+            }
+            return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).format(date);
+        } catch (error) {
+            console.warn('Failed to format timestamp', input, error);
+            return '';
+        }
+    }
+
+    function formatFeedRichText(value) {
+        const safe = escapeHtml((value ?? '').toString());
+        return safe.replace(/(?:\r\n|\n|\r)/g, '<br>');
+    }
+
+    async function ensureFeedUsersLoaded(ids = []) {
+        const normalized = Array.from(new Set((ids || []).map(normalizeNumericId).filter((id) => id !== null)));
+        if (!normalized.length) return;
+        const missing = normalized.filter((id) => !feedUserCache.has(String(id)));
+        if (!missing.length) return;
+        try {
+            const res = await apiClient.post('/search', {
+                db: 'workz_data',
+                table: 'hus',
+                columns: ['id', 'tt', 'im'],
+                conditions: { id: { op: 'IN', value: missing } },
+                fetchAll: true,
+            });
+            const rows = Array.isArray(res?.data) ? res.data : [];
+            rows.forEach((row) => {
+                if (row?.id == null) return;
+                feedUserCache.set(String(row.id), row);
+            });
+        } catch (error) {
+            console.error('Failed to load feed users', error);
+        }
+    }
+
+    function getFeedUserSummary(id) {
+        const key = String(id);
+        const user = feedUserCache.get(key);
+        const name = user?.tt || 'Usuário';
+        return {
+            id: user?.id ?? id,
+            name,
+            avatar: resolveImageSrc(user?.im, name, { size: 160 }),
+        };
+    }
+
+    async function fetchFeedLikes(postIds = []) {
+        const normalized = Array.from(new Set((postIds || []).map(normalizeNumericId).filter((id) => id !== null)));
+        const likeMap = new Map();
+        if (!normalized.length) return likeMap;
+        try {
+            const res = await apiClient.post('/search', {
+                db: 'workz_data',
+                table: 'lke',
+                columns: ['pl', 'us'],
+                conditions: { pl: { op: 'IN', value: normalized } },
+                fetchAll: true,
+            });
+            const rows = Array.isArray(res?.data) ? res.data : [];
+            const currentUserId = currentUserData?.id != null ? String(currentUserData.id) : null;
+            rows.forEach((row) => {
+                const postId = normalizeNumericId(row?.pl);
+                if (postId == null) return;
+                const key = String(postId);
+                if (!likeMap.has(key)) likeMap.set(key, { total: 0, userLiked: false });
+                const entry = likeMap.get(key);
+                entry.total += 1;
+                if (currentUserId && String(row?.us) === currentUserId) entry.userLiked = true;
+            });
+        } catch (error) {
+            console.error('Failed to fetch feed likes', error);
+        }
+        return likeMap;
+    }
+
+    async function fetchFeedComments(postIds = []) {
+        const normalized = Array.from(new Set((postIds || []).map(normalizeNumericId).filter((id) => id !== null)));
+        const commentsMap = new Map();
+        if (!normalized.length) return commentsMap;
+        try {
+            const res = await apiClient.post('/search', {
+                db: 'workz_data',
+                table: 'hpl_comments',
+                columns: ['id', 'pl', 'us', 'ds', 'dt'],
+                conditions: { pl: { op: 'IN', value: normalized } },
+                order: { by: 'dt', dir: 'ASC' },
+                fetchAll: true,
+            });
+            const rows = Array.isArray(res?.data) ? res.data : [];
+            rows.forEach((row) => {
+                const postId = normalizeNumericId(row?.pl);
+                if (postId == null) return;
+                const key = String(postId);
+                if (!commentsMap.has(key)) commentsMap.set(key, []);
+                commentsMap.get(key).push(row);
+            });
+        } catch (error) {
+            console.error('Failed to fetch feed comments', error);
+        }
+        return commentsMap;
+    }
+
+    async function hydrateFeedItems(items = []) {
+        if (!Array.isArray(items) || !items.length) return items;
+        const postIds = Array.from(new Set(items.map((item) => normalizeNumericId(item?.id)).filter((id) => id !== null)));
+        if (!postIds.length) return items;
+        const authorIds = Array.from(new Set(items.map((item) => normalizeNumericId(item?.us)).filter((id) => id !== null)));
+        await ensureFeedUsersLoaded(authorIds);
+
+        const [likesMap, commentsMap] = await Promise.all([
+            fetchFeedLikes(postIds),
+            fetchFeedComments(postIds),
+        ]);
+
+        const commentAuthorIds = [];
+        commentsMap.forEach((commentRows) => {
+            commentRows.forEach((row) => {
+                const authorId = normalizeNumericId(row?.us);
+                if (authorId != null) commentAuthorIds.push(authorId);
+            });
+        });
+        if (commentAuthorIds.length) await ensureFeedUsersLoaded(commentAuthorIds);
+
+        return items.map((item) => {
+            const numericId = normalizeNumericId(item?.id);
+            const key = numericId != null ? String(numericId) : String(item?.id ?? '');
+            const likeInfo = likesMap.get(key) || { total: 0, userLiked: false };
+            const comments = (commentsMap.get(key) || []).map((row) => ({
+                ...row,
+                author: getFeedUserSummary(row.us),
+                formattedDate: formatFeedTimestamp(row.dt),
+            }));
+            return {
+                ...item,
+                author: getFeedUserSummary(item.us),
+                likeInfo,
+                comments,
+                commentCount: comments.length,
+                formattedDate: formatFeedTimestamp(item.dt),
+                backgroundImage: resolveBackgroundImage(item.im, item.tt, { size: 1024 }),
+            };
+        });
+    }
+
+    function renderFeedComment(comment, { hidden = false } = {}) {
+        if (!comment) return '';
+        const commentAuthor = comment?.author ?? getFeedUserSummary(comment?.us);
+        const commentName = escapeHtml(commentAuthor?.name || 'Usuário');
+        const commentAvatar =
+            commentAuthor?.avatar ||
+            resolveImageSrc(commentAuthor?.im ?? null, commentAuthor?.tt ?? commentAuthor?.name ?? 'Usuário', { size: 80 });
+        const commentText = formatFeedRichText(comment?.ds || '');
+        const commentDate = escapeHtml(comment?.formattedDate || formatFeedTimestamp(comment?.dt) || '');
+        const hiddenClasses = hidden ? ' hidden extra-comment' : '';
+        const extraAttr = hidden ? ' data-role="extra-comment"' : '';
+        const commentId = comment?.id != null ? String(comment.id) : '';
+        return `
+                <div class="flex items-start gap-2 text-xs text-white/90${hiddenClasses}" data-comment-id="${commentId}"${extraAttr}>
+                    <span class="w-7 h-7 rounded-full overflow-hidden border border-white/20 bg-black/40 flex items-center justify-center">
+                        <img src="${commentAvatar}" alt="${commentName}" class="w-full h-full object-cover">
+                    </span>
+                    <div class="flex-1 space-y-1">
+                        <p class="font-semibold text-white/95">${commentName}</p>
+                        <p class="text-white/90 leading-snug">${commentText}</p>
+                        ${commentDate ? `<span class="text-[10px] uppercase tracking-wide text-white/60">${commentDate}</span>` : ''}
+                    </div>
+                </div>`;
+    }
 
     function appendFeed ( items ) {
         const timeline = document.querySelector('#timeline');
-        const html = items.map(post => `
-        <article class="col-span-12 sm:col-span-6 lg:col-span-4 flex flex-col bg-white p-4 rounded-3xl shadow-lg aspect-[3/4]">
-            <header class="text-sm text-gray-500 mb-1">
-                <span class="font-medium">${post.us}</span> • <time>${new Date(post.dt).toLocaleString()}</time>
-            </header>
-            ${post.tt ? `<h3 class="font-semibold mb-1">${post.tt}</h3>` : ''}                        
-        </article>
-        `).join('');
+        if (!timeline || !Array.isArray(items) || !items.length) return;
+
+        const html = items.map((post) => {
+            const author = post?.author ?? {};
+            const authorName = escapeHtml(author?.name || 'Usuário');
+            const avatarSrc = author?.avatar || resolveImageSrc(null, authorName, { size: 100 });
+            const title = escapeHtml(post?.tt || '');
+            const caption = formatFeedRichText(post?.ct || '');
+            const formattedDate = escapeHtml(post?.formattedDate || '');
+            const likeInfo = post?.likeInfo || {};
+            const likeTotal = Number.isFinite(Number(likeInfo.total)) ? Number(likeInfo.total) : 0;
+            const userLiked = !!likeInfo.userLiked;
+            const likeLabel = likeTotal === 1 ? 'curtida' : 'curtidas';
+            const postId = String(post?.id ?? '');
+            const backgroundStyle = post?.backgroundImage ? `background-image: ${post.backgroundImage};` : '';
+            const comments = Array.isArray(post?.comments) ? post.comments : [];
+            const visibleComments = comments.slice(0, 2);
+            const hiddenComments = comments.slice(2);
+
+            const commentList = [
+                ...visibleComments.map((comment) => renderFeedComment(comment)),
+                ...hiddenComments.map((comment) => renderFeedComment(comment, { hidden: true })),
+            ].join('');
+
+            const showAllButton = hiddenComments.length
+                ? `<button type="button" class="text-xs font-semibold text-white/80 hover:text-white transition" data-feed-action="show-comments" data-post-id="${postId}">Ver todos os ${comments.length} comentários</button>`
+                : '';
+
+            return `
+        <article class="col-span-12 sm:col-span-6 lg:col-span-4">
+            <div class="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-2xl bg-gray-900 text-white">
+                <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}"></div>
+                <div class="absolute inset-0 bg-gradient-to-b from-black/10 via-black/60 to-black/90"></div>
+                <div class="relative z-10 flex flex-col h-full justify-between">
+                    <header class="flex items-center gap-3 p-4">
+                        <span class="w-11 h-11 rounded-full overflow-hidden border border-white/30 bg-black/40 flex items-center justify-center">
+                            <img src="${avatarSrc}" alt="${authorName}" class="w-full h-full object-cover">
+                        </span>
+                        <div class="flex flex-col">
+                            <span class="font-semibold leading-tight">${authorName}</span>
+                            ${formattedDate ? `<time class="text-xs text-white/70">${formattedDate}</time>` : ''}
+                        </div>
+                    </header>
+                    <div class="px-4 pb-5 space-y-4">
+                        ${title ? `<h3 class="text-lg font-semibold text-white drop-shadow">${title}</h3>` : ''}
+                        ${caption ? `<p class="text-sm text-white/90 leading-relaxed">${caption}</p>` : ''}
+                        <div class="flex items-center gap-3">
+                            <button type="button" class="flex items-center justify-center w-10 h-10 rounded-full bg-black/40 hover:bg-black/60 transition text-lg ${userLiked ? 'text-red-400' : 'text-white'}" data-feed-action="toggle-like" data-post-id="${postId}" data-liked="${userLiked ? '1' : '0'}" aria-pressed="${userLiked}">
+                                <i class="${userLiked ? 'fas' : 'far'} fa-heart"></i>
+                            </button>
+                            <span class="text-sm text-white/90" data-role="like-count" data-post-id="${postId}" data-count="${likeTotal}">${likeTotal} ${likeLabel}</span>
+                        </div>
+                        <div class="space-y-3" data-role="comment-block" data-post-id="${postId}">
+                            ${showAllButton}
+                            <div class="space-y-3" data-role="comment-list" data-post-id="${postId}">
+                                ${commentList || '<p class="text-xs text-white/60" data-role="empty-comments">Ainda sem comentários.</p>'}
+                            </div>
+                            <form class="flex items-center gap-2 bg-black/40 rounded-full px-3 py-2" data-feed-action="comment-form" data-post-id="${postId}">
+                                <input type="text" name="comment" class="flex-1 bg-transparent border-none text-sm text-white placeholder-white/60 focus:outline-none" placeholder="Adicione um comentário..." autocomplete="off" maxlength="300">
+                                <button type="submit" class="text-sm font-semibold text-white hover:text-indigo-200 transition">Enviar</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </article>`;
+        }).join('');
 
         timeline.insertAdjacentHTML('beforeend', html);
+        ensureFeedInteractions();
+    }
+
+    function ensureFeedInteractions() {
+        const timeline = document.querySelector('#timeline');
+        if (!timeline || feedInteractionsAttached) return;
+        timeline.addEventListener('click', handleFeedClick);
+        timeline.addEventListener('submit', handleFeedSubmit);
+        feedInteractionsAttached = true;
+    }
+
+    async function handleFeedClick(event) {
+        const timeline = event.currentTarget;
+        const target = event.target.closest('[data-feed-action]');
+        if (!target || !(timeline instanceof Element) || !timeline.contains(target)) return;
+
+        const action = target.dataset.feedAction;
+        if (action === 'toggle-like') {
+            event.preventDefault();
+            const postId = target.dataset.postId;
+            if (postId) await togglePostLike(postId, target);
+        } else if (action === 'show-comments') {
+            event.preventDefault();
+            revealAllComments(target);
+        }
+    }
+
+    function adjustLikeButtonAppearance(button, liked) {
+        button.dataset.liked = liked ? '1' : '0';
+        button.setAttribute('aria-pressed', liked ? 'true' : 'false');
+        const icon = button.querySelector('i');
+        if (liked) {
+            button.classList.add('text-red-400');
+            button.classList.remove('text-white');
+            if (icon) {
+                icon.classList.remove('far');
+                icon.classList.add('fas');
+            }
+        } else {
+            button.classList.add('text-white');
+            button.classList.remove('text-red-400');
+            if (icon) {
+                icon.classList.remove('fas');
+                icon.classList.add('far');
+            }
+        }
+    }
+
+    function updateLikeCountElement(el, count) {
+        if (!el) return;
+        const safeCount = Math.max(0, Number(count) || 0);
+        el.dataset.count = String(safeCount);
+        const label = safeCount === 1 ? 'curtida' : 'curtidas';
+        el.textContent = `${safeCount} ${label}`;
+    }
+
+    async function togglePostLike(postId, button) {
+        if (!currentUserData?.id) {
+            if (typeof notifyError === 'function') notifyError('É necessário estar logado para curtir.');
+            return;
+        }
+        if (button.dataset.loading === '1') return;
+        const numericPostId = Number(postId);
+        if (!Number.isFinite(numericPostId)) return;
+
+        button.dataset.loading = '1';
+        const likeCountEl = document.querySelector(`[data-role="like-count"][data-post-id="${postId}"]`);
+        const currentCount = Number(likeCountEl?.dataset.count ?? 0) || 0;
+        const isCurrentlyLiked = button.dataset.liked === '1';
+
+        try {
+            if (isCurrentlyLiked) {
+                await apiClient.post('/delete', { db: 'workz_data', table: 'lke', conditions: { pl: numericPostId, us: currentUserData.id } });
+                adjustLikeButtonAppearance(button, false);
+                updateLikeCountElement(likeCountEl, currentCount - 1);
+            } else {
+                const createdAt = new Date().toISOString();
+                await apiClient.post('/insert', { db: 'workz_data', table: 'lke', data: { pl: numericPostId, us: currentUserData.id, dt: createdAt } });
+                adjustLikeButtonAppearance(button, true);
+                updateLikeCountElement(likeCountEl, currentCount + 1);
+            }
+        } catch (error) {
+            console.error('Failed to toggle like', error);
+            if (typeof notifyError === 'function') notifyError('Não foi possível atualizar sua curtida. Tente novamente.');
+        } finally {
+            delete button.dataset.loading;
+        }
+    }
+
+    function revealAllComments(button) {
+        const block = button.closest('[data-role="comment-block"]');
+        if (!block) return;
+        const extras = block.querySelectorAll('[data-role="extra-comment"]');
+        extras.forEach((node) => {
+            node.classList.remove('hidden', 'extra-comment');
+            node.removeAttribute('data-role');
+        });
+        button.remove();
+    }
+
+    function handleFeedSubmit(event) {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        if (form.dataset.feedAction !== 'comment-form') return;
+        event.preventDefault();
+        submitCommentForm(form);
+    }
+
+    async function submitCommentForm(form) {
+        if (!currentUserData?.id) {
+            if (typeof notifyError === 'function') notifyError('É necessário estar logado para comentar.');
+            return;
+        }
+        if (form.dataset.loading === '1') return;
+        const input = form.querySelector('input[name="comment"]');
+        const message = (input?.value ?? '').trim();
+        if (!message) return;
+
+        const postId = form.dataset.postId;
+        const numericPostId = Number(postId);
+        if (!postId || !Number.isFinite(numericPostId)) return;
+
+        form.dataset.loading = '1';
+        const createdAt = new Date().toISOString();
+        const payload = { pl: numericPostId, us: currentUserData.id, ds: message, dt: createdAt };
+        try {
+            const result = await apiClient.post('/insert', { db: 'workz_data', table: 'hpl_comments', data: payload });
+            feedUserCache.set(String(currentUserData.id), { id: currentUserData.id, tt: currentUserData.tt, im: currentUserData.im });
+            const commentData = {
+                id: result?.id ?? result?.insertId ?? Date.now(),
+                us: currentUserData.id,
+                ds: message,
+                dt: createdAt,
+                author: {
+                    id: currentUserData.id,
+                    name: currentUserData.tt || 'Você',
+                    avatar: resolveImageSrc(currentUserData.im, currentUserData.tt, { size: 80 }),
+                },
+                formattedDate: formatFeedTimestamp(createdAt),
+            };
+            const block = form.closest('[data-role="comment-block"]');
+            const list = block?.querySelector('[data-role="comment-list"]');
+            if (list) {
+                const emptyState = list.querySelector('[data-role="empty-comments"]');
+                if (emptyState) emptyState.remove();
+                list.insertAdjacentHTML('beforeend', renderFeedComment(commentData));
+            }
+            if (input) input.value = '';
+        } catch (error) {
+            console.error('Failed to submit comment', error);
+            if (typeof notifyError === 'function') notifyError('Não foi possível enviar seu comentário. Tente novamente.');
+        } finally {
+            delete form.dataset.loading;
+        }
     }
 
     // Exibição de loading (abstrai jQuery e permite trocar no futuro)
@@ -4428,7 +4836,14 @@ templates.entityContent = async ({ data }) => {
         }
 
         // renderizar (append)        
-        appendFeed(items);
+        let feedItems = items;
+        try {
+            feedItems = await hydrateFeedItems(items);
+        } catch (error) {
+            console.error('Failed to prepare feed items', error);
+        }
+        appendFeed(feedItems);
+
 
         // avançar offset
         feedOffset += FEED_PAGE_SIZE;
