@@ -4157,11 +4157,30 @@ templates.entityContent = async ({ data }) => {
                 : 0;
         memberStatus = (viewType === ENTITY.TEAM) ? Number(parseInt(userTeamsData.find(item => item.cm === viewData.id)?.st ?? 0)) : (viewType === ENTITY.BUSINESS) ? Number(parseInt(userBusinessesData.find(item => item.em === viewData.id)?.st ?? 0)) : 0;
 
+        const editorTriggerEl = document.querySelector('#editor-trigger');
+        const normalizedViewId = viewId ?? viewData?.id ?? entityId ?? null;
+        const shouldShowEditorTrigger =
+            viewType === 'dashboard' ||
+            (viewType === ENTITY.PROFILE && currentUserData && normalizedViewId !== null && String(normalizedViewId) === String(currentUserData.id)) ||
+            (viewType === ENTITY.BUSINESS && Number(memberStatus) === 1) ||
+            (viewType === ENTITY.TEAM && Number(memberStatus) === 1 && !viewRestricted);
+
+        const editorTriggerPromise = (async () => {
+            if (!editorTriggerEl) return;
+            if (!shouldShowEditorTrigger) {
+                editorTriggerEl.innerHTML = '';
+                editorTriggerEl.hidden = true;
+                return;
+            }
+            editorTriggerEl.hidden = false;
+            await renderTemplate(editorTriggerEl, templates['editorTrigger'], currentUserData);
+        })();
+
         Promise.all([            
             // Menu customizado
             customMenu(),
             // Gatilhos de criação de conteúdo
-            renderTemplate(document.querySelector('#editor-trigger'), templates['editorTrigger'], currentUserData),                    
+            editorTriggerPromise,
 
             (viewType === 'dashboard')
                 ? 
@@ -5479,4 +5498,5 @@ templates.entityContent = async ({ data }) => {
     }
 
 });
+
 
