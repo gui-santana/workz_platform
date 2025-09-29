@@ -1535,10 +1535,8 @@ templates.entityContent = async ({ data }) => {
                 const isLast = index === parsed.length - 1;
                 const borderClass = isLast ? '' : 'border-b border-gray-100';
                 return `
-                    <div title="Contato" class="${isFirst ? 'rounded-t-2xl' : ''} bg-white grid grid-cols-6 ${borderClass}" data-input-id="${index}">
-                        <select class="${isFirst ? 'rounded-tl-2xl' : ''} border-0 focus:outline-none col-span-2 p-4" name="url_type">
-                            ${UI.contactOptions(contact.type || '')}
-                        </select>
+                    <div title="Link" class="${isFirst ? 'rounded-t-2xl' : ''} bg-white grid grid-cols-6 ${borderClass}" data-input-id="${index}">
+                        <input class="${isFirst ? 'rounded-tl-2xl' : ''} border-0 focus:outline-none col-span-2 p-4" type="text" name="url_type" value="${contact.type || ''}">
                         <input class="border-0 focus:outline-none col-span-4 ${isFirst ? 'rounded-tr-2xl' : ''} p-4" type="text" name="url_value" value="${contact.value || ''}">
                     </div>
                 `;
@@ -2365,6 +2363,69 @@ templates.entityContent = async ({ data }) => {
                         <a class="font-semibold"> ${title}${visorCount}</a>
                     </div>
                     ${gridHtml}
+                </div>
+            </div>
+        `);
+    }
+
+    const HTML_ESCAPE_MAP = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    };
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char] || char);
+    }
+
+    function deriveContactHref(rawValue) {
+        const value = String(rawValue ?? '').trim();
+        if (!value) return null;
+        if (/^(https?:\/\/|mailto:|tel:|sms:)/i.test(value)) return value;
+        if (/^www\./i.test(value)) return `https://${value}`;
+        if (value.includes('@') && !value.includes(' ')) return `mailto:${value}`;
+        const digits = value.replace(/[^+\d]/g, '');
+        if (digits && digits.length >= 8 && /^\+?\d+$/.test(digits)) return `tel:${digits}`;
+        return null;
+    }
+
+    function appendContactsWidget(contactsSource) {
+        const widgetWrapper = document.querySelector('#widget-wrapper');
+        if (!widgetWrapper) return;
+
+        const normalized = extractContactsData(contactsSource);
+        if (!Array.isArray(normalized) || !normalized.length) return;
+
+        const existing = widgetWrapper.querySelector('#widget-contacts');
+        if (existing) existing.remove();
+
+        const count = normalized.length;
+        const countLabel = count > 0 ? ` (${count})` : '';
+        const itemsHtml = normalized.map((contact) => {
+            const label = escapeHtml(contact?.type || contact?.value || '');
+            const href = deriveContactHref(contact?.value);
+            if (href) {
+                const safeHref = escapeHtml(href);
+                return `<a class="block rounded-2xl p-3 bg-gray-100 hover:bg-gray-200 text-gray-700 truncate transition-colors" href="${safeHref}" target="_blank" rel="noopener noreferrer" title="${label}">${label}</a>`;
+            }
+            return `<div class="block rounded-2xl p-3 bg-gray-100 text-gray-600 truncate" title="${label}">${label}</div>`;
+        }).join('');
+
+        widgetWrapper.insertAdjacentHTML('beforeend', `    
+            <div id="widget-contacts">
+                <div class="bg-white p-3 rounded-3xl shadow-lg">
+                    <div class="w-full content-center mb-3 mt-1">
+                        <span class="fa-stack">
+                            <i class="fas fa-circle fa-stack-2x"></i>
+                            <i class="fas fa-link fa-stack-1x fa-inverse"></i>
+                        </span>
+                        <a class="font-semibold"> Links${countLabel}</a>
+                    </div>
+                    <div class="grid grid-cols-1 gap-3 font-semibold text-center">
+                        ${itemsHtml}
+                    </div>
                 </div>
             </div>
         `);
@@ -3241,15 +3302,15 @@ templates.entityContent = async ({ data }) => {
         const rows = [...container.children];
         rows.forEach((row, i) => {
             row.classList.remove('rounded-t-2xl', 'rounded-b-2xl', 'border-b', 'border-gray-100');
-            const select = row.querySelector('select[name="url_type"]');
-            const input = row.querySelector('input[name="url_value"]');
-            select?.classList.remove('rounded-tl-2xl');
-            input?.classList.remove('rounded-tr-2xl');
+            const urlType = row.querySelector('input[name="url_type"]');
+            const urlValue = row.querySelector('input[name="url_value"]');
+            urlType?.classList.remove('rounded-tl-2xl');
+            urlValue?.classList.remove('rounded-tr-2xl');
 
             if (i === 0) {
                 row.classList.add('rounded-t-2xl');
-                select?.classList.add('rounded-tl-2xl');
-                input?.classList.add('rounded-tr-2xl');
+                urlType?.classList.add('rounded-tl-2xl');
+                urlValue?.classList.add('rounded-tr-2xl');
             }
             if (i === rows.length - 1) {
                 row.classList.add('rounded-b-2xl');
@@ -4082,6 +4143,9 @@ templates.entityContent = async ({ data }) => {
         if (widgetPeople.length)      await appendWidget('people',      widgetPeople,      widgetPeopleCount);
         if (widgetBusinesses.length)  await appendWidget('businesses',  widgetBusinesses,  widgetBusinessesCount);
         if (widgetTeams.length)       await appendWidget('teams',       widgetTeams,       widgetTeamsCount);
+        if ([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(viewType) && viewData) {
+            appendContactsWidget(viewData);
+        }
 
         // Nível do usuário
         // - TEAM: utiliza nv do vínculo na própria equipe (teams_users)
@@ -4853,7 +4917,7 @@ templates.entityContent = async ({ data }) => {
         if (!container) return [];
         const rows = [...container.querySelectorAll('[data-input-id]')];
         const entries = rows.map((row) => {
-            const type = row.querySelector('select[name="url_type"]')?.value || '';
+            const type = row.querySelector('input[name="url_type"]')?.value || '';
             const value = row.querySelector('input[name="url_value"]')?.value || '';
             return { type: type.trim(), value: value.trim() };
         }).filter(item => item.type && item.value);
