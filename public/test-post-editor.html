@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste Post Editor</title>
+    <link rel="stylesheet" href="css/editor.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="main-wrapper" class="flex">
+        <div class="flex-1 p-4">
+            <h1>Teste do Post Editor</h1>
+            <div class="w-full p-3 border-b-2 border-gray-100 flex items-center gap-3">
+                <img class="page-thumb w-11 h-11 rounded-full pointer" src="/images/no-image.jpg" />
+                <div id="post-editor" class="flex-1 rounded-3xl h-11 pointer text-gray-500 px-4 text-left bg-gray-100 hover:bg-gray-200 flex items-center overflow-hidden whitespace-nowrap truncate">
+                    <a class="block w-full overflow-hidden whitespace-nowrap truncate">O que você está pensando, Usuário?</a>
+                </div>
+            </div>
+        </div>
+        <div id="sidebar-wrapper" class="w-0 transition-all duration-300 bg-white border-l border-gray-200 overflow-hidden">
+        </div>
+    </div>
+
+    <script>
+        // Mock das funções necessárias
+        const currentUserData = { id: 1, tt: 'Usuário Teste' };
+        
+        function notifyError(msg) {
+            alert('Erro: ' + msg);
+        }
+        
+        function notifySuccess(msg) {
+            alert('Sucesso: ' + msg);
+        }
+
+        // Mock do SidebarNav
+        const SidebarNav = {
+            stack: [],
+            mount: null,
+            setMount(el) { this.mount = el; },
+            push(state) { 
+                this.stack.push(state); 
+                this.render(); 
+            },
+            render() {
+                if (!this.mount) return;
+                const st = this.stack[this.stack.length-1];
+                if (st && st.view === 'post-editor') {
+                    this.mount.innerHTML = `
+                        <div class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
+                            <i class="fas fa-chevron-left"></i>
+                            <a>Voltar</a>
+                        </div>
+                        <div id="appShell">
+                            <header class="flex flex-col gap-2 text-center md:text-left">
+                                <h1 class="text-2xl font-bold text-slate-800">Mini PowerPoint/Canva 3x4 - Pro</h1>
+                                <p class="text-sm text-slate-500">Monte artes e cards verticais em qualquer tela.</p>
+                            </header>
+                            
+                            <section class="editor-card flex flex-col gap-5">
+                                <!-- Toolbar superior minimalista -->
+                                <div class="top-toolbar">
+                                    <label for="bgUpload" class="tool-icon" title="Plano de fundo">
+                                        <i class="fas fa-image"></i>
+                                        <input type="file" id="bgUpload" accept="image/*,video/*">
+                                    </label>
+                                    <button type="button" id="btnAddText" class="tool-icon" title="Adicionar texto">
+                                        <i class="fas fa-font"></i>
+                                    </button>
+                                    <button type="button" id="btnAddImg" class="tool-icon" title="Adicionar imagem">
+                                        <i class="fas fa-image"></i>
+                                    </button>
+                                    <button type="button" id="btnAddElement" class="tool-icon" title="Adicionar elemento">
+                                        <i class="fas fa-plus"></i>
+                                    </button>
+                                </div>
+                                
+                                <!-- Editor viewport -->
+                                <div id="editorViewport">
+                                    <div id="editor">
+                                        <canvas id="gridCanvas" width="900" height="1200"></canvas>
+                                        <div id="guideX" class="guide guide-x" style="display:none; top:50%"></div>
+                                        <div id="guideY" class="guide guide-y" style="display:none; left:50%"></div>
+                                    </div>
+                                </div>
+                            </section>
+                            
+                            <!-- Elementos ocultos para captura -->
+                            <video id="hiddenCameraStream" autoplay muted playsinline class="hidden"></video>
+                            <canvas id="captureCanvas" class="hidden"></canvas>
+                        </div>
+                    `;
+                    
+                    // Aguardar um pouco mais antes de inicializar
+                    setTimeout(() => {
+                        console.log('Verificando elementos antes de inicializar...');
+                        const sidebarContent = document.querySelector('.sidebar-content');
+                        const gridCanvas = sidebarContent.querySelector('#gridCanvas');
+                        const editorViewport = sidebarContent.querySelector('#editorViewport');
+                        console.log('GridCanvas:', gridCanvas);
+                        console.log('EditorViewport:', editorViewport);
+                        
+                        if (gridCanvas && editorViewport && typeof init === 'function') {
+                            console.log('Inicializando editor...');
+                            
+                            // Criar um contexto para o editor funcionar dentro da sidebar
+                            const originalGetElementById = document.getElementById;
+                            document.getElementById = function(id) {
+                                // Primeiro tentar encontrar na sidebar
+                                const sidebarElement = sidebarContent.querySelector(`#${id}`);
+                                if (sidebarElement) {
+                                    console.log(`Elemento ${id} encontrado na sidebar`);
+                                    return sidebarElement;
+                                }
+                                // Se não encontrar na sidebar, usar o método original
+                                return originalGetElementById.call(document, id);
+                            };
+                            
+                            try {
+                                init();
+                                console.log('Editor inicializado com sucesso!');
+                            } catch (error) {
+                                console.error('Erro ao inicializar editor:', error);
+                            } finally {
+                                // Restaurar o método original
+                                setTimeout(() => {
+                                    document.getElementById = originalGetElementById;
+                                }, 100);
+                            }
+                        } else {
+                            console.error('Elementos necessários não encontrados ou função init não disponível');
+                        }
+                    }, 200);
+                }
+            }
+        };
+
+        // Função para abrir o post editor
+        function openPostEditor() {
+            const sidebarWrapper = document.querySelector('#sidebar-wrapper');
+            
+            // Mostrar sidebar
+            sidebarWrapper.classList.remove('w-0');
+            sidebarWrapper.classList.add('w-1/3', 'shadow-2xl');
+            
+            // Criar conteúdo da sidebar
+            sidebarWrapper.innerHTML = '<div class="sidebar-content grid grid-cols-1 gap-6 p-4"></div>';
+            const sidebarContent = document.querySelector('.sidebar-content');
+            
+            // Usar o sistema de navegação do sidebar
+            SidebarNav.setMount(sidebarContent);
+            SidebarNav.push({
+                view: 'post-editor',
+                title: 'Editor de Posts',
+                payload: { data: currentUserData }
+            });
+        }
+
+        // Event listener para o post-editor
+        document.addEventListener('click', (e) => {
+            const postEditor = e.target.closest('#post-editor');
+            if (postEditor) {
+                e.preventDefault();
+                openPostEditor();
+                return;
+            }
+        });
+    </script>
+    
+    <script src="js/editor.js"></script>
+</body>
+</html>

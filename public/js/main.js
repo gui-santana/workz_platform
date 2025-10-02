@@ -29,14 +29,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let workzContent = '';
 
-    const apiClient = new ApiClient();    
+    const apiClient = new ApiClient();
 
     // Variáveis Globais do Usuário
     let currentUserData = null;
     let userPeople = [];
     let userBusinesses = []; //Ids de empresa
     let userTeams = [];
-    
+
     let userBusinessesData = [];// Condições do usuário nas empresas
     let userTeamsData = []; // Condições do usuário nas equipes
 
@@ -53,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Variáveis Globais do Feed       
     const FEED_PAGE_SIZE = 6;
-    let feedOffset = 0;    
+    let feedOffset = 0;
     let feedLoading = false;
     let feedFinished = false;
 
@@ -65,18 +65,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const SidebarNav = {
         stack: [],
         mount: null,
-        setMount(el){ this.mount = el; },
-        current(){ return this.stack[this.stack.length-1]; },
-        prev(){ return this.stack[this.stack.length-2]; },
-        resetRoot(data){ this.stack = [{ view: 'root', title: 'Ajustes', payload: { data }, type: 'root' }]; this.render(); },
-        push(state){ this.stack.push(state); this.render(); },
-        back(){ if (this.stack.length>1){ this.stack.pop(); this.render(); } else { this.resetRoot(currentUserData); } },
-        async render(){
+        setMount(el) { this.mount = el; },
+        current() { return this.stack[this.stack.length - 1]; },
+        prev() { return this.stack[this.stack.length - 2]; },
+        resetRoot(data) { this.stack = [{ view: 'root', title: 'Ajustes', payload: { data }, type: 'root' }]; this.render(); },
+        push(state) { this.stack.push(state); this.render(); },
+        back() { if (this.stack.length > 1) { this.stack.pop(); this.render(); } else { this.resetRoot(currentUserData); } },
+        async render() {
             if (!this.mount) return;
             const st = this.current();
             destroyImageCropper({ keepContext: st?.view === 'image-crop' });
             const isRoot = (st.view === 'root');
-            const payload = { ...(st.payload||{}), view: (isRoot ? null : st.view), origin: 'stack', navTitle: st.title, prevTitle: (this.prev()?.title || 'Ajustes') };
+            const payload = { ...(st.payload || {}), view: (isRoot ? null : st.view), origin: 'stack', navTitle: st.title, prevTitle: (this.prev()?.title || 'Ajustes') };
             this.mount.dataset.navMode = 'stack';
             this.mount.dataset.currentView = st.view || 'root';
             await renderTemplate(this.mount, templates.sidebarPageSettings, payload, () => {
@@ -89,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const id = it.id;
                         if (id === 'desktop') { navigateTo('/'); return; }
                         if (id === 'logout') { handleLogout(); return; }
-                        const titleMap = { people:'Pessoas', businesses:'Negócios', teams:'Equipes', apps:'Aplicativos' };
+                        const titleMap = { people: 'Pessoas', businesses: 'Negócios', teams: 'Equipes', apps: 'Aplicativos' };
                         this.push({ view: id, title: titleMap[id] || 'Ajustes', payload: { data: currentUserData } });
                     };
                     this.mount.addEventListener('click', rootHandler);
@@ -103,7 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const appRow = e.target.closest('[data-app-id]');
                     if (appRow && this.mount.contains(appRow) && this.mount.dataset.currentView === 'apps') {
                         const ap = appRow.dataset.appId;
-                        const res = await apiClient.post('/search', { db:'workz_apps', table:'apps', columns:['*'], conditions:{ id: ap } });
+                        const res = await apiClient.post('/search', { db: 'workz_apps', table: 'apps', columns: ['*'], conditions: { id: ap } });
                         const app = Array.isArray(res?.data) ? res.data[0] : res?.data || null;
                         if (app) this.push({ view: 'app-settings', title: app.tt || 'Aplicativo', payload: { data: app, appId: ap } });
                         return;
@@ -113,17 +113,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     const id = row.dataset.id;
                     if (!id) return;
                     if (this.mount.dataset.currentView === 'businesses') {
-                        const res = await apiClient.post('/search', { db:'workz_companies', table:'companies', columns:['*'], conditions:{ id } });
+                        const res = await apiClient.post('/search', { db: 'workz_companies', table: 'companies', columns: ['*'], conditions: { id } });
                         const data = Array.isArray(res?.data) ? res.data[0] : res?.data || null;
-                        if (data) this.push({ view: ENTITY.BUSINESS, title: data.tt || 'Negócio', payload: { data, type:'business' } });
+                        if (data) this.push({ view: ENTITY.BUSINESS, title: data.tt || 'Negócio', payload: { data, type: 'business' } });
                     } else if (this.mount.dataset.currentView === 'teams') {
-                        const res = await apiClient.post('/search', { db:'workz_companies', table:'teams', columns:['*'], conditions:{ id } });
+                        const res = await apiClient.post('/search', { db: 'workz_companies', table: 'teams', columns: ['*'], conditions: { id } });
                         const data = Array.isArray(res?.data) ? res.data[0] : res?.data || null;
-                        if (data) this.push({ view: ENTITY.TEAM, title: data.tt || 'Equipe', payload: { data, type:'team' } });
+                        if (data) this.push({ view: ENTITY.TEAM, title: data.tt || 'Equipe', payload: { data, type: 'team' } });
                     } else if (this.mount.dataset.currentView === 'people') {
                         // Abrir o perfil do usuário (visualização pública), não ajustes
                         navigateTo(`/profile/${id}`);
-                        try { await toggleSidebar(); } catch(_) {}
+                        try { await toggleSidebar(); } catch (_) { }
                     }
                 };
                 this.mount.addEventListener('click', listHandler);
@@ -309,7 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (trimmed.startsWith('/images/') || trimmed.startsWith('/users/')) {
             return trimmed;
         }
-    
+
         // Otherwise, assume it's raw base64 data.
         return `data:image/png;base64,${trimmed}`;
     }
@@ -366,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-       const IMAGE_UPLOAD_STATE = {
+    const IMAGE_UPLOAD_STATE = {
         input: null,
         context: null,
         cropper: null
@@ -556,7 +556,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-        function initializeImageCropperView(sidebarMount, cropData) {
+    function initializeImageCropperView(sidebarMount, cropData) {
         destroyImageCropper({ keepContext: true });
         if (!sidebarMount || !cropData?.imageDataUrl) return;
 
@@ -737,7 +737,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentState.zoomInput.value = String(currentState.scale);
         };
         loader.src = cropData.imageDataUrl;
-    }    function destroyImageCropper({ keepContext = false } = {}) {
+    } function destroyImageCropper({ keepContext = false } = {}) {
         const state = IMAGE_UPLOAD_STATE.cropper;
         if (!state) {
             if (!keepContext) resetImageUploadState();
@@ -820,13 +820,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!state?.image) {
             throw new Error('Imagem não carregada.');
         }
-    
+
         const { outputWidth = 600, outputHeight = 600 } = state.entityContext || {};
         const canvas = document.createElement('canvas');
         canvas.width = outputWidth;
         canvas.height = outputHeight;
         const ctx = canvas.getContext('2d');
-    
+
         const displayWidth = state.naturalWidth * state.scale;
         const displayHeight = state.naturalHeight * state.scale;
         const scaleX = state.naturalWidth / displayWidth;
@@ -835,14 +835,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const visibleY = (0 - state.offsetY) * scaleY;
         const visibleWidth = state.viewportWidth * scaleX;
         const visibleHeight = state.viewportHeight * scaleY;
-    
+
         const sx = Math.max(0, visibleX);
         const sy = Math.max(0, visibleY);
         const sw = Math.min(state.naturalWidth - sx, visibleWidth);
         const sh = Math.min(state.naturalHeight - sy, visibleHeight);
-    
+
         ctx.drawImage(state.image, sx, sy, sw, sh, 0, 0, outputWidth, outputHeight);
-    
+
         return new Promise((resolve, reject) => {
             canvas.toBlob((blob) => {
                 if (!blob) {
@@ -959,7 +959,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     }
-    
+
     // ===================================================================
     // 🏳️ TEMPLATES - Partes do HTML a ser renderizado
     // ===================================================================
@@ -1002,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <a href="#" id="show-login-link" class="font-bold text-orange-600 hover:underline">Faça o login</a>
             </p>                
         `,
-        
+
         login: `
             <div id="message" class="w-full"></div>
             <form id="login-form">                
@@ -1036,8 +1036,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 autoDismiss = true,
                 dismissAfter = 4000
             } = data;
-            
-            
+
+
             const styles = {
                 success: {
                     bg: 'bg-emerald-100',
@@ -1160,7 +1160,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div id="workz-content" class="max-w-screen-xl mx-auto clearfix grid grid-cols-12 gap-6">                               
             </div>        
         `,
-        
+
         workzContent: `
             <div class="col-span-12 rounded-b-3xl h-48 bg-gray-200 bg-cover bg-center"></div>
             <div class="col-span-12 sm:col-span-8 lg:col-span-9 flex flex-col grid grid-cols-12 gap-x-6 -mt-24 ml-6">
@@ -1211,7 +1211,7 @@ document.addEventListener('DOMContentLoaded', () => {
         editorTrigger: (currentUserData) => `
             <div class="w-full p-3 border-b-2 border-gray-100 flex items-center gap-3">
                 <img class="page-thumb w-11 h-11 rounded-full pointer" src="/images/no-image.jpg" />
-                <div id="pageConfig" class="flex-1 rounded-3xl h-11 pointer text-gray-500 px-4 text-left bg-gray-100 hover:bg-gray-200 flex items-center overflow-hidden whitespace-nowrap truncate">
+                <div id="post-editor" class="flex-1 rounded-3xl h-11 pointer text-gray-500 px-4 text-left bg-gray-100 hover:bg-gray-200 flex items-center overflow-hidden whitespace-nowrap truncate">
                     <a class="block w-full overflow-hidden whitespace-nowrap truncate">O que você está pensando, ${currentUserData.tt.split(' ')[0]}?</a>
                 </div>
             </div>                                                       
@@ -1240,7 +1240,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button class="bg-blue-600 text-white font-semibold py-2 px-5 rounded-md hover:bg-blue-700">Publicar</button>
                 </div>
             </div>
-        `,        
+        `,
 
         sidebarBusinessSettings: (businessData) => `
             <div id="voltar-main-menu" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">                
@@ -1290,7 +1290,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!Array.isArray(listItems) || listItems.length === 0) {
                 return `<div class="col-span-12"><div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Nenhum item encontrado.</div></div>`;
             }
-            let html = '<div class="col-span-12 flex flex-col grid grid-cols-12 gap-6">';        
+            let html = '<div class="col-span-12 flex flex-col grid grid-cols-12 gap-6">';
             listItems.forEach(item => {
                 const name = (item.tt || '');
                 html += `
@@ -1308,10 +1308,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Removido: lógica antiga baseada em sidebarHistory/sidebar-back
-templates.entityContent = async ({ data }) => {
+    templates.entityContent = async ({ data }) => {
         // Fallback for cover image - using a dynamic placeholder
         const coverUrl = data.cover || `https://source.unsplash.com/1600x900/?abstract,${viewType},${data.id}`;
-        
+
         let statsHtml = '';
         if (viewType === 'profile') {
             statsHtml = `
@@ -1475,7 +1475,7 @@ templates.entityContent = async ({ data }) => {
             </div>
         `;
         },
-        sectionCard: (content, { roundedTop=true, roundedBottom=true } = {}) => `
+        sectionCard: (content, { roundedTop = true, roundedBottom = true } = {}) => `
             <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
                 ${content}
             </div>
@@ -1497,10 +1497,10 @@ templates.entityContent = async ({ data }) => {
             </li>
         `,
         // Botão de ação padronizado (para sidebar/actions)
-        actionButton: ({ action, label, color='blue', extra='' }) => `
+        actionButton: ({ action, label, color = 'blue', extra = '' }) => `
             <button data-action="${action}" class="${CLASSNAMES.actionBtn} bg-${color}-400 hover:bg-${color}-600 ${extra}"><span class="truncate">${label}</span></button>
         `,
-        row: (id, label, inputHtml, { top=false, bottom=false } = {}) => `
+        row: (id, label, inputHtml, { top = false, bottom = false } = {}) => `
             <div class="grid grid-cols-4 border-b border-gray-200 ${top ? 'rounded-t-2xl' : ''} ${bottom ? 'rounded-b-2xl' : ''}">
                 <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
                 <div class="col-span-3 p-4">
@@ -1508,13 +1508,13 @@ templates.entityContent = async ({ data }) => {
                 </div>
             </div>
         `,
-        rowTextarea: (id, label, value='') => `
+        rowTextarea: (id, label, value = '') => `
             <div class="grid grid-cols-4">
                 <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
                 <textarea id="${id}" name="${id}" class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px] rounded-r-2xl">${value ?? ''}</textarea>
             </div>
         `,
-        rowSelect: (id, label, optionsHtml, { top=false, bottom=false } = {}) => `
+        rowSelect: (id, label, optionsHtml, { top = false, bottom = false } = {}) => `
             <div class="grid grid-cols-4 border-b border-gray-200 ${top ? 'rounded-t-2xl' : ''} ${bottom ? 'rounded-b-2xl' : ''}">
                 <label for="${id}" class="col-span-1 p-4 truncate text-gray-500">${label}</label>
                 <select id="${id}" name="${id}" class="border-0 focus:outline-none col-span-3 p-4">
@@ -1550,7 +1550,7 @@ templates.entityContent = async ({ data }) => {
                 return `<option value="${value}" class="${placeholderClass}" ${disabledAttr} ${selectedAttr}>${label}</option>`;
             }).join('');
         },
-        contactBlock: (contacts=null) => {
+        contactBlock: (contacts = null) => {
             let parsed = [];
             let fallbackValue = '';
 
@@ -1571,7 +1571,7 @@ templates.entityContent = async ({ data }) => {
             }
 
             if (!Array.isArray(parsed) || parsed.length === 0) {
-                parsed = fallbackValue ? [{ type:'', value:fallbackValue }] : [{ type:'', value:'' }];
+                parsed = fallbackValue ? [{ type: '', value: fallbackValue }] : [{ type: '', value: '' }];
             }
 
             const rows = parsed.map((contact, index) => {
@@ -1600,24 +1600,24 @@ templates.entityContent = async ({ data }) => {
         },
         privacyRowsProfile: ({ page_privacy, feed_privacy }) => {
             const pageOpts = `
-            <option value="" ${page_privacy==null?'selected':''} disabled>Selecione</option>
-            <option value="0" ${page_privacy===0?'selected':''}>Usuários logados</option>
-            <option value="1" ${page_privacy===1?'selected':''}>Toda a internet</option>
+            <option value="" ${page_privacy == null ? 'selected' : ''} disabled>Selecione</option>
+            <option value="0" ${page_privacy === 0 ? 'selected' : ''}>Usuários logados</option>
+            <option value="1" ${page_privacy === 1 ? 'selected' : ''}>Toda a internet</option>
             `;
             const feedOpts = `
-            <option value="" ${feed_privacy==null?'selected':''} disabled>Selecione</option>
-            <option value="0" ${feed_privacy===0?'selected':''}>Moderadores</option>
-            <option value="1" ${feed_privacy===1?'selected':''}>Usuários membros</option>
-            <option value="2" ${feed_privacy===2?'selected':''}>Usuários logados</option>
-            <option value="3" ${feed_privacy===3?'selected':''}>Toda a internet</option>
+            <option value="" ${feed_privacy == null ? 'selected' : ''} disabled>Selecione</option>
+            <option value="0" ${feed_privacy === 0 ? 'selected' : ''}>Moderadores</option>
+            <option value="1" ${feed_privacy === 1 ? 'selected' : ''}>Usuários membros</option>
+            <option value="2" ${feed_privacy === 2 ? 'selected' : ''}>Usuários logados</option>
+            <option value="3" ${feed_privacy === 3 ? 'selected' : ''}>Toda a internet</option>
             `;
             return UI.sectionCard(
-                UI.rowSelect('page_privacy', 'Página', pageOpts, { top:true }) +
-                UI.rowSelect('feed_privacy', 'Conteúdo', feedOpts, { bottom:true })
+                UI.rowSelect('page_privacy', 'Página', pageOpts, { top: true }) +
+                UI.rowSelect('feed_privacy', 'Conteúdo', feedOpts, { bottom: true })
             );
         },
-        shortcutItem: (id, icon, label, color = 'gray', { roundedTop=false, roundedBottom=false } = {}) => `
-        <div id="${id}" title="${label}" class="${roundedTop?'rounded-t-2xl':''} ${roundedBottom?'rounded-b-2xl':'border-b'} bg-${ (color !== 'gray') ? color + '-200' : 'white' } text-${color}-700 p-3 cursor-pointer hover:bg-${ (color !== 'gray') ? color + '-300' : 'white/50' } transition-all duration-300 ease-in-out">
+        shortcutItem: (id, icon, label, color = 'gray', { roundedTop = false, roundedBottom = false } = {}) => `
+        <div id="${id}" title="${label}" class="${roundedTop ? 'rounded-t-2xl' : ''} ${roundedBottom ? 'rounded-b-2xl' : 'border-b'} bg-${(color !== 'gray') ? color + '-200' : 'white'} text-${color}-700 p-3 cursor-pointer hover:bg-${(color !== 'gray') ? color + '-300' : 'white/50'} transition-all duration-300 ease-in-out">
             <span class="fa-stack">
                 <i class="fas fa-circle fa-stack-2x"></i>
                 <i class="fas ${icon} fa-stack-1x fa-inverse"></i>
@@ -1625,12 +1625,12 @@ templates.entityContent = async ({ data }) => {
             ${label}
         </div>
         `,
-        shortcutList: (items=[]) => `
+        shortcutList: (items = []) => `
         <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
             ${items.map((it, i) => UI.shortcutItem(it.id, it.icon, it.label, it.color, {
-                roundedTop: i===0,
-                roundedBottom: i===items.length-1                
-            })).join('')}
+            roundedTop: i === 0,
+            roundedBottom: i === items.length - 1
+        })).join('')}
         </div>
         `,
         signature: () => `
@@ -1642,9 +1642,11 @@ templates.entityContent = async ({ data }) => {
     };
 
     templates.sidebarPageSettings = async ({ view = null, data = null, type = null, origin = null, prevTitle = null, navTitle = null, crop = null }) => {
+        console.log('sidebarPageSettings executado com:', { view, data: !!data, type, origin, prevTitle, navTitle, crop });
+
         const personalizationCard = (d) => {
             const hasBk = d?.bk;
-            const changeLabel = hasBk ? 'Substituir' : 'Adicionar';            
+            const changeLabel = hasBk ? 'Substituir' : 'Adicionar';
             let removeButton = '';
             if (hasBk) {
                 removeButton = `<button data-action="remove-background" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fas fa-trash-alt"></i> Remover</button>`;
@@ -1690,9 +1692,9 @@ templates.entityContent = async ({ data }) => {
         const headerBackLabel = (view !== null) ? (([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(view)) ? 'Ajustes' : (view.startsWith('user-') ? (currentUserData?.tt ?? '') : (data?.tt ?? ''))) : 'Fechar';
 
         const financeShortcuts = UI.shortcutList([
-            { id: 'billing',      icon: 'fa-money-bill',     label: 'Cobrança e Recebimento' },
-            { id: 'transactions', icon: 'fa-receipt',        label: 'Transações' },
-            { id: 'subscriptions',icon: 'fa-satellite-dish', label: 'Assinaturas' }
+            { id: 'billing', icon: 'fa-money-bill', label: 'Cobrança e Recebimento' },
+            { id: 'transactions', icon: 'fa-receipt', label: 'Transações' },
+            { id: 'subscriptions', icon: 'fa-satellite-dish', label: 'Assinaturas' }
         ]);
 
         // Cabeçalho e navegação com suporte a stack
@@ -1732,9 +1734,9 @@ templates.entityContent = async ({ data }) => {
             return html;
         }
 
-        if (view === null) {            
+        if (view === null) {
             html += UI.renderCloseHeader();
-            
+
             const appearance = UI.shortcutList([
                 { id: 'desktop', icon: 'fa-th', label: 'Área de Trabalho' }
             ]);
@@ -1779,44 +1781,44 @@ templates.entityContent = async ({ data }) => {
             html += UI.renderHero({ tt: data.tt, im: data.im });
 
             const card1 = UI.sectionCard(
-                UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
-                UI.row('email','E-mail*', `<input class="w-full border-0 focus:outline-none" type="email" id="email" name="ml" value="${data.ml}" ${(data.provider ? '' : 'disabled')} required>`, {bottom:true})
+                UI.row('name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, { top: true }) +
+                UI.row('email', 'E-mail*', `<input class="w-full border-0 focus:outline-none" type="email" id="email" name="ml" value="${data.ml}" ${(data.provider ? '' : 'disabled')} required>`, { bottom: true })
             );
 
             const cardAbout = UI.sectionCard(UI.rowTextarea('cf', 'Sobre', data.cf));
 
             const cardUserMeta = UI.sectionCard(
-                UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}) +
+                UI.row('username', 'Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, { top: true }) +
                 UI.rowSelect('page_privacy', 'Página', `
-                <option value="" ${currentUserData.page_privacy==null?'selected':''} disabled>Selecione</option>
-                <option value="0" ${currentUserData.page_privacy===0?'selected':''}>Usuários logados</option>
-                <option value="1" ${currentUserData.page_privacy===1?'selected':''}>Toda a internet</option>
+                <option value="" ${currentUserData.page_privacy == null ? 'selected' : ''} disabled>Selecione</option>
+                <option value="0" ${currentUserData.page_privacy === 0 ? 'selected' : ''}>Usuários logados</option>
+                <option value="1" ${currentUserData.page_privacy === 1 ? 'selected' : ''}>Toda a internet</option>
                 `) +
                 UI.rowSelect('feed_privacy', 'Conteúdo', `
-                <option value="" ${currentUserData.feed_privacy==null?'selected':''} disabled>Selecione</option>
-                <option value="0" ${currentUserData.feed_privacy===0?'selected':''}>Moderadores</option>
-                <option value="1" ${currentUserData.feed_privacy===1?'selected':''}>Usuários membros</option>
-                <option value="2" ${currentUserData.feed_privacy===2?'selected':''}>Usuários logados</option>
-                <option value="3" ${currentUserData.feed_privacy===3 && currentUserData.page_privacy>0?'selected':''} ${currentUserData.page_privacy<1?'disabled':''}>Toda a internet</option>
-                `, {bottom:true})
+                <option value="" ${currentUserData.feed_privacy == null ? 'selected' : ''} disabled>Selecione</option>
+                <option value="0" ${currentUserData.feed_privacy === 0 ? 'selected' : ''}>Moderadores</option>
+                <option value="1" ${currentUserData.feed_privacy === 1 ? 'selected' : ''}>Usuários membros</option>
+                <option value="2" ${currentUserData.feed_privacy === 2 ? 'selected' : ''}>Usuários logados</option>
+                <option value="3" ${currentUserData.feed_privacy === 3 && currentUserData.page_privacy > 0 ? 'selected' : ''} ${currentUserData.page_privacy < 1 ? 'disabled' : ''}>Toda a internet</option>
+                `, { bottom: true })
             );
 
             const cardPersonal = UI.sectionCard(
-                UI.rowSelect('gender','Gênero', `
-                <option value="" ${(!['male','female'].includes(currentUserData.gender))?'selected':''} disabled>Selecione</option>
-                <option value="male" ${currentUserData.gender==='male'?'selected':''}>Masculino</option>
-                <option value="female" ${currentUserData.gender==='female'?'selected':''}>Feminino</option>
-                `, {top:true}) +
-                UI.row('birth','Nascimento', `<input class="w-full border-0 focus:outline-none" type="date" id="birth" name="birth" value="${(currentUserData.birth)? new Date(currentUserData.birth).toISOString().split('T')[0] : ''}">`) +
-                UI.row('cpf','CPF', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="999.999.999-99" id="cpf" name="national_id" value="${currentUserData.national_id ?? ''}">`, {bottom:true})
+                UI.rowSelect('gender', 'Gênero', `
+                <option value="" ${(!['male', 'female'].includes(currentUserData.gender)) ? 'selected' : ''} disabled>Selecione</option>
+                <option value="male" ${currentUserData.gender === 'male' ? 'selected' : ''}>Masculino</option>
+                <option value="female" ${currentUserData.gender === 'female' ? 'selected' : ''}>Feminino</option>
+                `, { top: true }) +
+                UI.row('birth', 'Nascimento', `<input class="w-full border-0 focus:outline-none" type="date" id="birth" name="birth" value="${(currentUserData.birth) ? new Date(currentUserData.birth).toISOString().split('T')[0] : ''}">`) +
+                UI.row('cpf', 'CPF', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="999.999.999-99" id="cpf" name="national_id" value="${currentUserData.national_id ?? ''}">`, { bottom: true })
             );
 
             const contacts = UI.contactBlock(data?.contacts ?? currentUserData?.contacts ?? '');
 
             const shortcuts = UI.shortcutList([
-                { id:'user-education', icon:'fa-graduation-cap', label:'Formação Acadêmica' },
-                { id:'user-jobs', icon:'fa-user-tie', label:'Experiência Profissional' },
-                { id:'testimonials', icon:'fa-scroll', label:'Depoimentos' },
+                { id: 'user-education', icon: 'fa-graduation-cap', label: 'Formação Acadêmica' },
+                { id: 'user-jobs', icon: 'fa-user-tie', label: 'Experiência Profissional' },
+                { id: 'testimonials', icon: 'fa-scroll', label: 'Depoimentos' },
             ]);
 
             const userChoices = UI.shortcutList([
@@ -1844,9 +1846,9 @@ templates.entityContent = async ({ data }) => {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const userId = data?.id ?? currentUserData?.id ?? '';
             const passwordCard = UI.sectionCard(
-                UI.row('current_password','Senha Atual', `<input class="w-full border-0 focus:outline-none" type="password" id="current_password" name="current_password" placeholder="********" required>`, {top:true}) +
-                UI.row('new_password','Nova Senha', `<input class="w-full border-0 focus:outline-none" type="password" id="new_password" name="new_password" placeholder="********" required>`) +
-                UI.row('new_password_repeat','Confirmar Nova Senha', `<input class="w-full border-0 focus:outline-none" type="password" id="new_password_repeat" name="new_password_repeat" placeholder="********" required>`, {bottom:true})
+                UI.row('current_password', 'Senha Atual', `<input class="w-full border-0 focus:outline-none" type="password" id="current_password" name="current_password" placeholder="********" required>`, { top: true }) +
+                UI.row('new_password', 'Nova Senha', `<input class="w-full border-0 focus:outline-none" type="password" id="new_password" name="new_password" placeholder="********" required>`) +
+                UI.row('new_password_repeat', 'Confirmar Nova Senha', `<input class="w-full border-0 focus:outline-none" type="password" id="new_password_repeat" name="new_password_repeat" placeholder="********" required>`, { bottom: true })
             );
 
             html += `
@@ -1864,47 +1866,47 @@ templates.entityContent = async ({ data }) => {
             html += UI.renderHero({ tt: data.tt, im: data.im });
 
             const basics = UI.sectionCard(
-                UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
-                UI.row('cnpj','CNPJ', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99.999.999/9999-99" id="cnpj" name="cnpj" value="${data.national_id ?? ''}">`, {bottom:true})
+                UI.row('name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, { top: true }) +
+                UI.row('cnpj', 'CNPJ', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99.999.999/9999-99" id="cnpj" name="cnpj" value="${data.national_id ?? ''}">`, { bottom: true })
             );
 
-            const about = UI.sectionCard(UI.rowTextarea('cf','Sobre', data.cf));
+            const about = UI.sectionCard(UI.rowTextarea('cf', 'Sobre', data.cf));
 
             const privacy = UI.sectionCard(
-                UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}) +
-                UI.rowSelect('page_privacy','Página', `
-                <option value="" ${data.page_privacy==null?'selected':''} disabled>Selecione</option>
-                <option value="0" ${data.page_privacy===0?'selected':''}>Usuários logados</option>
-                <option value="1" ${data.page_privacy===1?'selected':''}>Toda a internet</option>
+                UI.row('username', 'Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, { top: true }) +
+                UI.rowSelect('page_privacy', 'Página', `
+                <option value="" ${data.page_privacy == null ? 'selected' : ''} disabled>Selecione</option>
+                <option value="0" ${data.page_privacy === 0 ? 'selected' : ''}>Usuários logados</option>
+                <option value="1" ${data.page_privacy === 1 ? 'selected' : ''}>Toda a internet</option>
                 `) +
-                UI.rowSelect('feed_privacy','Conteúdo', `
-                <option value="" ${data.feed_privacy==null?'selected':''} disabled>Selecione</option>
-                <option value="0" ${data.feed_privacy===0?'selected':''}>Moderadores</option>
-                <option value="1" ${data.feed_privacy===1?'selected':''}>Usuários membros</option>
-                <option value="2" ${data.feed_privacy===2?'selected':''}>Usuários logados</option>
-                <option value="3" ${data.feed_privacy===3 && (data.page_privacy>0)?'selected':''} ${data.page_privacy<1?'disabled':''}>Toda a internet</option>
-                `, {bottom:true})
+                UI.rowSelect('feed_privacy', 'Conteúdo', `
+                <option value="" ${data.feed_privacy == null ? 'selected' : ''} disabled>Selecione</option>
+                <option value="0" ${data.feed_privacy === 0 ? 'selected' : ''}>Moderadores</option>
+                <option value="1" ${data.feed_privacy === 1 ? 'selected' : ''}>Usuários membros</option>
+                <option value="2" ${data.feed_privacy === 2 ? 'selected' : ''}>Usuários logados</option>
+                <option value="3" ${data.feed_privacy === 3 && (data.page_privacy > 0) ? 'selected' : ''} ${data.page_privacy < 1 ? 'disabled' : ''}>Toda a internet</option>
+                `, { bottom: true })
             );
 
             const address = UI.sectionCard(
-                UI.row('zip_code','CEP', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99999-999" id="zip_code" name="zip_code" value="${data?.zip_code ?? ''}">`, {top:true}) +
-                UI.rowSelect('country','País', UI.countryOptions(data?.country ?? '')) +
-                UI.row('state','Estado', `<input class="w-full border-0 focus:outline-none" type="text" id="state" name="state" value="${data?.state ?? ''}">`) +
-                UI.row('city','Cidade', `<input class="w-full border-0 focus:outline-none" type="text" id="city" name="city" value="${data?.city ?? ''}">`) +
-                UI.row('district','Bairro', `<input class="w-full border-0 focus:outline-none" type="text" id="district" name="district" value="${data?.district ?? ''}">`) +
-                UI.row('address','Endereço', `<input class="w-full border-0 focus:outline-none" type="text" id="address" name="address" value="${data?.address ?? ''}">`) +
-                UI.row('complement','Complemento', `<input class="w-full border-0 focus:outline-none" type="text" id="complement" name="complement" value="${data?.complement ?? ''}">`, {bottom:true})
+                UI.row('zip_code', 'CEP', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99999-999" id="zip_code" name="zip_code" value="${data?.zip_code ?? ''}">`, { top: true }) +
+                UI.rowSelect('country', 'País', UI.countryOptions(data?.country ?? '')) +
+                UI.row('state', 'Estado', `<input class="w-full border-0 focus:outline-none" type="text" id="state" name="state" value="${data?.state ?? ''}">`) +
+                UI.row('city', 'Cidade', `<input class="w-full border-0 focus:outline-none" type="text" id="city" name="city" value="${data?.city ?? ''}">`) +
+                UI.row('district', 'Bairro', `<input class="w-full border-0 focus:outline-none" type="text" id="district" name="district" value="${data?.district ?? ''}">`) +
+                UI.row('address', 'Endereço', `<input class="w-full border-0 focus:outline-none" type="text" id="address" name="address" value="${data?.address ?? ''}">`) +
+                UI.row('complement', 'Complemento', `<input class="w-full border-0 focus:outline-none" type="text" id="complement" name="complement" value="${data?.complement ?? ''}">`, { bottom: true })
             );
 
             const contacts = UI.contactBlock(data?.contacts ?? data?.url ?? '');
 
             const shortcuts = UI.shortcutList([
                 // { id:'business-shareholding', icon:'fa-sitemap', label:'Estrutura Societária' },
-                { id:'employees', icon:'fa-id-badge', label:'Colaboradores' },
-                { id:'testimonials', icon:'fa-scroll', label:'Depoimentos' },
+                { id: 'employees', icon: 'fa-id-badge', label: 'Colaboradores' },
+                { id: 'testimonials', icon: 'fa-scroll', label: 'Depoimentos' },
             ]);
 
-            
+
             html += `
                 ${personalizationCard(data)}
                 <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
@@ -1930,32 +1932,32 @@ templates.entityContent = async ({ data }) => {
             // (mantém tua lógica de buscar businesses; só exibindo com os helpers)
             let mappedBusinesses = await Promise.all(userBusinesses.map(async (business) => {
                 const b = await fetchByIds(business, 'businesses');
-                return `<option value="${business}" ${(data.em===business)?'selected':''}>${b.tt}</option>`;
+                return `<option value="${business}" ${(data.em === business) ? 'selected' : ''}>${b.tt}</option>`;
             }));
 
             const basics = UI.sectionCard(
-                UI.row('name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, {top:true}) +
-                UI.rowSelect('business','Negócio', `
-                <option value="" ${data.em==null?'selected':''} disabled>Selecione</option>
+                UI.row('name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, { top: true }) +
+                UI.rowSelect('business', 'Negócio', `
+                <option value="" ${data.em == null ? 'selected' : ''} disabled>Selecione</option>
                 ${mappedBusinesses.join('')}
-                `, {bottom:true})
+                `, { bottom: true })
             );
 
-            const about = UI.sectionCard(UI.rowTextarea('cf','Sobre', data.cf));
+            const about = UI.sectionCard(UI.rowTextarea('cf', 'Sobre', data.cf));
 
             const feedPrivacy = UI.sectionCard(
-                UI.rowSelect('feed_privacy','Conteúdo', `
-                <option value="" ${data.feed_privacy==null?'selected':''} disabled>Selecione</option>
-                <option value="0" ${data.feed_privacy===0?'selected':''}>Moderadores</option>
-                <option value="1" ${data.feed_privacy===1?'selected':''}>Membros da equipe</option>
-                <option value="2" ${data.feed_privacy===2?'selected':''}>Todos do negócio</option>
-                `, {bottom:true})
+                UI.rowSelect('feed_privacy', 'Conteúdo', `
+                <option value="" ${data.feed_privacy == null ? 'selected' : ''} disabled>Selecione</option>
+                <option value="0" ${data.feed_privacy === 0 ? 'selected' : ''}>Moderadores</option>
+                <option value="1" ${data.feed_privacy === 1 ? 'selected' : ''}>Membros da equipe</option>
+                <option value="2" ${data.feed_privacy === 2 ? 'selected' : ''}>Todos do negócio</option>
+                `, { bottom: true })
             );
 
             const contacts = UI.contactBlock(data?.contacts ?? data?.url ?? '');
 
             const shortcuts = UI.shortcutList([
-                { id:'employees', icon:'fa-id-badge', label:'Colaboradores' },
+                { id: 'employees', icon: 'fa-id-badge', label: 'Colaboradores' },
             ]);
 
             // Apenas dono ou moderadores da equipe podem excluir a equipe
@@ -1973,7 +1975,7 @@ templates.entityContent = async ({ data }) => {
                 <input type="hidden" name="id" value="${data.id}">
                 ${basics}
                 ${about}
-                ${UI.sectionCard(UI.row('username','Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, {top:true}))}
+                ${UI.sectionCard(UI.row('username', 'Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, { top: true }))}
                 ${feedPrivacy}
                 ${contacts}
                 <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
@@ -1986,7 +1988,7 @@ templates.entityContent = async ({ data }) => {
             const table = (type === 'business') ? 'employees' : 'teams_users';
             const idKey = (type === 'business') ? 'em' : 'cm';
             const conditions = { [idKey]: data.id };
-            const employees = await apiClient.post('/search', { db: 'workz_companies', table, columns: ['us', 'nv', 'st'], conditions, exists: [{ db: 'workz_data', table: 'hus', local: 'us', remote: 'id', conditions: { st: 1 }}], fetchAll: true});
+            const employees = await apiClient.post('/search', { db: 'workz_companies', table, columns: ['us', 'nv', 'st'], conditions, exists: [{ db: 'workz_data', table: 'hus', local: 'us', remote: 'id', conditions: { st: 1 } }], fetchAll: true });
             const entries = Array.isArray(employees?.data) ? employees.data : [];
             const allUserIds = entries.map(o => o.us);
             let people = await fetchByIds(allUserIds, 'people');
@@ -2006,7 +2008,7 @@ templates.entityContent = async ({ data }) => {
                     { v: 3, t: 'Moderador' },
                     { v: 4, t: 'Gestor' }
                 ];
-                return `<select name="nv" class="border-0 focus:outline-none">${options.map(o => `<option value="${o.v}" ${Number(current)===o.v?'selected':''}>${o.t}</option>`).join('')}</select>`;
+                return `<select name="nv" class="border-0 focus:outline-none">${options.map(o => `<option value="${o.v}" ${Number(current) === o.v ? 'selected' : ''}>${o.t}</option>`).join('')}</select>`;
             };
 
             const activeRows = active.length
@@ -2051,7 +2053,7 @@ templates.entityContent = async ({ data }) => {
                 list = Array.isArray(list) ? list : (list ? [list] : []);
                 // Campo de busca
                 const searchCard = UI.sectionCard(
-                    UI.row('people-search','Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="people-search" placeholder="Digite para filtrar">`, { top:true, bottom:true })
+                    UI.row('people-search', 'Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="people-search" placeholder="Digite para filtrar">`, { top: true, bottom: true })
                 );
 
                 const rows = list.map(u => {
@@ -2076,7 +2078,7 @@ templates.entityContent = async ({ data }) => {
             const ids = managed;
             if (!ids.length) {
                 const createBusinessCard = UI.sectionCard(
-                    UI.row('new-business-name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-business-name" placeholder="Digite o nome do negócio" required>`, { top:true }) +
+                    UI.row('new-business-name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-business-name" placeholder="Digite o nome do negócio" required>`, { top: true }) +
                     `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
                         <button data-action="create-business" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
                     </div>`
@@ -2087,14 +2089,14 @@ templates.entityContent = async ({ data }) => {
                 let list = await fetchByIds(ids, 'businesses');
                 list = Array.isArray(list) ? list : (list ? [list] : []);
                 const createBusinessCard = UI.sectionCard(
-                    UI.row('new-business-name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-business-name" placeholder="Digite o nome do negócio" required>`, { top:true }) +
+                    UI.row('new-business-name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-business-name" placeholder="Digite o nome do negócio" required>`, { top: true }) +
                     `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
                         <button data-action="create-business" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
                     </div>`
                 );
                 html += createBusinessCard;
                 const searchCardBiz = UI.sectionCard(
-                    UI.row('businesses-search','Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="businesses-search" placeholder="Digite para filtrar">`, { top:true, bottom:true })
+                    UI.row('businesses-search', 'Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="businesses-search" placeholder="Digite para filtrar">`, { top: true, bottom: true })
                 );
                 html += searchCardBiz;
                 const rows = list.map(b => {
@@ -2117,7 +2119,7 @@ templates.entityContent = async ({ data }) => {
             const res = await apiClient.post('/search', {
                 db: 'workz_companies',
                 table: 'teams',
-                columns: ['id','tt','im','us','usmn','st','em'],
+                columns: ['id', 'tt', 'im', 'us', 'usmn', 'st', 'em'],
                 conditions: { st: 1 },
                 exists: [{ table: 'companies', local: 'em', remote: 'id', conditions: { st: 1 } }],
                 fetchAll: true
@@ -2147,8 +2149,8 @@ templates.entityContent = async ({ data }) => {
                 const options = [`<option value="">Selecione um negócio</option>`]
                     .concat(bizList.map(b => `<option value="${b.id}">${b.tt}</option>`)).join('');
                 const createTeamCard = UI.sectionCard(
-                    UI.row('new-team-name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-team-name" placeholder="Digite o nome da equipe" required>`, { top:true }) +
-                    UI.rowSelect('new-team-business','Negócio', options) +
+                    UI.row('new-team-name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-team-name" placeholder="Digite o nome da equipe" required>`, { top: true }) +
+                    UI.rowSelect('new-team-business', 'Negócio', options) +
                     `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
                         <button data-action="create-team" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
                     </div>`
@@ -2165,15 +2167,15 @@ templates.entityContent = async ({ data }) => {
                 const options = [`<option value="">Selecione um negócio</option>`]
                     .concat(bizList.map(b => `<option value="${b.id}">${b.tt}</option>`)).join('');
                 const createTeamCard = UI.sectionCard(
-                    UI.row('new-team-name','Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-team-name" placeholder="Digite o nome da equipe" required>`, { top:true }) +
-                    UI.rowSelect('new-team-business','Negócio', options) +
+                    UI.row('new-team-name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-team-name" placeholder="Digite o nome da equipe" required>`, { top: true }) +
+                    UI.rowSelect('new-team-business', 'Negócio', options) +
                     `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
                         <button data-action="create-team" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
                     </div>`
                 );
                 html += createTeamCard;
                 const searchCardTeams = UI.sectionCard(
-                    UI.row('teams-search','Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="teams-search" placeholder="Digite para filtrar">`, { top:true, bottom:true })
+                    UI.row('teams-search', 'Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="teams-search" placeholder="Digite para filtrar">`, { top: true, bottom: true })
                 );
                 html += searchCardTeams;
                 const rows = visible.map(t => {
@@ -2206,7 +2208,7 @@ templates.entityContent = async ({ data }) => {
                 html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Nenhum aplicativo instalado.</div>`;
             } else {
                 const searchCardApps = UI.sectionCard(
-                    UI.row('apps-search','Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="apps-search" placeholder="Digite para filtrar">`, { top:true, bottom:true })
+                    UI.row('apps-search', 'Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="apps-search" placeholder="Digite para filtrar">`, { top: true, bottom: true })
                 );
                 const rows = list.map(app => {
                     const img = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 120 });
@@ -2245,9 +2247,9 @@ templates.entityContent = async ({ data }) => {
                 </div>
             </div>`;
             html += header + actions;
-        } else if (view === 'testimonials') {            
+        } else if (view === 'testimonials') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
-            const res = await apiClient.post('/search', { db:'workz_data', table:'testimonials', columns:['*'], conditions: { recipient: data.id, recipient_type: type }, fetchAll:true });
+            const res = await apiClient.post('/search', { db: 'workz_data', table: 'testimonials', columns: ['*'], conditions: { recipient: data.id, recipient_type: type }, fetchAll: true });
             const list = Array.isArray(res?.data) ? res.data : [];
             if (!list.length) {
                 html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Não há depoimentos.</div>`;
@@ -2255,7 +2257,7 @@ templates.entityContent = async ({ data }) => {
                 const cards = await Promise.all(list.map(async t => {
                     const author = await fetchByIds(t.author, 'people');
                     const avatar = resolveImageSrc(author?.im, author?.tt, { size: 100 });
-                    const primaryBtn = (t.status===0)
+                    const primaryBtn = (t.status === 0)
                         ? `<button title="Aceitar" data-action="accept-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-bl-2xl"><i class="fas fa-check"></i></button>`
                         : `<button title="Reverter" data-action="revert-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-bl-2xl"><i class="fas fa-undo"></i></button>`;
                     const rejectBtn = `<button title="Rejeitar" data-action="reject-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-br-2xl"><i class="fas fa-ban"></i></button>`;
@@ -2278,7 +2280,7 @@ templates.entityContent = async ({ data }) => {
             }
         } else if (view === 'billing') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
-            console.log(data, view, type);            
+            console.log(data, view, type);
             html += `<div class="bg-white rounded-2xl shadow-md p-4">Cobrança e Recebimento</div>`;
         } else if (view === 'transactions') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
@@ -2287,20 +2289,20 @@ templates.entityContent = async ({ data }) => {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const conditions = (type === 'business') ? { em: data.id, subscription: 1 } : { us: data.id, subscription: 1 };
 
-            const exists = [{ table: 'apps', local: 'ap', remote: 'id'}];
-            const res = await apiClient.post('/search', { db:'workz_apps', table:'gapp', columns:['*'], conditions: conditions, exists: exists, fetchAll:true });                        
+            const exists = [{ table: 'apps', local: 'ap', remote: 'id' }];
+            const res = await apiClient.post('/search', { db: 'workz_apps', table: 'gapp', columns: ['*'], conditions: conditions, exists: exists, fetchAll: true });
             const list = Array.isArray(res?.data) ? res.data : [];
 
             if (!list.length) {
                 html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Não há assinaturas.</div>`;
             } else {
-                const cards = await Promise.all(list.map(async t => {                    
+                const cards = await Promise.all(list.map(async t => {
                     const app = await fetchByIds(t.ap, 'apps');
                     const avatar = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 90 });
                     const actionBtn = (t.end_date === null)
                         ? `<button title="Cancelar" data-action="reject-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-b-2xl"><i class="fas fa-ban"></i> Cancelar Assinatura</button>`
                         : `<button title="Renovar" data-action="revert-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-b-2xl"><i class="fas fa-undo"></i> Renovar Assinatura</button>`
-                    ;
+                        ;
                     console.log(app);
                     return `
                         <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
@@ -2309,7 +2311,7 @@ templates.entityContent = async ({ data }) => {
                                 <a class="font-semibold">${app?.tt}</a>
                             </div>
                             <div class="grid grid-cols-1 border-t p-4">                                
-                                ${ (app?.vl > 0) ? app?.vl : 'Gratuito' }
+                                ${(app?.vl > 0) ? app?.vl : 'Gratuito'}
                             </div>
                             <div class="grid grid-cols-1 border-t">
                                 ${actionBtn}
@@ -2349,6 +2351,185 @@ templates.entityContent = async ({ data }) => {
             }));
             html += cards.join('');
             html += `<button id="add-job-btn" class="w-full py-2 px-4 bg-green-500 text-white font-semibold rounded-3xl hover:bg-green-700 transition-colors mt-4">Adicionar Experiência Profissional</button>`;
+        } else if (view === 'post-editor') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle || 'Voltar', title: navTitle || 'Editor de Posts' });
+            html += `
+                <div id="appShell">
+    <header class="flex flex-col gap-2 text-center md:text-left">
+      <h1 class="text-2xl font-bold text-slate-800">Mini PowerPoint/Canva 3x4 - Pro</h1>
+      <p class="text-sm text-slate-500">Monte artes e cards verticais em qualquer tela.</p>
+    </header>
+  
+    <section class="editor-card flex flex-col gap-5">
+      <!-- Toolbar superior minimalista -->
+      <div class="top-toolbar">
+        <label for="bgUpload" class="tool-icon" title="Plano de fundo">
+          <i class="fas fa-image"></i>
+          <input type="file" id="bgUpload" accept="image/*,video/*">
+        </label>
+        <button type="button" id="btnAddText" class="tool-icon" title="Adicionar texto">
+          <i class="fas fa-font"></i>
+        </button>
+        <button type="button" id="btnAddImg" class="tool-icon" title="Adicionar imagem">
+          <i class="fas fa-image"></i>
+        </button>
+        <button type="button" id="btnAddElement" class="tool-icon" title="Adicionar elemento">
+          <i class="fas fa-plus"></i>
+        </button>
+        <button type="button" id="btnCameraMode" class="tool-icon hidden" title="Usar câmera (requer permissão)">
+          <i class="fas fa-camera"></i>
+        </button>
+        <div class="toolbar-divider"></div>
+
+        <button type="button" id="btnSaveJSON" class="tool-icon" title="Salvar layout">
+          <i class="fas fa-save"></i>
+        </button>
+        <label class="tool-icon" for="loadJSON" title="Carregar layout">
+          <i class="fas fa-folder-open"></i>
+          <input type="file" id="loadJSON" accept="application/json" class="sr-only">
+        </label>
+      </div>
+  
+      <!-- Editor viewport com botão de captura sobreposto -->
+      <div id="editorViewport">
+        <div id="editor">
+          <canvas id="gridCanvas" width="900" height="1200"></canvas>
+          <div id="guideX" class="guide guide-x" style="display:none; top:50%"></div>
+          <div id="guideY" class="guide guide-y" style="display:none; left:50%"></div>
+        </div>
+        
+        <!-- Botão de captura estilo Instagram Stories -->
+        <div class="capture-overlay">
+          <button type="button" id="captureButton" class="capture-button" title="Toque para foto, segure para vídeo">
+            <div class="capture-inner">
+              <i class="fa-solid fa-camera capture-icon"></i>
+            </div>
+            <div class="capture-hint">
+              <i class="fa-solid fa-hand-pointer"></i>
+            </div>
+          </button>
+        </div>
+      </div>
+  
+      <div class="flex flex-wrap gap-3 items-center text-xs text-slate-500 justify-between">
+        <span id="captureHint">Dica: <strong>Toque</strong> para foto, <strong>segure</strong> para vídeo</span>
+        <span>Proporção fixa 3:4 • 900 × 1200 px</span>
+      </div>
+    </section>
+  
+    <section id="itemBar" class="editor-card control-panel" style="display:none">
+      <div class="flex items-center gap-2">
+        <span class="text-sm text-slate-600">Selecionado</span>
+        <select id="zIndex" class="border border-slate-200 rounded-lg px-2 py-1 text-sm">
+          <option value="front">Trazer p/ frente</option>
+          <option value="back">Enviar p/ trás</option>
+        </select>
+      </div>
+  
+      <div id="textControls" class="hidden flex-wrap items-center gap-2">
+        <label class="flex items-center gap-2 text-sm text-slate-600">
+          Fonte
+          <input id="fontSize" type="range" min="12" max="96" value="28" class="accent-slate-500" title="Tamanho da fonte">
+        </label>
+        <input id="fontColor" type="color" value="#111827" class="h-9 w-9 rounded-full border border-slate-200" title="Cor do texto">
+        <select id="fontWeight" class="border border-slate-200 rounded-lg px-2 py-1 text-sm" title="Peso">
+          <option value="400">Regular</option>
+          <option value="600" selected>Semibold</option>
+          <option value="700">Bold</option>
+        </select>
+        <div class="flex items-center gap-2">
+          <button type="button" id="alignLeft" class="toolbar-btn toolbar-btn--ghost" title="Alinhar à esquerda">
+            <i class="fa-solid fa-align-left"></i><span class="sr-only">Alinhar à esquerda</span>
+          </button>
+          <button type="button" id="alignCenter" class="toolbar-btn toolbar-btn--ghost" title="Centralizar texto">
+            <i class="fa-solid fa-align-center"></i><span class="sr-only">Centralizar</span>
+          </button>
+          <button type="button" id="alignRight" class="toolbar-btn toolbar-btn--ghost" title="Alinhar à direita">
+            <i class="fa-solid fa-align-right"></i><span class="sr-only">Alinhar à direita</span>
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="flex items-center gap-2 text-sm text-slate-600">
+            Fundo
+            <input id="bgTextColor" type="color" value="#ffffff" class="h-9 w-9 rounded-full border border-slate-200" title="Cor de fundo do texto">
+          </label>
+          <label class="flex items-center gap-1 text-sm text-slate-600">
+            <input id="bgNone" type="checkbox" class="rounded border-slate-300">
+            Sem fundo
+          </label>
+        </div>
+        <button type="button" id="btnEditText" class="toolbar-btn toolbar-btn--ghost" aria-pressed="false" title="Editar texto selecionado">
+          <i class="fa-solid fa-edit"></i>
+          <span id="btnEditTextLabel">Editar</span>
+        </button>
+      </div>
+  
+      <div id="animControls" class="hidden flex-wrap items-center gap-2">
+        <label class="flex items-center gap-2 text-sm text-slate-600">
+          Animação
+          <select id="animType" class="border border-slate-200 rounded-lg px-2 py-1 text-sm">
+            <option value="none">none</option>
+            <option value="fade-in">fade-in</option>
+            <option value="slide-left">slide-in left</option>
+            <option value="slide-right">slide-in right</option>
+            <option value="slide-top">slide-in top</option>
+            <option value="slide-bottom">slide-in bottom</option>
+          </select>
+        </label>
+        <label class="flex items-center gap-2 text-sm text-slate-600">
+          Delay (s)
+          <input id="animDelay" type="number" step="0.1" min="0" value="0" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
+        </label>
+        <label class="flex items-center gap-2 text-sm text-slate-600">
+          Duração (s)
+          <input id="animDur" type="number" step="0.1" min="0.1" value="0.8" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
+        </label>
+      </div>
+  
+      <div class="ml-auto">
+        <button type="button" id="btnDelete" class="toolbar-btn toolbar-btn--danger" title="Excluir item selecionado">
+          <i class="fa-solid fa-trash"></i><span>Excluir</span>
+        </button>
+      </div>
+    </section>
+  
+    <!-- Botão Enviar destacado -->
+    <section class="editor-card">
+      <div class="flex flex-col items-center gap-4">
+        <button type="button" id="btnEnviar" class="enviar-button" title="Enviar conteúdo">
+          <div class="enviar-inner">
+            <i class="fas fa-paper-plane enviar-icon"></i>
+            <span class="enviar-text">Enviar</span>
+          </div>
+        </button>
+        
+        <!-- Configurações de exportação (ocultas por padrão) -->
+        <div id="exportSettings" class="export-settings hidden">
+          <div class="flex flex-wrap gap-3 items-center justify-center text-sm">
+            <label class="flex items-center gap-2 text-slate-600">
+              Duração (s)
+              <input id="vidDur" type="number" min="1" step="0.5" value="6" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
+            </label>
+            <label class="flex items-center gap-2 text-slate-600">
+              FPS
+              <input id="vidFPS" type="number" min="10" max="60" step="1" value="30" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
+            </label>
+          </div>
+          <div id="videoExportInfo" class="text-xs text-slate-500 text-center mt-2 hidden">
+            <i class="fa-solid fa-info-circle"></i> 
+            <span id="videoExportInfoText"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+  
+    <canvas id="outCanvas" width="900" height="1200" class="hidden"></canvas>
+    
+    <!-- Elementos ocultos para captura -->
+    <video id="hiddenCameraStream" autoplay muted playsinline class="hidden"></video>
+    <canvas id="captureCanvas" class="hidden"></canvas>
+  </div>
+            `;
         }
         html += UI.signature();
         return html;
@@ -2357,20 +2538,20 @@ templates.entityContent = async ({ data }) => {
 
 
     async function appendWidget(type = 'people', gridList, count) {
-                
+
         // people aqui são IDs; resolvemos antes de tudo
-        let resolved = await fetchByIds(gridList, type);      
-        
-        resolved = (!Array.isArray(resolved)) ? [resolved] : resolved;        
+        let resolved = await fetchByIds(gridList, type);
+
+        resolved = (!Array.isArray(resolved)) ? [resolved] : resolved;
 
         count = Number(count) ?? 0;
         const visorCount = count > 0 ? ` (${count})` : '';
         const fontAwesome = type === 'people' ? 'fas fa-user-friends' : type === 'teams' ? 'fas fa-users' : 'fas fa-briefcase';
-        const title = type === 'people' ? 'Seguindo' : type === 'teams' ? 'Equipes' : 'Negócios';        
+        const title = type === 'people' ? 'Seguindo' : type === 'teams' ? 'Equipes' : 'Negócios';
 
         // monta o grid (ou o vazio) sem ternário com várias linhas
         let gridHtml = '';
-        if (count > 0) {            
+        if (count > 0) {
             const cards = resolved?.map(p => `
             <div data-id="${p.id}" class="relative rounded-2xl overflow-hidden bg-gray-300 aspect-square cursor-pointer card-item">
                 <div class="absolute inset-0 bg-center bg-cover" style="background-image:${resolveBackgroundImage(p?.im, p?.tt, { size: 100 })};"></div>
@@ -2379,12 +2560,12 @@ templates.entityContent = async ({ data }) => {
                 </div>
             </div>                                
             `).join('');
-            
+
             gridHtml = `
             <div class="grid grid-cols-3 gap-3 min-w-0">
                 ${cards}
             </div>
-            `;            
+            `;
         } else {
             gridHtml = `
             <div class="rounded-3xl w-full p-3 truncate flex items-center gap-2" style="background:#F7F8D1;">
@@ -2395,7 +2576,7 @@ templates.entityContent = async ({ data }) => {
         }
 
         const widgetWrapper = document.querySelector('#widget-wrapper');
-        
+
         widgetWrapper.insertAdjacentHTML('beforeend', `    
             <div id="widget-${type}">
                 <div class="bg-white p-3 rounded-3xl shadow-lg">
@@ -2475,7 +2656,7 @@ templates.entityContent = async ({ data }) => {
         `);
     }
 
-    async function pageAction() {        
+    async function pageAction() {
         const actionContainer = document.querySelector('#action-container');
         const isManager = memberLevel >= 3;
         if (viewType === ENTITY.PROFILE) {
@@ -2488,14 +2669,14 @@ templates.entityContent = async ({ data }) => {
                 actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'follow-user', label: 'Seguir', color: 'blue' }));
             }
         } else if (viewType === ENTITY.BUSINESS) {
-            const parseIdArray = (val) => { try { const arr = JSON.parse(val); return Array.isArray(arr) ? arr : []; } catch(_) { return []; } };
+            const parseIdArray = (val) => { try { const arr = JSON.parse(val); return Array.isArray(arr) ? arr : []; } catch (_) { return []; } };
             const mods = (viewData?.usmn) ? parseIdArray(viewData.usmn) : [];
             const isModerator = mods.map(String).includes(String(currentUserData.id));
-            
+
             // Verifica se o usuário não é gestor na empresa ou moderador
-            if(!isManager && !isModerator){                                
+            if (!isManager && !isModerator) {
                 if (userBusinesses.includes(viewId)) {
-                    if(memberStatus === 0) {
+                    if (memberStatus === 0) {
                         actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'cancel-request', label: 'Cancelar Pedido', color: 'yellow' }));
                     } else {
                         actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'cancel-access', label: 'Cancelar Acesso', color: 'red' }));
@@ -2508,14 +2689,14 @@ templates.entityContent = async ({ data }) => {
                     <li><button data-sidebar-action="page-settings" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-cog fa-stack-1x text-gray-700"></i></span><span class="truncate">Ajustes</a></span></li>
                 `);
             }
-                        
-        } else if (viewType === ENTITY.TEAM) {                                    
+
+        } else if (viewType === ENTITY.TEAM) {
             const canManage = canManageTeam(viewData);
             // Acesso de equipe NÃO herda de gestor do negócio.
             // Somente moderadores/dono da equipe ou membros aprovados têm alternativas a pedir acesso.
             if (!canManage) {
                 if (userTeams.includes(viewId)) {
-                    if(memberStatus === 0) {
+                    if (memberStatus === 0) {
                         actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'cancel-request', label: 'Cancelar Pedido', color: 'yellow' }));
                     } else {
                         actionContainer.insertAdjacentHTML('beforeend', UI.actionButton({ action: 'cancel-access', label: 'Cancelar Acesso', color: 'red' }));
@@ -2531,7 +2712,7 @@ templates.entityContent = async ({ data }) => {
         }
     }
 
-    function customMenu () {
+    function customMenu() {
         const customMenu = document.querySelector('#custom-menu');
         const standardMenu = document.querySelector('#standard-menu');
 
@@ -2549,14 +2730,14 @@ templates.entityContent = async ({ data }) => {
                 pageAction();
             }
             customMenu.insertAdjacentHTML('beforeend',
-                UI.menuItem({ action: 'dashboard',  icon: 'fa-home',  label: 'Início' }) +
+                UI.menuItem({ action: 'dashboard', icon: 'fa-home', label: 'Início' }) +
                 UI.menuItem({ action: 'share-page', icon: 'fa-share', label: 'Compartilhar' })
             );
-        } 
-        
+        }
+
         // Delegação global do roteador cobre cliques com data-action
     }
-    
+
     function normalizeNumericId(value) {
         const num = Number(value);
         return Number.isFinite(num) ? num : null;
@@ -2753,7 +2934,7 @@ templates.entityContent = async ({ data }) => {
                 </div>`;
     }
 
-    function appendFeed ( items ) {
+    function appendFeed(items) {
         const timeline = document.querySelector('#timeline');
         if (!timeline || !Array.isArray(items) || !items.length) return;
 
@@ -3033,10 +3214,10 @@ templates.entityContent = async ({ data }) => {
     }
 
     // Notificações simples
-    function notifySuccess(msg) { try { swal('Pronto', msg, 'success'); } catch(_) { try { alert(msg); } catch(__) {} } }
-    function notifyError(msg) { try { swal('Ops', msg, 'error'); } catch(_) { try { alert(msg); } catch(__) {} } }
+    function notifySuccess(msg) { try { swal('Pronto', msg, 'success'); } catch (_) { try { alert(msg); } catch (__) { } } }
+    function notifyError(msg) { try { swal('Ops', msg, 'error'); } catch (_) { try { alert(msg); } catch (__) { } } }
 
-    async function confirmDialog(msg, { title='Confirmação', danger=false } = {}) {
+    async function confirmDialog(msg, { title = 'Confirmação', danger = false } = {}) {
         try {
             return await swal({
                 title,
@@ -3045,8 +3226,8 @@ templates.entityContent = async ({ data }) => {
                 buttons: ['Cancelar', 'Confirmar'],
                 dangerMode: !!danger,
             });
-        } catch(_) {
-            try { return confirm(msg); } catch(__) { return false; }
+        } catch (_) {
+            try { return confirm(msg); } catch (__) { return false; }
         }
     }
 
@@ -3061,11 +3242,11 @@ templates.entityContent = async ({ data }) => {
         if (loading) {
             if (!button.dataset.origHtml) button.dataset.origHtml = button.innerHTML;
             button.disabled = true;
-            button.classList.add('opacity-60','cursor-not-allowed');
+            button.classList.add('opacity-60', 'cursor-not-allowed');
             button.innerHTML = `<span class="inline-block animate-pulse">${textWhileLoading}</span>`;
         } else {
             button.disabled = false;
-            button.classList.remove('opacity-60','cursor-not-allowed');
+            button.classList.remove('opacity-60', 'cursor-not-allowed');
             if (button.dataset.origHtml) { button.innerHTML = button.dataset.origHtml; delete button.dataset.origHtml; }
         }
     }
@@ -3078,7 +3259,7 @@ templates.entityContent = async ({ data }) => {
                 await navigator.share({ title: document.title || 'Workz!', url });
                 return true;
             }
-        } catch (_) {}
+        } catch (_) { }
         try {
             await navigator.clipboard.writeText(url);
             notifySuccess('Link copiado!');
@@ -3175,7 +3356,7 @@ templates.entityContent = async ({ data }) => {
                     }
                 }
                 notifySuccess('Negócio excluído.');
-            } catch(_) {
+            } catch (_) {
                 notifyError('Falha ao excluir o negócio.');
             }
             setButtonLoading(button, false);
@@ -3281,7 +3462,7 @@ templates.entityContent = async ({ data }) => {
         },
         'create-team': async () => {
             const name = (document.getElementById('new-team-name')?.value || '').trim();
-            const em   = (document.getElementById('new-team-business')?.value || '').trim();
+            const em = (document.getElementById('new-team-business')?.value || '').trim();
             if (!name || !em) { notifyError('Informe o nome da equipe e o negócio.'); return; }
             const sc = document.querySelector('.sidebar-content');
             // Cria a equipe
@@ -3402,7 +3583,7 @@ templates.entityContent = async ({ data }) => {
             const payloadKeys = { us: state.user?.id, [idKey]: state.view?.id };
             if (button) setButtonLoading(button, true, 'Enviando…');
             try {
-                const exists = await apiClient.post('/search', { db: 'workz_companies', table, columns: ['id','st'], conditions: payloadKeys, fetchAll: true, limit: 1 });
+                const exists = await apiClient.post('/search', { db: 'workz_companies', table, columns: ['id', 'st'], conditions: payloadKeys, fetchAll: true, limit: 1 });
                 if (Array.isArray(exists?.data) && exists.data.length) {
                     await apiClient.post('/update', { db: 'workz_companies', table, data: { st: 0 }, conditions: payloadKeys });
                 } else {
@@ -3513,7 +3694,7 @@ templates.entityContent = async ({ data }) => {
                             memberStatus = 1;
                             viewRestricted = false;
                             // Re-renderiza a view atual para carregar conteúdo e feed
-                            try { await renderView(viewId); } catch(_) {}
+                            try { await renderView(viewId); } catch (_) { }
                         }
                     }
                 }
@@ -3572,7 +3753,7 @@ templates.entityContent = async ({ data }) => {
                     const ac = document.querySelector('#action-container');
                     if (ac) { ac.innerHTML = ''; pageAction(); }
                     if (typeof SidebarNav !== 'undefined') {
-                        try { await SidebarNav.render(); } catch(_) {}
+                        try { await SidebarNav.render(); } catch (_) { }
                     }
                 }
                 // Feedback simples
@@ -3591,7 +3772,7 @@ templates.entityContent = async ({ data }) => {
             try {
                 await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 1 }, conditions: { id } });
                 notifySuccess('Depoimento aceito.');
-            } catch(_) { notifyError('Falha ao aceitar depoimento.'); }
+            } catch (_) { notifyError('Falha ao aceitar depoimento.'); }
             loadPage();
         },
         'reject-testmonial': async ({ button }) => {
@@ -3600,7 +3781,7 @@ templates.entityContent = async ({ data }) => {
             try {
                 await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 2 }, conditions: { id } });
                 notifySuccess('Depoimento rejeitado.');
-            } catch(_) { notifyError('Falha ao rejeitar depoimento.'); }
+            } catch (_) { notifyError('Falha ao rejeitar depoimento.'); }
             loadPage();
         },
         'revert-testmonial': async ({ button }) => {
@@ -3609,7 +3790,7 @@ templates.entityContent = async ({ data }) => {
             try {
                 await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 0 }, conditions: { id } });
                 notifySuccess('Depoimento revertido.');
-            } catch(_) { notifyError('Falha ao reverter depoimento.'); }
+            } catch (_) { notifyError('Falha ao reverter depoimento.'); }
             loadPage();
         },
         // Jobs (experiências)
@@ -3621,7 +3802,7 @@ templates.entityContent = async ({ data }) => {
                 await apiClient.post('/delete', { db: 'workz_companies', table: 'employees', conditions: { id } });
                 notifySuccess('Experiência excluída.');
                 loadPage();
-            } catch(_) { notifyError('Falha ao excluir experiência.'); }
+            } catch (_) { notifyError('Falha ao excluir experiência.'); }
             finally { hideLoading(); }
         },
         'edit-job': ({ button }) => {
@@ -3633,16 +3814,6 @@ templates.entityContent = async ({ data }) => {
             form.querySelectorAll('input,select,textarea').forEach(el => el.disabled = false);
         }
     };
-
-    document.addEventListener('click', (e) => {
-        const btn = e.target.closest('[data-action]');
-        if (!btn) return;
-        const action = btn.dataset.action;
-        const handler = ACTIONS[action];
-        if (!handler) return;
-        e.preventDefault();
-        handler({ event: e, button: btn, state: getState() });
-    });
 
     // Retorna metadados da tabela de associação conforme o tipo de página
     function getMembershipMeta(type) {
@@ -3659,18 +3830,397 @@ templates.entityContent = async ({ data }) => {
             const rec = (userBusinessesData || []).find(r => String(r.em) === String(companyId) && Number(r.st) === 1);
             const level = Number(rec?.nv ?? 0);
             return level >= 3;
-        } catch(_) { return false; }
+        } catch (_) { return false; }
     }
     function isTeamOwner(teamData) {
-        try { return String(teamData?.us) === String(currentUserData.id); } catch(_) { return false; }
+        try { return String(teamData?.us) === String(currentUserData.id); } catch (_) { return false; }
     }
     function isTeamModerator(teamData) {
         try {
             const mods = teamData?.usmn ? JSON.parse(teamData.usmn) : [];
             return Array.isArray(mods) && mods.map(String).includes(String(currentUserData.id));
-        } catch(_) { return false; }
+        } catch (_) { return false; }
     }
     function canManageTeam(teamData) { return isTeamOwner(teamData) || isTeamModerator(teamData); }
+
+    // ===================================================================
+    // POST EDITOR INTEGRATION
+    // ===================================================================
+
+    async function openPostEditor() {
+        try {
+            // Carregar CSS do editor se ainda não foi carregado
+            if (!document.querySelector('link[href*="editor.css"]')) {
+                const editorCSS = document.createElement('link');
+                editorCSS.rel = 'stylesheet';
+                editorCSS.href = 'css/editor.css';
+                document.head.appendChild(editorCSS);
+            }
+
+            // Limpar e preparar sidebar
+            sidebarWrapper.innerHTML = '';
+
+            // Garantir que w-0 seja removida e as classes de largura sejam adicionadas
+            if (sidebarWrapper.classList.contains('w-0')) {
+                sidebarWrapper.classList.remove('w-0');
+            }
+            if (!sidebarWrapper.classList.contains('lg:w-1/3')) {
+                sidebarWrapper.classList.add('lg:w-1/3');
+            }
+            if (!sidebarWrapper.classList.contains('sm:w-1/2')) {
+                sidebarWrapper.classList.add('sm:w-1/2');
+            }
+            if (!sidebarWrapper.classList.contains('w-full')) {
+                sidebarWrapper.classList.add('w-full');
+            }
+            if (!sidebarWrapper.classList.contains('shadow-2xl')) {
+                sidebarWrapper.classList.add('shadow-2xl');
+            }
+
+            console.log('Classes depois:', sidebarWrapper.className);
+
+            // Forçar largura via CSS inline para sobrescrever qualquer CSS conflitante
+            sidebarWrapper.style.width = '33.333333%'; // equivalente a w-1/3
+            sidebarWrapper.style.minWidth = '300px'; // largura mínima
+
+            // Verificar se a sidebar está visível
+            const rect = sidebarWrapper.getBoundingClientRect();
+            console.log('Dimensões da sidebar:', rect.width, 'x', rect.height);
+            console.log('Posição da sidebar:', rect.left, rect.top);
+
+            // Criar conteúdo da sidebar
+            sidebarWrapper.innerHTML = `<div class="sidebar-content grid grid-cols-1 gap-6 p-4"></div>`;
+            const sidebarContent = document.querySelector('.sidebar-content');
+
+            if (!sidebarContent) {
+                console.error('Falha ao criar sidebar-content');
+                notifyError('Erro ao preparar interface do editor.');
+                return;
+            }
+
+            // Usar o sistema de navegação do sidebar para carregar a view post-editor
+            SidebarNav.setMount(sidebarContent);
+            await renderTemplate(sidebarWrapper, templates.sidebarPageSettings, {
+                view: 'post-editor',
+                data: currentUserData,
+                navTitle: 'Editor de Posts',
+                prevTitle: 'Voltar',
+                origin: 'stack'
+            }, async () => {
+                // Callback executado após a renderização completa
+                setTimeout(() => {
+                    console.log('Procurando elementos diretamente na sidebar...');
+                    console.log('Conteúdo atual da sidebar:', sidebarWrapper.innerHTML.substring(0, 500));
+
+                    // Buscar elementos diretamente no sidebarWrapper
+                    const appShellInSidebar = sidebarWrapper.querySelector('#appShell');
+                    const gridCanvasInSidebar = sidebarWrapper.querySelector('#gridCanvas');
+
+                    console.log('Verificando elementos do editor:');
+                    console.log('AppShell encontrado:', !!appShellInSidebar);
+                    console.log('GridCanvas encontrado:', !!gridCanvasInSidebar);
+
+                    if (appShellInSidebar && gridCanvasInSidebar) {
+                        console.log('Elementos encontrados, carregando editor...');
+                        loadEditorScript(sidebarWrapper);
+                    } else {
+                        console.error('Elementos não encontrados na sidebar');
+                        console.log('Conteúdo da sidebar (primeiros 1000 chars):', sidebarWrapper.innerHTML.substring(0, 1000));
+
+                        // Tentar novamente após mais tempo
+                        setTimeout(() => {
+                            const appShellRetry = sidebarWrapper.querySelector('#appShell');
+                            const gridCanvasRetry = sidebarWrapper.querySelector('#gridCanvas');
+
+                            if (appShellRetry && gridCanvasRetry) {
+                                console.log('Elementos encontrados na segunda tentativa');
+                                loadEditorScript(sidebarWrapper);
+                            } else {
+                                console.error('Elementos ainda não encontrados na segunda tentativa');
+                                notifyError('Interface do editor não foi carregada corretamente.');
+                            }
+                        }, 500);
+                    }
+                }, 200);
+            });
+
+        } catch (error) {
+            console.error('Erro ao abrir post editor:', error);
+            notifyError('Não foi possível abrir o editor de posts.');
+        }
+    }
+
+    function loadEditorScript(sidebarContent = null) {
+        console.log('loadEditorScript chamado');
+
+        if (!sidebarContent) {
+            sidebarContent = document.querySelector('.sidebar-content');
+        }
+
+        if (!sidebarContent) {
+            console.error('Sidebar content não encontrado');
+            notifyError('Interface do editor não está pronta.');
+            return;
+        }
+
+        const requiredElements = ['editorViewport', 'editor', 'gridCanvas'];
+        const missingElements = requiredElements.filter(id => !sidebarContent.querySelector(`#${id}`));
+
+        console.log('Elementos necessários:', requiredElements);
+        console.log('Elementos faltando:', missingElements);
+
+        if (missingElements.length > 0) {
+            console.error('Elementos necessários não encontrados:', missingElements);
+            notifyError('Interface do editor não está pronta.');
+            return;
+        }
+
+        // Verificar se o script já foi carregado
+        if (document.querySelector('script[src*="editor.js"]')) {
+            // Se já existe, apenas reinicializar
+            if (typeof init === 'function') {
+                try {
+                    initEditorInSidebar(sidebarContent);
+                } catch (error) {
+                    console.error('Erro ao inicializar editor:', error);
+                    notifyError('Erro ao inicializar o editor.');
+                }
+            }
+            return;
+        }
+
+        // Carregar o script do editor
+        const editorScript = document.createElement('script');
+        editorScript.src = 'js/editor.js';
+        editorScript.onload = () => {
+            setTimeout(() => {
+                if (typeof init === 'function') {
+                    try {
+                        initEditorInSidebar(sidebarContent);
+                    } catch (error) {
+                        console.error('Erro ao inicializar editor:', error);
+                        notifyError('Erro ao inicializar o editor.');
+                    }
+                } else {
+                    // Tentar carregar com fetch para debug
+                    fetch('js/editor.js')
+                        .then(response => response.text())
+                        .then(content => {
+                            if (content.trim().startsWith('<')) {
+                                console.error('editor.js está retornando HTML em vez de JavaScript!');
+                                createInlineEditor(sidebarContent);
+                            } else {
+                                try {
+                                    eval(content);
+                                    if (typeof init === 'function') {
+                                        initEditorInSidebar(sidebarContent);
+                                    }
+                                } catch (evalError) {
+                                    console.error('Erro ao executar editor.js:', evalError);
+                                    createInlineEditor(sidebarContent);
+                                }
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Erro ao fazer fetch do editor.js:', err);
+                            notifyError('Erro ao carregar o editor.');
+                        });
+                }
+            }, 100);
+        };
+        editorScript.onerror = () => {
+            console.error('Erro ao carregar editor.js com caminho relativo');
+            console.log('Tentando carregar com caminho absoluto...');
+
+            // Tentar com caminho absoluto
+            const absoluteScript = document.createElement('script');
+            const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
+            absoluteScript.src = baseUrl + 'js/editor.js';
+
+            absoluteScript.onload = () => {
+                console.log('Script carregado com caminho absoluto');
+                setTimeout(() => {
+                    if (typeof init === 'function') {
+                        console.log('Função init encontrada após carregamento absoluto');
+                        // Usar a mesma lógica de inicialização
+                        try {
+                            console.log('Inicializando editor...');
+                            setTimeout(() => {
+                                const originalGetElementById = document.getElementById;
+                                document.getElementById = function (id) {
+                                    const sidebarElement = sidebarContent.querySelector(`#${id}`);
+                                    if (sidebarElement) {
+                                        console.log(`Elemento ${id} encontrado na sidebar`);
+                                        return sidebarElement;
+                                    }
+                                    return originalGetElementById.call(document, id);
+                                };
+
+                                init();
+
+                                setTimeout(() => {
+                                    document.getElementById = originalGetElementById;
+                                }, 100);
+                            }, 50);
+                        } catch (error) {
+                            console.error('Erro ao inicializar editor:', error);
+                            notifyError('Erro ao inicializar o editor.');
+                        }
+                    } else {
+                        console.error('Função init ainda não encontrada após carregamento absoluto');
+                        notifyError('Editor não foi carregado corretamente.');
+                    }
+                }, 100);
+            };
+
+            absoluteScript.onerror = () => {
+                console.error('Erro ao carregar editor.js mesmo com caminho absoluto');
+                console.log('Criando editor básico inline como fallback...');
+
+                // Criar um editor básico inline como fallback
+                createInlineEditor(sidebarContent);
+            };
+
+            document.head.appendChild(absoluteScript);
+        };
+        document.head.appendChild(editorScript);
+    }
+
+    function initEditorInSidebar(sidebarContent) {
+        // Criar um contexto para o editor funcionar dentro da sidebar
+        const originalGetElementById = document.getElementById;
+        document.getElementById = function (id) {
+            // Primeiro tentar encontrar na sidebar
+            const sidebarElement = sidebarContent.querySelector(`#${id}`);
+            if (sidebarElement) {
+                return sidebarElement;
+            }
+            // Se não encontrar na sidebar, usar o método original
+            return originalGetElementById.call(document, id);
+        };
+
+        try {
+            // Inicializar o editor
+            init();
+        } finally {
+            // Restaurar o método original
+            setTimeout(() => {
+                document.getElementById = originalGetElementById;
+            }, 100);
+        }
+    }
+
+    function createInlineEditor(sidebarContent) {
+        console.log('Criando editor básico inline...');
+
+        try {
+            const gridCanvas = sidebarContent.querySelector('#gridCanvas');
+            if (!gridCanvas) {
+                console.error('Canvas não encontrado para editor inline');
+                notifyError('Interface do editor não está pronta.');
+                return;
+            }
+
+            const ctx = gridCanvas.getContext('2d');
+            if (!ctx) {
+                console.error('Não foi possível obter contexto do canvas');
+                notifyError('Erro ao inicializar canvas.');
+                return;
+            }
+
+            // Desenhar grade básica
+            function drawGrid() {
+                ctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+                ctx.globalAlpha = 0.15;
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 1;
+
+                // Linhas verticais
+                for (let x = 0; x <= gridCanvas.width; x += 20) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, gridCanvas.height);
+                    ctx.stroke();
+                }
+
+                // Linhas horizontais
+                for (let y = 0; y <= gridCanvas.height; y += 20) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(gridCanvas.width, y);
+                    ctx.stroke();
+                }
+
+                ctx.globalAlpha = 1;
+            }
+
+            // Desenhar grade inicial
+            drawGrid();
+
+            // Adicionar funcionalidade básica de texto
+            const btnAddText = sidebarContent.querySelector('#btnAddText');
+            if (btnAddText) {
+                btnAddText.addEventListener('click', () => {
+                    const editor = sidebarContent.querySelector('#editor');
+                    if (editor) {
+                        const textBox = document.createElement('div');
+                        textBox.className = 'item';
+                        textBox.style.position = 'absolute';
+                        textBox.style.left = '50px';
+                        textBox.style.top = '50px';
+                        textBox.style.padding = '10px';
+                        textBox.style.backgroundColor = 'rgba(255,255,255,0.9)';
+                        textBox.style.border = '2px solid #ccc';
+                        textBox.style.borderRadius = '4px';
+                        textBox.style.cursor = 'move';
+                        textBox.style.minWidth = '100px';
+                        textBox.style.minHeight = '30px';
+                        textBox.contentEditable = true;
+                        textBox.innerText = 'Novo texto';
+                        textBox.dataset.type = 'text';
+
+                        // Adicionar funcionalidade de arrastar
+                        let isDragging = false;
+                        let startX, startY, initialLeft, initialTop;
+
+                        textBox.addEventListener('mousedown', (e) => {
+                            if (e.target === textBox) {
+                                isDragging = true;
+                                startX = e.clientX;
+                                startY = e.clientY;
+                                initialLeft = parseInt(textBox.style.left);
+                                initialTop = parseInt(textBox.style.top);
+                                e.preventDefault();
+                            }
+                        });
+
+                        document.addEventListener('mousemove', (e) => {
+                            if (isDragging) {
+                                const deltaX = e.clientX - startX;
+                                const deltaY = e.clientY - startY;
+                                textBox.style.left = (initialLeft + deltaX) + 'px';
+                                textBox.style.top = (initialTop + deltaY) + 'px';
+                            }
+                        });
+
+                        document.addEventListener('mouseup', () => {
+                            isDragging = false;
+                        });
+
+                        editor.appendChild(textBox);
+                        console.log('Caixa de texto criada com editor básico');
+                    }
+                });
+            }
+
+            console.log('Editor básico inline criado com sucesso');
+            notifySuccess('Editor básico carregado. Funcionalidade limitada disponível.');
+
+        } catch (error) {
+            console.error('Erro ao criar editor inline:', error);
+            notifyError('Erro ao criar editor básico.');
+        }
+    }
 
     // ===================================================================
     // 😉 ANIMAÇÃO E RENDERIZAÇÃO
@@ -3744,26 +4294,26 @@ templates.entityContent = async ({ data }) => {
     function enterRow(row) {
         if (prefersReduced) return;
 
-            row.style.overflow = 'hidden';
-            row.style.opacity = '0';
-            row.style.transform = 'scale(0.98)';
-            row.style.height = '0px';
+        row.style.overflow = 'hidden';
+        row.style.opacity = '0';
+        row.style.transform = 'scale(0.98)';
+        row.style.height = '0px';
 
-            // força reflow
-            row.getBoundingClientRect();
+        // força reflow
+        row.getBoundingClientRect();
 
-            row.style.transition = 'height 160ms ease, opacity 160ms ease, transform 160ms ease';
-            row.style.height = row.scrollHeight + 'px';
-            row.style.opacity = '1';
-            row.style.transform = 'scale(1)';
+        row.style.transition = 'height 160ms ease, opacity 160ms ease, transform 160ms ease';
+        row.style.height = row.scrollHeight + 'px';
+        row.style.opacity = '1';
+        row.style.transform = 'scale(1)';
 
-            row.addEventListener('transitionend', () => {
+        row.addEventListener('transitionend', () => {
             row.style.transition = '';
             row.style.height = '';
             row.style.overflow = '';
             row.style.transform = '';
             row.style.opacity = '';
-            }, { once: true });
+        }, { once: true });
     }
 
     function leaveRow(row, done) {
@@ -3783,7 +4333,7 @@ templates.entityContent = async ({ data }) => {
         row.style.transform = 'scale(0.98)';
 
         row.addEventListener('transitionend', () => {
-        done?.();
+            done?.();
         }, { once: true });
     }
 
@@ -3819,22 +4369,81 @@ templates.entityContent = async ({ data }) => {
         //
 
         if (toggle === true) {
-            sidebarWrapper.classList.toggle('w-0');
-            sidebarWrapper.classList.toggle('lg:w-1/3');
-            sidebarWrapper.classList.toggle('sm:w-1/2');
-            sidebarWrapper.classList.toggle('w-full');
-            sidebarWrapper.classList.toggle('shadow-2xl');
+            console.log('Classes antes do toggle:', sidebarWrapper.className);
+
+            // Para o post-editor, garantir que a sidebar fique visível
+            if (el && el.dataset.sidebarAction === 'post-editor') {
+                // Remover w-0 e adicionar classes de largura
+                sidebarWrapper.classList.remove('w-0');
+                sidebarWrapper.classList.add('lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
+            } else {
+                // Comportamento normal de toggle para outros elementos
+                sidebarWrapper.classList.toggle('w-0');
+                sidebarWrapper.classList.toggle('lg:w-1/3');
+                sidebarWrapper.classList.toggle('sm:w-1/2');
+                sidebarWrapper.classList.toggle('w-full');
+                sidebarWrapper.classList.toggle('shadow-2xl');
+            }
+
+            console.log('Classes depois do toggle:', sidebarWrapper.className);
         }
 
         if (el) {
             sidebarWrapper.innerHTML = `<div class="sidebar-content grid grid-cols-1 gap-6 p-4"></div>`;
             const sidebarContent = document.querySelector('.sidebar-content');
-            const action = el.dataset.sidebarAction;            
+            const action = el.dataset.sidebarAction;
             if (action === 'settings') {
                 // Página principal de configurações (atalhos gerais)
                 SidebarNav.setMount(sidebarContent);
                 SidebarNav.resetRoot(currentUserData);
-                renderTemplate(sidebarContent, templates.sidebarPageSettings, { data: currentUserData, origin: 'stack' }, () => {});
+                renderTemplate(sidebarContent, templates.sidebarPageSettings, { data: currentUserData, origin: 'stack' }, () => { });
+
+            } else if (action === 'post-editor') {
+                console.log('toggleSidebar: Processando action post-editor');
+                // Editor de posts
+                // Carregar CSS do editor se ainda não foi carregado
+                if (!document.querySelector('link[href*="editor.css"]')) {
+                    console.log('Carregando CSS do editor...');
+                    const editorCSS = document.createElement('link');
+                    editorCSS.rel = 'stylesheet';
+                    editorCSS.href = 'css/editor.css';
+                    document.head.appendChild(editorCSS);
+                }
+
+                // Usar o sistema de navegação do sidebar
+                SidebarNav.setMount(sidebarContent);
+
+                // Renderizar o template do post-editor
+                renderTemplate(sidebarContent, templates.sidebarPageSettings, {
+                    view: 'post-editor',
+                    data: currentUserData,
+                    navTitle: 'Editor de Posts',
+                    prevTitle: 'Voltar',
+                    origin: 'stack'
+                }, async () => {                    
+                    // Callback executado após a renderização completa
+                    setTimeout(() => {
+                        // Buscar elementos diretamente no sidebarWrapper
+                        const appShellInSidebar = sidebarWrapper.querySelector('#appShell');
+                        const gridCanvasInSidebar = sidebarWrapper.querySelector('#gridCanvas');
+
+                        if (appShellInSidebar && gridCanvasInSidebar) {
+                            loadEditorScript(sidebarWrapper);
+                        } else {
+                            // Tentar novamente após mais tempo
+                            setTimeout(() => {
+                                const appShellRetry = sidebarWrapper.querySelector('#appShell');
+                                const gridCanvasRetry = sidebarWrapper.querySelector('#gridCanvas');
+
+                                if (appShellRetry && gridCanvasRetry) {
+                                    loadEditorScript(sidebarWrapper);
+                                } else {
+                                    notifyError('Interface do editor não foi carregada corretamente.');
+                                }
+                            }, 500);
+                        }
+                    }, 200);                    
+                });
 
             } else if (action === 'page-settings') {
                 // Entrou em Ajustes a partir da página atual (fora do stack ou entidade corrente)
@@ -3849,7 +4458,7 @@ templates.entityContent = async ({ data }) => {
                 //Botões de Adição / Remoção
                 settingsForm?.addEventListener('click', (e) => {
                     const addBtn = e.target.closest('#add-input-button');
-                    const rmBtn  = e.target.closest('#remove-input-button');
+                    const rmBtn = e.target.closest('#remove-input-button');
                     if (!addBtn && !rmBtn) return;
                     e.preventDefault();
                     const container = settingsForm.querySelector('#input-container');
@@ -3876,7 +4485,7 @@ templates.entityContent = async ({ data }) => {
                             });
                         } else {
                             return;
-                        }                            
+                        }
                         newRow.style.willChange = 'height, opacity, transform';
                         container.appendChild(newRow);
                         enterRow(newRow);
@@ -3892,17 +4501,17 @@ templates.entityContent = async ({ data }) => {
                             });
                         }
                     }
-                });                    
+                });
                 document?.querySelector("#business-shareholding")?.addEventListener('click', (e) => {
                     renderTemplate(sidebarContent, templates.sidebarPageSettings, {
                         view: 'business-shareholding',
                         data: pageSettingsData
-                    }, () => {});
+                    }, () => { });
                 });
             };
-        };            
+        };
     };
-    
+
     // Anexa listeners necessários para interações dentro de uma subview de ajustes
     function wireSidebarPageActions(sidebarContent, pageSettingsData, pageSettingsView) {
         const settingsForm = document.querySelector('#settings-form');
@@ -3910,7 +4519,7 @@ templates.entityContent = async ({ data }) => {
             if (settingsForm._clickHandler) settingsForm.removeEventListener('click', settingsForm._clickHandler);
             const clickHandler = (e) => {
                 const addBtn = e.target.closest('#add-input-button');
-                const rmBtn  = e.target.closest('#remove-input-button');
+                const rmBtn = e.target.closest('#remove-input-button');
                 if (!addBtn && !rmBtn) return;
                 e.preventDefault();
                 const container = settingsForm.querySelector('#input-container');
@@ -3966,13 +4575,13 @@ templates.entityContent = async ({ data }) => {
         sidebarContent.addEventListener('click', shortcutsHandler);
         sidebarContent._shortcutsHandler = shortcutsHandler;
 
-        
+
 
 
         document?.getElementById('settings-form')?.addEventListener('submit', handleUpdate);
         initMasks();
     }
-    
+
     function setupCepAutofill(form) {
         if (!form) return;
         const zipInput = form.querySelector('input[name="zip_code"]');
@@ -4097,10 +4706,10 @@ templates.entityContent = async ({ data }) => {
             <select name="third_party" ${disabled ? 'disabled' : ''} class="border-0 focus:outline-none col-span-3 p-4" required>
             <option value="" disabled ${!selected ? 'selected' : ''}>Selecione</option>
             `;
-            const optionsHtml = Object.entries(businessesJobs).sort(([,a],[,b]) => a.localeCompare(b, 'pt-BR')).map(([id, nome]) => `
+        const optionsHtml = Object.entries(businessesJobs).sort(([, a], [, b]) => a.localeCompare(b, 'pt-BR')).map(([id, nome]) => `
             <option value="${id}" ${String(selected) === String(id) ? 'selected' : ''}>${nome}</option>
             `).join('');
-            html += optionsHtml + `
+        html += optionsHtml + `
             </select>
         </div>
         `;
@@ -4111,20 +4720,20 @@ templates.entityContent = async ({ data }) => {
     // 2) Inicializa (útil no carregamento da página/templating)
     function initOutsourcedUI(scope = document) {
         let allTypeSelectors = scope.querySelectorAll('.job-form select[name="type"]');
-        allTypeSelectors.forEach(sel => {            
+        allTypeSelectors.forEach(sel => {
             const form = sel.closest('.job-form');
-            const disabled = sel.disabled || form?.dataset.readonlyMode === '1';            
+            const disabled = sel.disabled || form?.dataset.readonlyMode === '1';
             const currentExtraValue = form?.querySelector('[name="third_party"]')?.value || form?.dataset.thirdParty || '';
             renderOutsourcedRow(sel, { selected: currentExtraValue, disabled });
-        });        
+        });
     }
 
     // ===================================================================
     // 🧠 LÓGICA DE INICIALIZAÇÃO
     // ===================================================================
 
-    async function startup(){        
-        
+    async function startup() {
+
         const showNotLoggedIn = () => {
             localStorage.removeItem('jwt_token');
             renderTemplate(mainWrapper, 'notLoggedIn', null, () => {
@@ -4133,7 +4742,7 @@ templates.entityContent = async ({ data }) => {
                     renderLoginUI();
                     viewType = 'public';
                     loadFeed();
-                    initFeedInfiniteScroll();    
+                    initFeedInfiniteScroll();
                 });
             });
         }
@@ -4141,11 +4750,11 @@ templates.entityContent = async ({ data }) => {
         const urlToken = new URLSearchParams(window.location.search).get('token');
         if (urlToken) {
             localStorage.setItem('jwt_token', urlToken);
-            window.history.replaceState({}, '', '/');            
+            window.history.replaceState({}, '', '/');
         }
 
         if (!localStorage.getItem('jwt_token')) {
-            showNotLoggedIn();           
+            showNotLoggedIn();
             return;
         }
 
@@ -4175,7 +4784,7 @@ templates.entityContent = async ({ data }) => {
             order: { by: 's1', dir: 'DESC' },
             fetchAll: true
         });
-        userPeople = userPeople.data.map(o => o.s1);        
+        userPeople = userPeople.data.map(o => o.s1);
 
         // Negócios
         // 1) Vínculos por employees (membros/gestores)
@@ -4193,7 +4802,7 @@ templates.entityContent = async ({ data }) => {
                 conditions: { st: 1 }   // filtros extras na tabela companies
             }],
             order: { by: 'em', dir: 'DESC' },
-            fetchAll: true         
+            fetchAll: true
         });
         userBusinessesData = Array.isArray(userBusinesses?.data) ? userBusinesses.data.slice() : [];
         userBusinesses = userBusinessesData.map(o => o.em);
@@ -4202,7 +4811,7 @@ templates.entityContent = async ({ data }) => {
         const ownedBiz = await apiClient.post('/search', {
             db: 'workz_companies',
             table: 'companies',
-            columns: ['id','us','st','tt'],
+            columns: ['id', 'us', 'st', 'tt'],
             conditions: { us: currentUserData.id, st: 1 },
             order: { by: 'id', dir: 'DESC' },
             fetchAll: true
@@ -4258,7 +4867,7 @@ templates.entityContent = async ({ data }) => {
         );
 
         // 4) Filtre os teams que pertencem a businesses do usuário
-        const filteredTeams = userTeamsData.filter(t => {            
+        const filteredTeams = userTeamsData.filter(t => {
             const em = idToEm.get(t.cm);
             return userBusinessSet.has(String(em));
         });
@@ -4266,10 +4875,10 @@ templates.entityContent = async ({ data }) => {
         // 5) Aplique o resultado (substitui a lista, evita remover “em voo”)
         userTeamsData = filteredTeams;
 
-        userTeams = userTeamsData.map(o => o.cm);                                
-        renderTemplate(mainWrapper, 'dashboard', null, () => {            
+        userTeams = userTeamsData.map(o => o.cm);
+        renderTemplate(mainWrapper, 'dashboard', null, () => {
             workzContent = document.querySelector('#workz-content');
-            loadPage();            
+            loadPage();
         });
     }
 
@@ -4280,23 +4889,23 @@ templates.entityContent = async ({ data }) => {
         const businessMatch = path.match(/^\/business\/(\d+)$/);
         const teamMatch = path.match(/^\/team\/(\d+)$/);
         const peopleListMatch = path.match(/^\/people$/);
-        const businessListMatch = path.match(/^\/businesses$/);                
+        const businessListMatch = path.match(/^\/businesses$/);
         const teamsListMatch = path.match(/^\/teams$/);
 
         const renderList = async (listType = 'people') => {
             const entityMap = {
-                people:     { db: 'workz_data',      table: 'hus',       columns: ['id', 'tt', 'im'],        conditions: { st: 1 }, url: 'profile/' },
-                teams:      { db: 'workz_companies', table: 'teams',     columns: ['id', 'tt', 'im', 'em'], conditions: { st: 1 }, url: 'team/' },
-                businesses: { db: 'workz_companies', table: 'companies', columns: ['id', 'tt', 'im'],        conditions: { st: 1 }, url: 'business/' }
-            };            
+                people: { db: 'workz_data', table: 'hus', columns: ['id', 'tt', 'im'], conditions: { st: 1 }, url: 'profile/' },
+                teams: { db: 'workz_companies', table: 'teams', columns: ['id', 'tt', 'im', 'em'], conditions: { st: 1 }, url: 'team/' },
+                businesses: { db: 'workz_companies', table: 'companies', columns: ['id', 'tt', 'im'], conditions: { st: 1 }, url: 'business/' }
+            };
             let list = await apiClient.post('/search', {
                 db: entityMap[listType].db,
                 table: entityMap[listType].table,
                 columns: entityMap[listType].columns,
-                conditions: entityMap[listType].conditions,                
+                conditions: entityMap[listType].conditions,
                 order: { by: 'tt', dir: 'ASC' },
                 fetchAll: true
-            }); 
+            });
             list = list.data;
             // Filtro global: Equipes só são listadas se o usuário for membro aprovado do negócio dono
             if (listType === 'teams') {
@@ -4311,7 +4920,7 @@ templates.entityContent = async ({ data }) => {
                 const handler = (e) => {
                     const item = e.target.closest('.list-item');
                     if (!item) return;
-                    navigateTo(`/${ entityMap[listType].url + item.dataset.itemId }`);
+                    navigateTo(`/${entityMap[listType].url + item.dataset.itemId}`);
                 };
                 workzContent.addEventListener('click', handler, { once: true });
                 // Busca rápida no cliente
@@ -4347,7 +4956,7 @@ templates.entityContent = async ({ data }) => {
             renderList('teams');
             return;
         } else {
-            if (profileMatch) {                                
+            if (profileMatch) {
                 renderTemplate(workzContent, 'workzContent', null, () => {
                     applyEntityBackgroundImage(null);
                     viewType = 'profile';
@@ -4362,19 +4971,19 @@ templates.entityContent = async ({ data }) => {
                     viewId = parseInt(businessMatch[1], 10);
                     renderView(viewId);
                 });
-                return;                
+                return;
             } else if (teamMatch) {
                 renderTemplate(workzContent, 'workzContent', null, () => {
                     applyEntityBackgroundImage(null);
                     viewType = 'team';
-                    viewId = parseInt(teamMatch[1], 10);                    
+                    viewId = parseInt(teamMatch[1], 10);
                     renderView(viewId);
                 });
-                return;                
+                return;
             } else {
                 renderTemplate(workzContent, 'workzContent', null, () => {
                     applyEntityBackgroundImage(null);
-                    viewType = 'dashboard';                    
+                    viewType = 'dashboard';
                     renderView();
                 });
                 return;
@@ -4397,7 +5006,7 @@ templates.entityContent = async ({ data }) => {
         let entityImage = '';
 
         // DASHBOARD: usa caches/globais já carregados
-        if (viewType === 'dashboard') {            
+        if (viewType === 'dashboard') {
 
 
             const ppl = Array.isArray(userPeople) ? userPeople : [];
@@ -4418,38 +5027,38 @@ templates.entityContent = async ({ data }) => {
 
             entityImage = resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 100 });
 
-        // OUTRAS ROTAS: define o que buscar
+            // OUTRAS ROTAS: define o que buscar
         } else {
-            
+
             let entityMap = {};
             let entitiesToFetch = [];
             if (viewType === ENTITY.PROFILE) {
                 entityMap = {
-                    people:     { db: 'workz_data',      table: 'usg',             target: 's1', conditions: { s0: entityId }, mainDb: 'workz_data', mainTable: 'hus' },
+                    people: { db: 'workz_data', table: 'usg', target: 's1', conditions: { s0: entityId }, mainDb: 'workz_data', mainTable: 'hus' },
                     // Somente businesses aprovados (st=1)
-                    businesses: { db: 'workz_companies', table: 'employees',       target: 'em', conditions: { us: entityId, st: 1 }, mainDb: 'workz_companies', mainTable: 'companies' },
-                    teams:      { db: 'workz_companies', table: 'teams_users',     target: 'cm', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'teams' },
-                }; 
-                entitiesToFetch = ['people', 'businesses', 'teams'];                
+                    businesses: { db: 'workz_companies', table: 'employees', target: 'em', conditions: { us: entityId, st: 1 }, mainDb: 'workz_companies', mainTable: 'companies' },
+                    teams: { db: 'workz_companies', table: 'teams_users', target: 'cm', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'teams' },
+                };
+                entitiesToFetch = ['people', 'businesses', 'teams'];
             } else if (viewType === ENTITY.BUSINESS) {
                 entityMap = {
                     // Somente membros aprovados (st=1) devem aparecer no widget da página do negócio
-                    people:     { db: 'workz_companies', table: 'employees',       target: 'us', conditions: { em: entityId, st: 1 }, mainDb: 'workz_data', mainTable: 'hus' },                    
-                    teams:      { db: 'workz_companies', table: 'teams',           target: 'id', conditions: { em: entityId, st: 1 } },
-                    businesses: { db: 'workz_companies', table: 'employees',       target: 'em', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'companies' },
-                }; 
+                    people: { db: 'workz_companies', table: 'employees', target: 'us', conditions: { em: entityId, st: 1 }, mainDb: 'workz_data', mainTable: 'hus' },
+                    teams: { db: 'workz_companies', table: 'teams', target: 'id', conditions: { em: entityId, st: 1 } },
+                    businesses: { db: 'workz_companies', table: 'employees', target: 'em', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'companies' },
+                };
                 entitiesToFetch = ['people', 'teams'];
-            } else if  (viewType === ENTITY.TEAM) {
+            } else if (viewType === ENTITY.TEAM) {
                 entityMap = {
                     // Somente membros aprovados (st=1) devem aparecer
-                    people:     { db: 'workz_companies', table: 'teams_users',     target: 'us', conditions: { cm: entityId, st: 1 }, mainDb: 'workz_data', mainTable: 'hus' },
-                    teams:      { db: 'workz_companies', table: 'teams_users',     target: 'cm', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'teams' }
-                }; 
+                    people: { db: 'workz_companies', table: 'teams_users', target: 'us', conditions: { cm: entityId, st: 1 }, mainDb: 'workz_data', mainTable: 'hus' },
+                    teams: { db: 'workz_companies', table: 'teams_users', target: 'cm', conditions: { us: entityId }, mainDb: 'workz_companies', mainTable: 'teams' }
+                };
                 entitiesToFetch = ['people'];
             }
 
             // Define o tipo de entidade
-            let entityType = (viewType === ENTITY.PROFILE) ? 'people' : (viewType === ENTITY.BUSINESS)   ? 'businesses' : 'teams';
+            let entityType = (viewType === ENTITY.PROFILE) ? 'people' : (viewType === ENTITY.BUSINESS) ? 'businesses' : 'teams';
 
             // Busca dados da entidade
             entityData = await apiClient.post('/search', {
@@ -4457,19 +5066,19 @@ templates.entityContent = async ({ data }) => {
                 table: entityMap[entityType].mainTable,
                 columns: ['*'],
                 conditions: { ['id']: entityId }
-            }); 
+            });
 
             // Verifica se entidade existe
             if (entityData.data.length === 0) {
-                hideLoading({ delay: 250 });                
+                hideLoading({ delay: 250 });
                 return;
-            }                        
+            }
 
             if (!entitiesToFetch.length) {
                 // nada a buscar — evita loop vazio
                 // ... render mínimo/placeholder se precisar
                 return;
-            }        
+            }
 
             // Busca tudo em paralelo
             const resultsArray = await Promise.all(
@@ -4477,7 +5086,7 @@ templates.entityContent = async ({ data }) => {
                     const cfg = entityMap[key];
                     try {
                         const [res] = await Promise.all([
-                            
+
                             // Primeiro: busca os 6 primeiros registros
                             (async () => {
                                 const payload = {
@@ -4499,14 +5108,14 @@ templates.entityContent = async ({ data }) => {
                                         remote: 'id',               // coluna da outra tabela (hus.id)
                                         conditions: { st: 1 }       // filtros extras na tabela hus
                                     }];
-                                }                                
+                                }
                                 return apiClient.post('/search', payload);
                             })(),
                         ]);
 
-                        const list = Array.isArray(res?.data) ? res.data.map(row => row[cfg.target]) : [];                        
+                        const list = Array.isArray(res?.data) ? res.data.map(row => row[cfg.target]) : [];
                         const count = list.length;
-                        
+
                         return [key, list, count];
 
                     } catch (e) {
@@ -4522,7 +5131,7 @@ templates.entityContent = async ({ data }) => {
             for (const [key, list, count] of resultsArray) {
                 const safeList = Array.isArray(list) ? list : [];
                 results[key] = safeList;
-                results[`${key}Count`] = count;               
+                results[`${key}Count`] = count;
             }
 
             Object.assign(entityData.data[0], results);
@@ -4547,9 +5156,9 @@ templates.entityContent = async ({ data }) => {
             let postsCount = await apiClient.post('/count', {
                 db: 'workz_data',
                 table: 'hpl',
-                conditions: postConditions                
+                conditions: postConditions
             });
-           
+
             results.postsCount = postsCount.count;
 
             const needFollowers = !!followersConditions;
@@ -4571,7 +5180,7 @@ templates.entityContent = async ({ data }) => {
                 results.followersCount = followersCount.count;
             };
 
-            Object.assign(entityData.data[0], results);            
+            Object.assign(entityData.data[0], results);
 
             entityImage = resolveImageSrc(entityData.data[0].im, entityData.data[0].tt, { size: 100 });
 
@@ -4599,11 +5208,11 @@ templates.entityContent = async ({ data }) => {
                 );
 
                 // 4) Filtre os teams que pertencem a businesses do usuário
-                const filteredTeams = results?.teams.filter(t => {                
+                const filteredTeams = results?.teams.filter(t => {
                     const em = idToEm.get(t);
                     return userBusinessSet.has(String(em));
                 });
-                
+
 
                 // 5) Aplique o resultado (substitui a lista, evita remover “em voo”)
                 results.teams = filteredTeams;
@@ -4621,18 +5230,18 @@ templates.entityContent = async ({ data }) => {
             }
 
             // Atribuições com fallback
-            widgetPeople     = Array.isArray(results?.people)     ? results.people.slice(0, 6)     : [];
+            widgetPeople = Array.isArray(results?.people) ? results.people.slice(0, 6) : [];
             widgetBusinesses = Array.isArray(results?.businesses) ? results.businesses.slice(0, 6) : [];
-            widgetTeams      = Array.isArray(results?.teams)      ? results.teams.slice(0, 6)      : [];
+            widgetTeams = Array.isArray(results?.teams) ? results.teams.slice(0, 6) : [];
             widgetPeopleCount = results.peopleCount ?? 0;
             widgetBusinessesCount = results.businessesCount ?? 0;
             widgetTeamsCount = results.teamsCount ?? 0;
         }
-            
+
         // Depois os widgets, na ordem desejada
-        if (widgetPeople.length)      await appendWidget('people',      widgetPeople,      widgetPeopleCount);
-        if (widgetBusinesses.length)  await appendWidget('businesses',  widgetBusinesses,  widgetBusinessesCount);
-        if (widgetTeams.length)       await appendWidget('teams',       widgetTeams,       widgetTeamsCount);
+        if (widgetPeople.length) await appendWidget('people', widgetPeople, widgetPeopleCount);
+        if (widgetBusinesses.length) await appendWidget('businesses', widgetBusinesses, widgetBusinessesCount);
+        if (widgetTeams.length) await appendWidget('teams', widgetTeams, widgetTeamsCount);
         if ([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(viewType) && viewData) {
             appendContactsWidget(viewData);
         }
@@ -4663,19 +5272,44 @@ templates.entityContent = async ({ data }) => {
                 return;
             }
             editorTriggerEl.hidden = false;
-            await renderTemplate(editorTriggerEl, templates['editorTrigger'], currentUserData);
+            await renderTemplate(editorTriggerEl, templates['editorTrigger'], currentUserData, () => {
+                document.addEventListener('click', (e) => {
+                    // Verificar se clicou no post-editor
+                    const postEditor = e.target.closest('#post-editor');
+                    if (postEditor) {
+                        console.log('Clique no post-editor detectado!');
+                        e.preventDefault();
+                        e.stopPropagation(); // Impedir que o event listener global processe
+
+                        // Criar um elemento mock com data-sidebar-action para usar com toggleSidebar
+                        const mockElement = document.createElement('div');
+                        mockElement.dataset.sidebarAction = 'post-editor';
+                        console.log('Chamando toggleSidebar com elemento mock');
+                        toggleSidebar(mockElement, true);
+                        return;
+                    }
+
+                    const btn = e.target.closest('[data-action]');
+                    if (!btn) return;
+                    const action = btn.dataset.action;
+                    const handler = ACTIONS[action];
+                    if (!handler) return;
+                    e.preventDefault();
+                    handler({ event: e, button: btn, state: getState() });
+                });
+            });
         })();
 
-        Promise.all([            
+        Promise.all([
             // Menu customizado
             customMenu(),
             // Gatilhos de criação de conteúdo
             editorTriggerPromise,
 
             (viewType === 'dashboard')
-                ? 
+                ?
                 // Conteúdo principal (Dashboard)
-                renderTemplate(document.querySelector('#main-content'), 'mainContent', null, async () => {                    
+                renderTemplate(document.querySelector('#main-content'), 'mainContent', null, async () => {
                     startClock();
                     // Aplicativos
                     let userAppsRaw = await apiClient.post('/search', {
@@ -4695,8 +5329,8 @@ templates.entityContent = async ({ data }) => {
                         initAppLibrary('#app-library', resolvedApps); // Pass resolvedApps to initAppLibrary
                     });
                 })
-                : Promise.resolve(),              
-            
+                : Promise.resolve(),
+
             (viewType !== 'dashboard')
                 ?
                 // Conteúdo principal (Perfil, Negócio ou Equipe)
@@ -4706,7 +5340,7 @@ templates.entityContent = async ({ data }) => {
                     { data: entityData.data[0] }
                 )
                 : Promise.resolve(),
-            
+
             // Imagem da página
             document.querySelector('#profile-image').src = entityImage
         ]).then(() => {
@@ -4724,7 +5358,7 @@ templates.entityContent = async ({ data }) => {
                 const type = widgetRoot.id.replace('widget-', '');
 
                 // pega o ID do card
-                const id = card.dataset.id;                
+                const id = card.dataset.id;
 
                 // redireciona de acordo com o tipo
                 let baseUrl;
@@ -4741,7 +5375,7 @@ templates.entityContent = async ({ data }) => {
                 const card = e.target.closest('.card-item');
                 if (!card) return;
                 const widgetRoot = card.closest('[id^="widget-"]');
-                const type = widgetRoot?.id?.replace('widget-','') || '';
+                const type = widgetRoot?.id?.replace('widget-', '') || '';
                 const id = card.dataset.id;
                 let baseUrl;
                 if (type === 'people') baseUrl = '/profile/';
@@ -4757,24 +5391,24 @@ templates.entityContent = async ({ data }) => {
             }
 
             // Reseta o estado do feed
-            feedOffset = 0;        
+            feedOffset = 0;
             feedLoading = false;
             feedFinished = false;
 
             // Finalizações
             loadFeed();
-            initFeedInfiniteScroll();            
+            initFeedInfiniteScroll();
             //topBarScroll();      
-            hideLoading();                                          
+            hideLoading();
         });
     }
 
     // mapeia type -> banco/tabela
     const typeMap = {
-        people:      { db: 'workz_data',      table: 'hus',       idCol: 'id' },
-        businesses:  { db: 'workz_companies', table: 'companies', idCol: 'id' },
-        teams:       { db: 'workz_companies', table: 'teams',     idCol: 'id' },
-        apps:        { db: 'workz_apps',      table: 'apps',      idCol: 'id' }
+        people: { db: 'workz_data', table: 'hus', idCol: 'id' },
+        businesses: { db: 'workz_companies', table: 'companies', idCol: 'id' },
+        teams: { db: 'workz_companies', table: 'teams', idCol: 'id' },
+        apps: { db: 'workz_apps', table: 'apps', idCol: 'id' }
     };
 
     async function fetchByIds(ids = [], type = 'people') {
@@ -4821,9 +5455,9 @@ templates.entityContent = async ({ data }) => {
                 const appId = appButton.dataset.appId;
                 const res = await apiClient.post('/search', { db: 'workz_apps', table: 'apps', columns: ['*'], conditions: { id: appId } });
                 const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
-                
+
                 const appUrl = app?.src || app?.page_privacy;
-                if (app && appUrl) { 
+                if (app && appUrl) {
                     // Assuming newWindow is a global function
                     newWindow(appUrl, `app_${app.id}`, app.im, app.tt);
                 } else {
@@ -4861,15 +5495,15 @@ templates.entityContent = async ({ data }) => {
 
         if (viewType === 'dashboard') {
             // Copia segura + sem duplicatas
-            const basePeople   = Array.isArray(userPeople) ? userPeople : [];
-            const baseBiz      = Array.isArray(userBusinesses) ? userBusinesses : [];
-            const baseTeams    = Array.isArray(userTeams) ? userTeams : [];
+            const basePeople = Array.isArray(userPeople) ? userPeople : [];
+            const baseBiz = Array.isArray(userBusinesses) ? userBusinesses : [];
+            const baseTeams = Array.isArray(userTeams) ? userTeams : [];
 
-            const followedIds  = [...new Set([...basePeople, currentUserData.id])];
+            const followedIds = [...new Set([...basePeople, currentUserData.id])];
 
             if (followedIds.length) orBlocks.push({ us: { op: 'IN', value: followedIds } });
-            if (baseBiz.length)     orBlocks.push({ em: { op: 'IN', value: baseBiz } });
-            if (baseTeams.length)   orBlocks.push({ cm: { op: 'IN', value: baseTeams } });
+            if (baseBiz.length) orBlocks.push({ em: { op: 'IN', value: baseBiz } });
+            if (baseTeams.length) orBlocks.push({ cm: { op: 'IN', value: baseTeams } });
 
         } else if (viewType === ENTITY.PROFILE) {
             orBlocks.push({ us: viewId, cm: 0, em: 0 });
@@ -4892,12 +5526,12 @@ templates.entityContent = async ({ data }) => {
             feedFinished = true;
             feedLoading = false;
             return;
-        }                
+        }
 
         const res = await apiClient.post('/search', {
             db: 'workz_data',
             table: 'hpl',
-            columns: ['id','us','em','cm','tt','ct','dt','im'],
+            columns: ['id', 'us', 'em', 'cm', 'tt', 'ct', 'dt', 'im'],
             conditions: {
                 st: 1,                // AND st = 1
                 _or: orBlocks         // AND ( us IN (...) OR em IN (...) OR cm IN (...) )
@@ -4940,7 +5574,7 @@ templates.entityContent = async ({ data }) => {
         const io = new IntersectionObserver((entries) => {
             const [entry] = entries;
             if (entry.isIntersecting) {
-            loadFeed();
+                loadFeed();
             }
         }, { rootMargin: '200px' }); // começa a carregar antes de encostar
 
@@ -4951,9 +5585,9 @@ templates.entityContent = async ({ data }) => {
         try {
             const userData = await apiClient.get('/me');
             if (userData.error) {
-                handleLogout();                
+                handleLogout();
                 return false;
-            }            
+            }
             currentUserData = userData;
             return true;
         } catch (error) {
@@ -5025,8 +5659,8 @@ templates.entityContent = async ({ data }) => {
         }
 
         const entityType = (view === ENTITY.BUSINESS) ? 'businesses'
-                         : (view === ENTITY.TEAM) ? 'teams'
-                         : 'people';
+            : (view === ENTITY.TEAM) ? 'teams'
+                : 'people';
 
         if (rawData.id) {
             const result = await apiClient.post('/update', {
@@ -5556,7 +6190,7 @@ templates.entityContent = async ({ data }) => {
 
         const submitBtn = loginForm.querySelector('button[type="submit"]');
         setButtonLoading(submitBtn, true, 'Entrando...');
-        
+
         try {
             const result = await apiClient.post('/login', data);
             if (result?.token) {
@@ -5656,7 +6290,7 @@ templates.entityContent = async ({ data }) => {
     // ===================================================================
 
     async function renderRegisterUI() {
-        const mainWrapperInit = document.getElementById('main-wrapper-init');        
+        const mainWrapperInit = document.getElementById('main-wrapper-init');
         await renderTemplate(mainWrapperInit, 'register', null, () => {
             // Adiciona os listeners aos elementos de registo
             const registerForm = document.getElementById('register-form');
@@ -5723,26 +6357,26 @@ templates.entityContent = async ({ data }) => {
             return; // Stop if clock element is not on the page
         }
         const today = new Date();
-		let h = today.getHours();
-		let m = today.getMinutes();
-		h = checkTime(h);
-		m = checkTime(m);
-		
-        clock.innerHTML =  h + ":" + m;
+        let h = today.getHours();
+        let m = today.getMinutes();
+        h = checkTime(h);
+        m = checkTime(m);
 
-		setTimeout(startClock, 1000);
-	}
+        clock.innerHTML = h + ":" + m;
 
-	function checkTime(i) {
-		return (i < 10 ? "0" : "") + i;
-	}  
+        setTimeout(startClock, 1000);
+    }
 
-    function topBarScroll(){
-        
+    function checkTime(i) {
+        return (i < 10 ? "0" : "") + i;
+    }
+
+    function topBarScroll() {
+
         const topBar = document.querySelector('#topbar');
-        const logo = document.querySelector('.logo-menu');        
+        const logo = document.querySelector('.logo-menu');
 
-        mainWrapper.scroll(function(){            
+        mainWrapper.scroll(function () {
             if (mainWrapper.scrollTop() > 17.5) {
                 topBar.addClass('shadow-3xl bg-gray-100');
                 logo.attr('src', '/images/logos/workz/90x47.png');
@@ -5759,8 +6393,8 @@ templates.entityContent = async ({ data }) => {
                     'height': '76px',
                     'transition': 'width 0.5s, height 0.5s'
                 });
-            
-            }   
+
+            }
         });
     }
 
@@ -5768,7 +6402,7 @@ templates.entityContent = async ({ data }) => {
 
     setupSidebarFormConfirmation();
 
-    
+
 
     document.addEventListener('submit', (event) => {
         if (!event.target?.matches?.('#change-password-form')) return;
@@ -5780,7 +6414,7 @@ templates.entityContent = async ({ data }) => {
         handleChangePassword(event);
     }, true);
 
-    document.addEventListener('click', function(event) {
+    document.addEventListener('click', function (event) {
         const target = event.target;
         const activeSwal = document.querySelector('.swal-overlay:not(.swal-hidden)');
         if (activeSwal && activeSwal.contains(target)) {
@@ -5789,8 +6423,8 @@ templates.entityContent = async ({ data }) => {
         const isSidebarOpen = !sidebarWrapper.classList.contains('w-0');
         const clickedInsideSidebar = sidebarWrapper.contains(target);
         const clickedSidebarTrigger = !!target.closest('#sidebarTrigger');
-        
-        const actionBtn = target.closest('[data-sidebar-action]');        
+
+        const actionBtn = target.closest('[data-sidebar-action]');
         const actionType = actionBtn?.dataset?.sidebarAction;
         if (actionType === 'sidebar-back') {
             // Deixa o handler de histórico cuidar; não limpar/trocar o sidebar aqui
@@ -5804,13 +6438,13 @@ templates.entityContent = async ({ data }) => {
         }
         if (actionBtn && !isSidebarOpen) {
             event.preventDefault();
-            toggleSidebar(actionBtn);     
+            toggleSidebar(actionBtn);
             return;
         } else if (actionBtn && isSidebarOpen && actionBtn.id !== 'close') {
             event.preventDefault();
             toggleSidebar(actionBtn, false);
             return;
-        } else if (actionBtn && isSidebarOpen && actionBtn.id === 'close') { 
+        } else if (actionBtn && isSidebarOpen && actionBtn.id === 'close') {
             toggleSidebar();
         }
 
