@@ -4,6 +4,26 @@ import { ApiClient } from "./core/ApiClient.js";
 
 document.addEventListener('DOMContentLoaded', () => {
 
+    /*
+     * =========================================================================
+     *  Workz! Main Script Organization
+     * -------------------------------------------------------------------------
+     *  1. Global State & DOM References
+     *  2. Template Definitions
+     *  3. UI Construction Helpers
+     *  4. Media & Upload Utilities
+     *  5. Template Rendering & Messaging Utilities
+     *  6. Domain Constants & Data Mappers
+     *  7. Feed Helpers & Social Interactions
+     *  8. Generic Helpers (navigation, notifications, masks)
+     *  9. Startup Flow & Event Bindings
+     * =========================================================================
+     */
+
+    // =====================================================================
+    // 1. GLOBAL STATE & DOM REFERENCES
+    // =====================================================================
+
     const mainWrapper = document.querySelector("#main-wrapper"); //Main Wrapper
     const sidebarWrapper = document.querySelector('#sidebar-wrapper');
 
@@ -242,6 +262,11 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Constantes de entidade para padronização
+
+    // =====================================================================
+    // 6. DOMAIN CONSTANTS & DATA MAPPERS
+    // =====================================================================
+
     const ENTITY = Object.freeze({
         PROFILE: 'profile',
         BUSINESS: 'business',
@@ -259,6 +284,11 @@ document.addEventListener('DOMContentLoaded', () => {
         'businesses': { db: 'workz_companies', table: 'companies' },
         'teams': { db: 'workz_companies', table: 'teams' }
     };
+
+
+    // =====================================================================
+    // 4. MEDIA & UPLOAD UTILITIES
+    // =====================================================================
 
     function resolveImageSrc(imValue, label = '', options = {}) {
         const { size = 100, fallbackUrl = null } = options ?? {};
@@ -934,6 +964,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // 🏳️ TEMPLATES - Partes do HTML a ser renderizado
     // ===================================================================
 
+
+    // =====================================================================
+    // 2. TEMPLATE DEFINITIONS
+    // =====================================================================
+
     const templates = {
 
         init: `            
@@ -1411,6 +1446,11 @@ templates.entityContent = async ({ data }) => {
         { value: 'Brasil', label: 'Brasil' }
     ];
 
+
+
+    // =====================================================================
+    // 3. UI CONSTRUCTION HELPERS
+    // =====================================================================
 
     const UI = {
         renderHeader: ({ backAction = 'page-settings', backLabel, title }) => `
@@ -2522,6 +2562,11 @@ templates.entityContent = async ({ data }) => {
         return Number.isFinite(num) ? num : null;
     }
 
+
+    // =====================================================================
+    // 7. FEED HELPERS & SOCIAL INTERACTIONS
+    // =====================================================================
+
     function formatFeedTimestamp(input) {
         if (!input) return '';
         try {
@@ -2936,10 +2981,42 @@ templates.entityContent = async ({ data }) => {
     }
 
     // Exibição de loading (abstrai jQuery e permite trocar no futuro)
-    function showLoading() { try { $('#loading').fadeIn(); } catch(e) { const el = document.getElementById('loading'); if (el) el.style.display = 'block'; } }
-    function hideLoading() { try { $('#loading').fadeOut(); } catch(e) { const el = document.getElementById('loading'); if (el) el.style.display = 'none'; } }
+    function showLoading() {
+        const loader = document.getElementById('loading');
+        if (!loader) return;
+        const jq = (typeof window !== 'undefined') ? window.jQuery : null;
+        if (typeof jq === 'function' && jq.fn && typeof jq.fn.fadeIn === 'function') {
+            jq(loader).stop(true, true).fadeIn();
+        } else {
+            loader.style.display = 'block';
+            loader.style.opacity = '1';
+        }
+    }
+    function hideLoading({ delay = 0 } = {}) {
+        const loader = document.getElementById('loading');
+        if (!loader) return;
+        const perform = () => {
+            const jq = (typeof window !== 'undefined') ? window.jQuery : null;
+            if (typeof jq === 'function' && jq.fn && typeof jq.fn.fadeOut === 'function') {
+                jq(loader).stop(true, true).fadeOut();
+            } else {
+                loader.style.opacity = '0';
+                loader.style.display = 'none';
+            }
+        };
+        if (delay > 0) {
+            window.setTimeout(perform, delay);
+        } else {
+            perform();
+        }
+    }
 
     // Navegação centralizada (mantém padrão e facilita manutenção)
+
+    // =====================================================================
+    // 8. GENERIC HELPERS & INFRASTRUCTURE
+    // =====================================================================
+
     function navigateTo(path) {
         history.pushState({}, '', path);
         showLoading();
@@ -3622,6 +3699,11 @@ templates.entityContent = async ({ data }) => {
         element.style.opacity = 1;
         element.style.pointerEvents = '';
     }
+
+
+    // =====================================================================
+    // 5. TEMPLATE RENDERING & MESSAGING UTILITIES
+    // =====================================================================
 
     async function renderTemplate(container, template, data = null, onRendered = null) {
         await fadeTransition(container, async () => {
@@ -4379,7 +4461,7 @@ templates.entityContent = async ({ data }) => {
 
             // Verifica se entidade existe
             if (entityData.data.length === 0) {
-                $('#loading').delay(250).fadeOut();                
+                hideLoading({ delay: 250 });                
                 return;
             }                        
 
@@ -4683,7 +4765,7 @@ templates.entityContent = async ({ data }) => {
             loadFeed();
             initFeedInfiniteScroll();            
             //topBarScroll();      
-            $('#loading').fadeOut();                                          
+            hideLoading();                                          
         });
     }
 
@@ -5479,7 +5561,7 @@ templates.entityContent = async ({ data }) => {
             const result = await apiClient.post('/login', data);
             if (result?.token) {
                 localStorage.setItem('jwt_token', result.token);
-                $('#loading').fadeIn();
+                showLoading();
                 startup();
             } else {
                 await showMessage(messageContainer, result?.error || 'Credenciais inválidas. Verifique seus dados.', 'error', { dismissAfter: 6000 });
@@ -5549,7 +5631,7 @@ templates.entityContent = async ({ data }) => {
 
             if (result?.token) {
                 localStorage.setItem('jwt_token', result.token);
-                $('#loading').fadeIn();
+                showLoading();
                 startup();
                 return;
             }
@@ -5622,13 +5704,18 @@ templates.entityContent = async ({ data }) => {
                 e.preventDefault();
                 renderRegisterUI();
             });
-            $('#loading').delay(250).fadeOut();
+            hideLoading({ delay: 250 });
         });
     }
 
     // ===================================================================
     // 🔄 RENDERIZAÇÃO DA INTERFACE
     // ===================================================================
+
+
+    // =====================================================================
+    // 9. STARTUP FLOW & EVENT BINDINGS
+    // =====================================================================
 
     function startClock() {
         const clock = document.querySelector('#wClock');
