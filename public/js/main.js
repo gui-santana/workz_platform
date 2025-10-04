@@ -2538,6 +2538,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     async function appendWidget(type = 'people', gridList, count) {
+        console.log(`Adicionando widget: ${type}, count: ${count}`);
 
         // people aqui são IDs; resolvemos antes de tudo
         let resolved = await fetchByIds(gridList, type);
@@ -2576,6 +2577,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const widgetWrapper = document.querySelector('#widget-wrapper');
+
+        // Verificar se o widget já existe e removê-lo
+        const existingWidget = widgetWrapper.querySelector(`#widget-${type}`);
+        if (existingWidget) {
+            console.log(`Removendo widget duplicado: ${type}`);
+            existingWidget.remove();
+        }
 
         widgetWrapper.insertAdjacentHTML('beforeend', `    
             <div id="widget-${type}">
@@ -2658,6 +2666,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function pageAction() {
         const actionContainer = document.querySelector('#action-container');
+
+        // Limpar container de ações antes de adicionar novas
+        if (actionContainer) {
+            actionContainer.innerHTML = '';
+        }
+
         const isManager = memberLevel >= 3;
         if (viewType === ENTITY.PROFILE) {
             const isFollowing = Array.isArray(userPeople)
@@ -2713,8 +2727,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function customMenu() {
+        console.log('customMenu chamada, viewType:', viewType);
         const customMenu = document.querySelector('#custom-menu');
         const standardMenu = document.querySelector('#standard-menu');
+
+        // Limpar menu customizado antes de adicionar novos itens
+        if (customMenu) {
+            customMenu.innerHTML = '';
+        }
 
         if (viewType === 'dashboard') {
             customMenu.insertAdjacentHTML('beforeend', UI.menuItem({ action: 'my-profile', icon: 'fa-address-card', label: 'Meu Perfil' }));
@@ -2938,7 +2958,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const timeline = document.querySelector('#timeline');
         if (!timeline || !Array.isArray(items) || !items.length) return;
 
-        const html = items.map((post) => {
+        // Verificar posts duplicados
+        const existingPostIds = new Set();
+        timeline.querySelectorAll('[data-post-id]').forEach(post => {
+            existingPostIds.add(post.dataset.postId);
+        });
+
+        // Filtrar apenas posts que não existem
+        const newItems = items.filter(post => !existingPostIds.has(String(post?.id ?? '')));
+        console.log(`appendFeed: ${items.length} posts recebidos, ${existingPostIds.size} existentes, ${newItems.length} novos`);
+        if (!newItems.length) return;
+
+        const html = newItems.map((post) => {
             const author = post?.author ?? {};
             const authorName = escapeHtml(author?.name || 'Usuário');
             const avatarSrc = author?.avatar || resolveImageSrc(null, authorName, { size: 100 });
@@ -2965,7 +2996,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 : '';
 
             return `
-        <article class="col-span-12 sm:col-span-6 lg:col-span-4">
+        <article class="col-span-12 sm:col-span-6 lg:col-span-4" data-post-id="${postId}">
             <div class="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-2xl bg-gray-900 text-white">
                 <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}"></div>
                 <div class="absolute inset-0 bg-gradient-to-b from-black/10 via-black/60 to-black/90"></div>
@@ -4420,7 +4451,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     navTitle: 'Editor de Posts',
                     prevTitle: 'Voltar',
                     origin: 'stack'
-                }, async () => {                    
+                }, async () => {
                     // Callback executado após a renderização completa
                     setTimeout(() => {
                         // Buscar elementos diretamente no sidebarWrapper
@@ -4442,7 +4473,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 }
                             }, 500);
                         }
-                    }, 200);                    
+                    }, 200);
                 });
 
             } else if (action === 'page-settings') {
@@ -4741,6 +4772,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderTemplate(loginWrapper, 'init', null, () => {
                     renderLoginUI();
                     viewType = 'public';
+                    resetFeed();
                     loadFeed();
                     initFeedInfiniteScroll();
                 });
@@ -4992,6 +5024,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function renderView(entity = currentUserData) {
+        console.log('renderView chamada, viewType:', viewType, 'entity:', entity);
+
+        // Limpar widgets existentes no início da renderView
+        const widgetWrapper = document.querySelector('#widget-wrapper');
+        if (widgetWrapper) {
+            console.log('Limpando widgets existentes...');
+            widgetWrapper.innerHTML = '';
+        }
+
         // Normaliza o ID que vai para a query
         const entityId = typeof entity === 'object' && entity !== null ? entity.id : entity;
         let entityData = [];
@@ -5346,7 +5387,17 @@ document.addEventListener('DOMContentLoaded', () => {
         ]).then(() => {
 
             const widgetWrapper = document.querySelector('#widget-wrapper');
-            widgetWrapper.addEventListener('click', (e) => {
+
+            // Remover event listeners existentes para evitar duplicação
+            if (widgetWrapper._clickHandler) {
+                widgetWrapper.removeEventListener('click', widgetWrapper._clickHandler);
+            }
+            if (widgetWrapper._keydownHandler) {
+                widgetWrapper.removeEventListener('keydown', widgetWrapper._keydownHandler);
+            }
+
+            // Criar novos handlers
+            const clickHandler = (e) => {
                 const card = e.target.closest('.card-item');
                 if (!card) return; // não clicou em um card
 
@@ -5367,10 +5418,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 else baseUrl = '/business/';
 
                 navigateTo(`${baseUrl}${id}`);
-            });
+            };
 
             // Acessibilidade: abrir cards com Enter
-            widgetWrapper.addEventListener('keydown', (e) => {
+            const keydownHandler = (e) => {
                 if (e.key !== 'Enter') return;
                 const card = e.target.closest('.card-item');
                 if (!card) return;
@@ -5382,7 +5433,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 else if (type === 'teams') baseUrl = '/team/';
                 else baseUrl = '/business/';
                 navigateTo(`${baseUrl}${id}`);
-            });
+            };
+
+            // Adicionar os event listeners e armazenar as referências
+            widgetWrapper.addEventListener('click', clickHandler);
+            widgetWrapper.addEventListener('keydown', keydownHandler);
+            widgetWrapper._clickHandler = clickHandler;
+            widgetWrapper._keydownHandler = keydownHandler;
 
 
             const pageThumbs = document.getElementsByClassName('page-thumb');
@@ -5391,9 +5448,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // Reseta o estado do feed
-            feedOffset = 0;
-            feedLoading = false;
-            feedFinished = false;
+            resetFeed();
 
             // Finalizações
             loadFeed();
@@ -5485,7 +5540,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function resetFeed() {
+        feedOffset = 0;
+        feedLoading = false;
+        feedFinished = false;
+        feedInteractionsAttached = false;
+
+        // Limpar o conteúdo do timeline
+        const timeline = document.querySelector('#timeline');
+        if (timeline) {
+            timeline.innerHTML = '';
+        }
+    }
+
     async function loadFeed() {
+        console.log('loadFeed chamada, viewType:', viewType, 'feedLoading:', feedLoading, 'feedFinished:', feedFinished);
         if (!viewType) return;
 
         if (feedLoading || feedFinished) return;
