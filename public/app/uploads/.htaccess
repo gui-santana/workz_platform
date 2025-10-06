@@ -1,0 +1,18 @@
+# Permitir acesso aos arquivos de upload
+Options -Indexes
+<Files "*">
+    Order Allow,Deny
+    Allow from all
+</Files>
+
+# Permitir apenas tipos de arquivo específicos
+<FilesMatch "\.(jpg|jpeg|png|gif|webp|mp4|webm|avi|mov)$">
+    Order Allow,Deny
+    Allow from all
+</FilesMatch>
+
+# Bloquear arquivos PHP na pasta de uploads
+<FilesMatch "\.php$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>

@@ -881,4 +881,214 @@ body.is-rotating .h-rot {
   }
 
 
+}/* Est
+ilos para o editor de posts */
+.item {
+  position: absolute;
+  cursor: move;
+  user-select: none;
+  border: 2px solid transparent;
+  transition: border-color 0.2s;
+}
+
+.item.selected {
+  border-color: #3b82f6;
+}
+
+.item.draggable {
+  cursor: grab;
+}
+
+.item.draggable:active {
+  cursor: grabbing;
+}
+
+/* Estilos para caixas de texto */
+.text-box {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.2;
+  word-wrap: break-word;
+  min-width: 100px;
+  min-height: 30px;
+}
+
+.text-box[data-align="left"] {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.text-box[data-align="center"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.text-box[data-align="right"] {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+/* Estilos para itens de imagem */
+.image-item {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.image-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Handles de redimensionamento */
+.handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 1000;
+  display: none !important;
+}
+
+.item.selected .handle {
+  display: block !important;
+}
+
+.h-nw { top: -6px; left: -6px; cursor: nw-resize; }
+.h-ne { top: -6px; right: -6px; cursor: ne-resize; }
+.h-sw { bottom: -6px; left: -6px; cursor: sw-resize; }
+.h-se { bottom: -6px; right: -6px; cursor: se-resize; }
+
+/* Estilos para mídia de fundo */
+.bg-media {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -1;
+}
+
+/* Estilos para o botão de enviar */
+.enviar-icon {
+  transition: transform 0.2s;
+}
+
+#btnEnviar.exporting .enviar-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Estilos para notificações de captura */
+.capture-notification {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(34, 197, 94, 0.9);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  z-index: 1000;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* Estados do botão de captura */
+.camera-active {
+  background-color: #ef4444 !important;
+  border-color: #dc2626 !important;
+}
+
+.camera-inactive {
+  background-color: #6b7280 !important;
+  border-color: #4b5563 !important;
+}
+
+.long-press {
+  transform: scale(0.95);
+  background-color: #dc2626 !important;
+}
+
+.capture-mode {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* Estilos para o grid canvas */
+#gridCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Estilos para guias de alinhamento */
+.guide {
+  position: absolute;
+  background: #ef4444;
+  z-index: 999;
+  pointer-events: none;
+}
+
+.guide-x {
+  width: 100%;
+  height: 1px;
+}
+
+.guide-y {
+  height: 100%;
+  width: 1px;
+}
+
+/* Estados de redimensionamento */
+.is-resizing {
+  cursor: nw-resize !important;
+}
+
+.is-resizing * {
+  cursor: nw-resize !important;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+  .text-box {
+    font-size: 24px;
+    padding: 6px 10px;
+  }
+  
+  .handle {
+    width: 16px;
+    height: 16px;
+  }
+  
+  .h-nw, .h-ne, .h-sw, .h-se {
+    margin: -8px;
+  }
 }

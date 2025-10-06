@@ -2354,188 +2354,180 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (view === 'post-editor') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle || 'Voltar', title: navTitle || 'Editor de Posts' });
             html += `
-                <div id="appShell">
-    <header class="flex flex-col gap-2 text-center md:text-left">
-      <h1 class="text-2xl font-bold text-slate-800">Mini PowerPoint/Canva 3x4 - Pro</h1>
-      <p class="text-sm text-slate-500">Monte artes e cards verticais em qualquer tela.</p>
-    </header>
-  
-    <section class="editor-card flex flex-col gap-5">
-      <!-- Toolbar superior minimalista -->
-      <div class="top-toolbar">
-        <label for="bgUpload" class="tool-icon" title="Plano de fundo">
-          <i class="fas fa-image"></i>
-          <input type="file" id="bgUpload" accept="image/*,video/*">
-        </label>
-        <button type="button" id="btnAddText" class="tool-icon" title="Adicionar texto">
-          <i class="fas fa-font"></i>
-        </button>
-        <button type="button" id="btnAddImg" class="tool-icon" title="Adicionar imagem">
-          <i class="fas fa-image"></i>
-        </button>
-        <button type="button" id="btnAddElement" class="tool-icon" title="Adicionar elemento">
-          <i class="fas fa-plus"></i>
-        </button>
-        <button type="button" id="btnCameraMode" class="tool-icon hidden" title="Usar câmera (requer permissão)">
-          <i class="fas fa-camera"></i>
-        </button>
-        <div class="toolbar-divider"></div>
+            <div id="appShell">    
+                <section class="editor-card flex flex-col gap-5">
+                <!-- Toolbar superior minimalista -->
+                <div class="top-toolbar">
+                    <label for="bgUpload" class="tool-icon" title="Plano de fundo">
+                        <i class="fas fa-image"></i>
+                        <input type="file" id="bgUpload" accept="image/*,video/*">
+                    </label>
+                    <button type="button" id="btnAddText" class="tool-icon" title="Adicionar texto">
+                        <i class="fas fa-font"></i>
+                    </button>
+                    <button type="button" id="btnAddImg" class="tool-icon" title="Adicionar imagem">
+                        <i class="fas fa-image"></i>
+                    </button>
+                    <button type="button" id="btnAddElement" class="tool-icon" title="Adicionar elemento">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                    <button type="button" id="btnCameraMode" class="tool-icon hidden" title="Usar câmera (requer permissão)">
+                        <i class="fas fa-camera"></i>
+                    </button>
+                    <div class="toolbar-divider"></div>
 
-        <button type="button" id="btnSaveJSON" class="tool-icon" title="Salvar layout">
-          <i class="fas fa-save"></i>
-        </button>
-        <label class="tool-icon" for="loadJSON" title="Carregar layout">
-          <i class="fas fa-folder-open"></i>
-          <input type="file" id="loadJSON" accept="application/json" class="sr-only">
-        </label>
-      </div>
-  
-      <!-- Editor viewport com botão de captura sobreposto -->
-      <div id="editorViewport">
-        <div id="editor">
-          <canvas id="gridCanvas" width="900" height="1200"></canvas>
-          <div id="guideX" class="guide guide-x" style="display:none; top:50%"></div>
-          <div id="guideY" class="guide guide-y" style="display:none; left:50%"></div>
-        </div>
-        
-        <!-- Botão de captura estilo Instagram Stories -->
-        <div class="capture-overlay">
-          <button type="button" id="captureButton" class="capture-button" title="Toque para foto, segure para vídeo">
-            <div class="capture-inner">
-              <i class="fa-solid fa-camera capture-icon"></i>
+                    <button type="button" id="btnSaveJSON" class="tool-icon" title="Salvar layout">
+                        <i class="fas fa-save"></i>
+                    </button>
+                    <label class="tool-icon" for="loadJSON" title="Carregar layout">
+                        <i class="fas fa-folder-open"></i>
+                        <input type="file" id="loadJSON" accept="application/json" class="sr-only">
+                    </label>
+                </div>
+            
+                <!-- Editor viewport com botão de captura sobreposto -->
+                <div id="editorViewport">
+                    <div id="editor">
+                        <canvas id="gridCanvas" width="900" height="1200"></canvas>
+                        <div id="guideX" class="guide guide-x" style="display:none; top:50%"></div>
+                        <div id="guideY" class="guide guide-y" style="display:none; left:50%"></div>
+                    </div>                    
+                    <!-- Botão de captura estilo Instagram Stories -->
+                    <div class="capture-overlay">
+                    <button type="button" id="captureButton" class="capture-button" title="Toque para foto, segure para vídeo">
+                        <div class="capture-inner">
+                            <i class="fa-solid fa-camera capture-icon"></i>
+                        </div>
+                        <div class="capture-hint">
+                            <i class="fa-solid fa-hand-pointer"></i>
+                        </div>
+                    </button>
+                    </div>
+                </div>
+            
+                <div class="flex flex-wrap gap-3 items-center text-xs text-slate-500 justify-between">
+                    <span id="captureHint">Dica: <strong>Toque</strong> para foto, <strong>segure</strong> para vídeo</span>
+                    <span>Proporção fixa 3:4 • 900 × 1200 px</span>
+                </div>
+                </section>
+            
+                <section id="itemBar" class="editor-card control-panel" style="display:none">
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm text-slate-600">Selecionado</span>
+                        <select id="zIndex" class="border border-slate-200 rounded-lg px-2 py-1 text-sm">
+                            <option value="front">Trazer p/ frente</option>
+                            <option value="back">Enviar p/ trás</option>
+                        </select>
+                    </div>
+                
+                    <div id="textControls" class="hidden flex-wrap items-center gap-2">
+                        <label class="flex items-center gap-2 text-sm text-slate-600">
+                            Fonte
+                            <input id="fontSize" type="range" min="12" max="96" value="28" class="accent-slate-500" title="Tamanho da fonte">
+                        </label>
+                        <input id="fontColor" type="color" value="#111827" class="h-9 w-9 rounded-full border border-slate-200" title="Cor do texto">
+                        <select id="fontWeight" class="border border-slate-200 rounded-lg px-2 py-1 text-sm" title="Peso">
+                            <option value="400">Regular</option>
+                            <option value="600" selected>Semibold</option>
+                            <option value="700">Bold</option>
+                        </select>
+                        <div class="flex items-center gap-2">
+                            <button type="button" id="alignLeft" class="toolbar-btn toolbar-btn--ghost" title="Alinhar à esquerda">
+                                <i class="fa-solid fa-align-left"></i><span class="sr-only">Alinhar à esquerda</span>
+                            </button>
+                            <button type="button" id="alignCenter" class="toolbar-btn toolbar-btn--ghost" title="Centralizar texto">
+                                <i class="fa-solid fa-align-center"></i><span class="sr-only">Centralizar</span>
+                            </button>
+                            <button type="button" id="alignRight" class="toolbar-btn toolbar-btn--ghost" title="Alinhar à direita">
+                                <i class="fa-solid fa-align-right"></i><span class="sr-only">Alinhar à direita</span>
+                            </button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <label class="flex items-center gap-2 text-sm text-slate-600">
+                                Fundo
+                                <input id="bgTextColor" type="color" value="#ffffff" class="h-9 w-9 rounded-full border border-slate-200" title="Cor de fundo do texto">
+                            </label>
+                            <label class="flex items-center gap-1 text-sm text-slate-600">
+                                <input id="bgNone" type="checkbox" class="rounded border-slate-300">
+                                Sem fundo
+                            </label>
+                        </div>
+                        <button type="button" id="btnEditText" class="toolbar-btn toolbar-btn--ghost" aria-pressed="false" title="Editar texto selecionado">
+                            <i class="fa-solid fa-edit"></i>
+                            <span id="btnEditTextLabel">Editar</span>
+                        </button>
+                    </div>
+            
+                    <div id="animControls" class="hidden flex-wrap items-center gap-2">
+                        <label class="flex items-center gap-2 text-sm text-slate-600">
+                        Animação
+                        <select id="animType" class="border border-slate-200 rounded-lg px-2 py-1 text-sm">
+                            <option value="none">none</option>
+                            <option value="fade-in">fade-in</option>
+                            <option value="slide-left">slide-in left</option>
+                            <option value="slide-right">slide-in right</option>
+                            <option value="slide-top">slide-in top</option>
+                            <option value="slide-bottom">slide-in bottom</option>
+                        </select>
+                        </label>
+                        <label class="flex items-center gap-2 text-sm text-slate-600">
+                        Delay (s)
+                        <input id="animDelay" type="number" step="0.1" min="0" value="0" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
+                        </label>
+                        <label class="flex items-center gap-2 text-sm text-slate-600">
+                        Duração (s)
+                        <input id="animDur" type="number" step="0.1" min="0.1" value="0.8" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
+                        </label>
+                    </div>
+            
+                    <div class="ml-auto">
+                        <button type="button" id="btnDelete" class="toolbar-btn toolbar-btn--danger" title="Excluir item selecionado">
+                            <i class="fa-solid fa-trash"></i><span>Excluir</span>
+                        </button>
+                    </div>
+                </section>
+            
+                <!-- Botão Enviar destacado -->
+                <section class="editor-card">
+                    <div class="flex flex-col items-center gap-4">
+                        <button type="button" id="btnEnviar" class="enviar-button" title="Enviar conteúdo">
+                            <div class="enviar-inner">
+                                <i class="fas fa-paper-plane enviar-icon"></i>
+                                <span class="enviar-text">Enviar</span>
+                            </div>
+                        </button>
+                        
+                        <!-- Configurações de exportação (ocultas por padrão) -->
+                        <div id="exportSettings" class="export-settings hidden">
+                        <div class="flex flex-wrap gap-3 items-center justify-center text-sm">
+                            <label class="flex items-center gap-2 text-slate-600">
+                                Duração (s)
+                                <input id="vidDur" type="number" min="1" step="0.5" value="6" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
+                            </label>
+                            <label class="flex items-center gap-2 text-slate-600">
+                                FPS
+                                <input id="vidFPS" type="number" min="10" max="60" step="1" value="30" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
+                            </label>
+                        </div>
+                        <div id="videoExportInfo" class="text-xs text-slate-500 text-center mt-2 hidden">
+                            <i class="fa-solid fa-info-circle"></i> 
+                            <span id="videoExportInfoText"></span>
+                        </div>
+                        </div>
+                    </div>
+                </section>
+            
+                <canvas id="outCanvas" width="900" height="1200" class="hidden"></canvas>
+                
+                <!-- Elementos ocultos para captura -->
+                <video id="hiddenCameraStream" autoplay muted playsinline class="hidden"></video>
+                <canvas id="captureCanvas" class="hidden"></canvas>
             </div>
-            <div class="capture-hint">
-              <i class="fa-solid fa-hand-pointer"></i>
-            </div>
-          </button>
-        </div>
-      </div>
-  
-      <div class="flex flex-wrap gap-3 items-center text-xs text-slate-500 justify-between">
-        <span id="captureHint">Dica: <strong>Toque</strong> para foto, <strong>segure</strong> para vídeo</span>
-        <span>Proporção fixa 3:4 • 900 × 1200 px</span>
-      </div>
-    </section>
-  
-    <section id="itemBar" class="editor-card control-panel" style="display:none">
-      <div class="flex items-center gap-2">
-        <span class="text-sm text-slate-600">Selecionado</span>
-        <select id="zIndex" class="border border-slate-200 rounded-lg px-2 py-1 text-sm">
-          <option value="front">Trazer p/ frente</option>
-          <option value="back">Enviar p/ trás</option>
-        </select>
-      </div>
-  
-      <div id="textControls" class="hidden flex-wrap items-center gap-2">
-        <label class="flex items-center gap-2 text-sm text-slate-600">
-          Fonte
-          <input id="fontSize" type="range" min="12" max="96" value="28" class="accent-slate-500" title="Tamanho da fonte">
-        </label>
-        <input id="fontColor" type="color" value="#111827" class="h-9 w-9 rounded-full border border-slate-200" title="Cor do texto">
-        <select id="fontWeight" class="border border-slate-200 rounded-lg px-2 py-1 text-sm" title="Peso">
-          <option value="400">Regular</option>
-          <option value="600" selected>Semibold</option>
-          <option value="700">Bold</option>
-        </select>
-        <div class="flex items-center gap-2">
-          <button type="button" id="alignLeft" class="toolbar-btn toolbar-btn--ghost" title="Alinhar à esquerda">
-            <i class="fa-solid fa-align-left"></i><span class="sr-only">Alinhar à esquerda</span>
-          </button>
-          <button type="button" id="alignCenter" class="toolbar-btn toolbar-btn--ghost" title="Centralizar texto">
-            <i class="fa-solid fa-align-center"></i><span class="sr-only">Centralizar</span>
-          </button>
-          <button type="button" id="alignRight" class="toolbar-btn toolbar-btn--ghost" title="Alinhar à direita">
-            <i class="fa-solid fa-align-right"></i><span class="sr-only">Alinhar à direita</span>
-          </button>
-        </div>
-        <div class="flex items-center gap-2">
-          <label class="flex items-center gap-2 text-sm text-slate-600">
-            Fundo
-            <input id="bgTextColor" type="color" value="#ffffff" class="h-9 w-9 rounded-full border border-slate-200" title="Cor de fundo do texto">
-          </label>
-          <label class="flex items-center gap-1 text-sm text-slate-600">
-            <input id="bgNone" type="checkbox" class="rounded border-slate-300">
-            Sem fundo
-          </label>
-        </div>
-        <button type="button" id="btnEditText" class="toolbar-btn toolbar-btn--ghost" aria-pressed="false" title="Editar texto selecionado">
-          <i class="fa-solid fa-edit"></i>
-          <span id="btnEditTextLabel">Editar</span>
-        </button>
-      </div>
-  
-      <div id="animControls" class="hidden flex-wrap items-center gap-2">
-        <label class="flex items-center gap-2 text-sm text-slate-600">
-          Animação
-          <select id="animType" class="border border-slate-200 rounded-lg px-2 py-1 text-sm">
-            <option value="none">none</option>
-            <option value="fade-in">fade-in</option>
-            <option value="slide-left">slide-in left</option>
-            <option value="slide-right">slide-in right</option>
-            <option value="slide-top">slide-in top</option>
-            <option value="slide-bottom">slide-in bottom</option>
-          </select>
-        </label>
-        <label class="flex items-center gap-2 text-sm text-slate-600">
-          Delay (s)
-          <input id="animDelay" type="number" step="0.1" min="0" value="0" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
-        </label>
-        <label class="flex items-center gap-2 text-sm text-slate-600">
-          Duração (s)
-          <input id="animDur" type="number" step="0.1" min="0.1" value="0.8" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
-        </label>
-      </div>
-  
-      <div class="ml-auto">
-        <button type="button" id="btnDelete" class="toolbar-btn toolbar-btn--danger" title="Excluir item selecionado">
-          <i class="fa-solid fa-trash"></i><span>Excluir</span>
-        </button>
-      </div>
-    </section>
-  
-    <!-- Botão Enviar destacado -->
-    <section class="editor-card">
-      <div class="flex flex-col items-center gap-4">
-        <button type="button" id="btnEnviar" class="enviar-button" title="Enviar conteúdo">
-          <div class="enviar-inner">
-            <i class="fas fa-paper-plane enviar-icon"></i>
-            <span class="enviar-text">Enviar</span>
-          </div>
-        </button>
-        
-        <!-- Configurações de exportação (ocultas por padrão) -->
-        <div id="exportSettings" class="export-settings hidden">
-          <div class="flex flex-wrap gap-3 items-center justify-center text-sm">
-            <label class="flex items-center gap-2 text-slate-600">
-              Duração (s)
-              <input id="vidDur" type="number" min="1" step="0.5" value="6" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
-            </label>
-            <label class="flex items-center gap-2 text-slate-600">
-              FPS
-              <input id="vidFPS" type="number" min="10" max="60" step="1" value="30" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
-            </label>
-          </div>
-          <div id="videoExportInfo" class="text-xs text-slate-500 text-center mt-2 hidden">
-            <i class="fa-solid fa-info-circle"></i> 
-            <span id="videoExportInfoText"></span>
-          </div>
-        </div>
-      </div>
-    </section>
-  
-    <canvas id="outCanvas" width="900" height="1200" class="hidden"></canvas>
-    
-    <!-- Elementos ocultos para captura -->
-    <video id="hiddenCameraStream" autoplay muted playsinline class="hidden"></video>
-    <canvas id="captureCanvas" class="hidden"></canvas>
-  </div>
             `;
         }
         html += UI.signature();
         return html;
     };
-
-
 
     async function appendWidget(type = 'people', gridList, count) {
         console.log(`Adicionando widget: ${type}, count: ${count}`);
@@ -3244,9 +3236,13 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    // Notificações simples
+    // Notificações simples (disponíveis globalmente)
     function notifySuccess(msg) { try { swal('Pronto', msg, 'success'); } catch (_) { try { alert(msg); } catch (__) { } } }
     function notifyError(msg) { try { swal('Ops', msg, 'error'); } catch (_) { try { alert(msg); } catch (__) { } } }
+    
+    // Tornar funções disponíveis globalmente para o editor
+    window.notifySuccess = notifySuccess;
+    window.notifyError = notifyError;
 
     async function confirmDialog(msg, { title = 'Confirmação', danger = false } = {}) {
         try {
@@ -3884,7 +3880,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!document.querySelector('link[href*="editor.css"]')) {
                 const editorCSS = document.createElement('link');
                 editorCSS.rel = 'stylesheet';
-                editorCSS.href = 'css/editor.css';
+                // Use absolute path to work on nested routes like /team/15
+                editorCSS.href = '/css/editor.css';
                 document.head.appendChild(editorCSS);
             }
 
@@ -4007,114 +4004,67 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Verificar se o script já foi carregado
-        if (document.querySelector('script[src*="editor.js"]')) {
-            // Se já existe, apenas reinicializar
-            if (typeof init === 'function') {
-                try {
-                    initEditorInSidebar(sidebarContent);
-                } catch (error) {
-                    console.error('Erro ao inicializar editor:', error);
-                    notifyError('Erro ao inicializar o editor.');
-                }
+        if (typeof init === 'function') {
+            try {
+                initEditorInSidebar(sidebarContent);
+                return;
+            } catch (error) {
+                console.error('Erro ao inicializar editor:', error);
+                notifyError('Erro ao inicializar o editor.');
+                return;
             }
-            return;
         }
 
-        // Carregar o script do editor
-        const editorScript = document.createElement('script');
-        editorScript.src = 'js/editor.js';
-        editorScript.onload = () => {
-            setTimeout(() => {
-                if (typeof init === 'function') {
-                    try {
-                        initEditorInSidebar(sidebarContent);
-                    } catch (error) {
-                        console.error('Erro ao inicializar editor:', error);
-                        notifyError('Erro ao inicializar o editor.');
-                    }
-                } else {
-                    // Tentar carregar com fetch para debug
-                    fetch('js/editor.js')
-                        .then(response => response.text())
-                        .then(content => {
-                            if (content.trim().startsWith('<')) {
-                                console.error('editor.js está retornando HTML em vez de JavaScript!');
-                                createInlineEditor(sidebarContent);
-                            } else {
-                                try {
-                                    eval(content);
-                                    if (typeof init === 'function') {
-                                        initEditorInSidebar(sidebarContent);
-                                    }
-                                } catch (evalError) {
-                                    console.error('Erro ao executar editor.js:', evalError);
-                                    createInlineEditor(sidebarContent);
-                                }
-                            }
-                        })
-                        .catch(err => {
-                            console.error('Erro ao fazer fetch do editor.js:', err);
-                            notifyError('Erro ao carregar o editor.');
-                        });
+        // Usar fetch para carregar o script diretamente
+        const editorUrl = window.location.origin + '/js/editor.js?v=' + Date.now();
+        
+        console.log('Tentando carregar editor de:', editorUrl);
+        
+        fetch(editorUrl)
+            .then(response => {
+                console.log('Resposta do fetch:', response.status, response.statusText);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-            }, 100);
-        };
-        editorScript.onerror = () => {
-            console.error('Erro ao carregar editor.js com caminho relativo');
-            console.log('Tentando carregar com caminho absoluto...');
-
-            // Tentar com caminho absoluto
-            const absoluteScript = document.createElement('script');
-            const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
-            absoluteScript.src = baseUrl + 'js/editor.js';
-
-            absoluteScript.onload = () => {
-                console.log('Script carregado com caminho absoluto');
-                setTimeout(() => {
-                    if (typeof init === 'function') {
-                        console.log('Função init encontrada após carregamento absoluto');
-                        // Usar a mesma lógica de inicialização
-                        try {
-                            console.log('Inicializando editor...');
-                            setTimeout(() => {
-                                const originalGetElementById = document.getElementById;
-                                document.getElementById = function (id) {
-                                    const sidebarElement = sidebarContent.querySelector(`#${id}`);
-                                    if (sidebarElement) {
-                                        console.log(`Elemento ${id} encontrado na sidebar`);
-                                        return sidebarElement;
-                                    }
-                                    return originalGetElementById.call(document, id);
-                                };
-
-                                init();
-
-                                setTimeout(() => {
-                                    document.getElementById = originalGetElementById;
-                                }, 100);
-                            }, 50);
-                        } catch (error) {
-                            console.error('Erro ao inicializar editor:', error);
-                            notifyError('Erro ao inicializar o editor.');
+                return response.text();
+            })
+            .then(content => {
+                console.log('Conteúdo recebido, primeiros 100 caracteres:', content.substring(0, 100));
+                
+                if (content.trim().startsWith('<')) {
+                    console.error('editor.js está retornando HTML em vez de JavaScript!');
+                    console.log('Conteúdo HTML recebido:', content.substring(0, 500));
+                    createInlineEditor(sidebarContent);
+                    return;
+                }
+                
+                try {
+                    // Criar e executar o script
+                    const script = document.createElement('script');
+                    script.textContent = content;
+                    document.head.appendChild(script);
+                    
+                    // Aguardar um pouco e tentar inicializar
+                    setTimeout(() => {
+                        if (typeof init === 'function') {
+                            console.log('Função init encontrada, inicializando editor...');
+                            initEditorInSidebar(sidebarContent);
+                        } else {
+                            console.error('Função init não encontrada após carregar o script');
+                            createInlineEditor(sidebarContent);
                         }
-                    } else {
-                        console.error('Função init ainda não encontrada após carregamento absoluto');
-                        notifyError('Editor não foi carregado corretamente.');
-                    }
-                }, 100);
-            };
-
-            absoluteScript.onerror = () => {
-                console.error('Erro ao carregar editor.js mesmo com caminho absoluto');
+                    }, 100);
+                    
+                } catch (evalError) {
+                    console.error('Erro ao executar editor.js:', evalError);
+                    createInlineEditor(sidebarContent);
+                }
+            })
+            .catch(err => {
+                console.error('Erro ao fazer fetch do editor.js:', err);
                 console.log('Criando editor básico inline como fallback...');
-
-                // Criar um editor básico inline como fallback
                 createInlineEditor(sidebarContent);
-            };
-
-            document.head.appendChild(absoluteScript);
-        };
-        document.head.appendChild(editorScript);
+            });
     }
 
     function initEditorInSidebar(sidebarContent) {
@@ -4191,7 +4141,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Adicionar funcionalidade básica de texto
             const btnAddText = sidebarContent.querySelector('#btnAddText');
             if (btnAddText) {
-                btnAddText.addEventListener('click', () => {
+                // Evitar múltiplos binds se o fallback for chamado mais de uma vez
+                if (btnAddText._inlineTextHandler) {
+                    btnAddText.removeEventListener('click', btnAddText._inlineTextHandler);
+                }
+                const inlineHandler = () => {
                     const editor = sidebarContent.querySelector('#editor');
                     if (editor) {
                         const textBox = document.createElement('div');
@@ -4241,7 +4195,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         editor.appendChild(textBox);
                         console.log('Caixa de texto criada com editor básico');
                     }
-                });
+                };
+                btnAddText.addEventListener('click', inlineHandler);
+                btnAddText._inlineTextHandler = inlineHandler;
             }
 
             console.log('Editor básico inline criado com sucesso');
@@ -4437,7 +4393,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.log('Carregando CSS do editor...');
                     const editorCSS = document.createElement('link');
                     editorCSS.rel = 'stylesheet';
-                    editorCSS.href = 'css/editor.css';
+                    // Use absolute path to ensure correct load on nested routes
+                    editorCSS.href = '/css/editor.css';
                     document.head.appendChild(editorCSS);
                 }
 
@@ -5658,6 +5615,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 return false;
             }
             currentUserData = userData;
+            // Tornar disponível globalmente para o editor
+            window.currentUserData = currentUserData;
             return true;
         } catch (error) {
             console.error('Failed to initialize user data:', error);
@@ -6495,6 +6454,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const actionBtn = target.closest('[data-sidebar-action]');
         const actionType = actionBtn?.dataset?.sidebarAction;
+        const actionInsideSidebar = actionBtn ? sidebarWrapper.contains(actionBtn) : false;
         if (actionType === 'sidebar-back') {
             // Deixa o handler de histórico cuidar; não limpar/trocar o sidebar aqui
             event.preventDefault();
@@ -6510,6 +6470,10 @@ document.addEventListener('DOMContentLoaded', () => {
             toggleSidebar(actionBtn);
             return;
         } else if (actionBtn && isSidebarOpen && actionBtn.id !== 'close') {
+            // Se o botão pertence ao conteúdo da sidebar, deixe os handlers internos cuidarem
+            if (actionInsideSidebar) {
+                return;
+            }
             event.preventDefault();
             toggleSidebar(actionBtn, false);
             return;
@@ -6703,5 +6667,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
-
-

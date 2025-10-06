@@ -23,6 +23,24 @@ const init = () => {
 
   // ---------- Refs e constantes
     const editorViewport = document.getElementById('editorViewport');
+    // Evitar múltiplas inicializações no mesmo DOM (duplica event listeners)
+    if (!editorViewport) return;
+    if (editorViewport.dataset && editorViewport.dataset.initialized === '1') {
+      console.debug('[editor] já inicializado neste container, ignorando init()');
+      return;
+    }
+    editorViewport.dataset.initialized = '1';
+
+    // Helper para vincular listeners sem duplicar
+    const addEvtOnce = (el, type, handler, options) => {
+      if (!el) return;
+      const key = `__bound_${type}`;
+      if (el[key]) {
+        el.removeEventListener(type, el[key], options);
+      }
+      el.addEventListener(type, handler, options);
+      el[key] = handler;
+    };
     const editor = document.getElementById('editor');
     const gridCanvas = document.getElementById('gridCanvas');
     const gctx = gridCanvas.getContext('2d');
@@ -170,7 +188,8 @@ const init = () => {
   
 
     // ---------- Criação: Texto / Imagem / Elementos
-    btnAddText.addEventListener('click', ()=> createTextBox('Digite seu texto'));
+    const onAddTextClick = () => createTextBox('Digite seu texto');
+    addEvtOnce(btnAddText, 'click', onAddTextClick);
     btnAddImg.addEventListener('click', ()=>{
       const input = document.createElement('input'); input.type='file'; input.accept='image/*';
       input.onchange = e=>{
@@ -1485,10 +1504,10 @@ const init = () => {
           exportSettings.classList.remove('hidden');
           return;
         }
-        await exportVideo();
+        await exportAndSaveVideo();
       } else {
-        // Exportar como PNG
-        await exportFrameToPNG();
+        // Exportar e salvar como imagem
+        await exportAndSaveImage();
       }
     }
     
@@ -1526,6 +1545,321 @@ const init = () => {
     async function exportFrameToPNG(tSec=null){
       await renderFrame(tSec);
       const a = document.createElement('a'); a.download='slide.png'; a.href=outCanvas.toDataURL('image/png'); a.click();
+    }
+
+    // ---------- Função para comprimir imagem
+    async function compressImage(canvas, quality = 0.7, maxWidth = 1024) {
+      return new Promise(resolve => {
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Calcular novo tamanho mantendo proporção
+        const scale = Math.min(maxWidth / canvas.width, maxWidth / canvas.height, 1);
+        tempCanvas.width = canvas.width * scale;
+        tempCanvas.height = canvas.height * scale;
+        
+        // Desenhar imagem redimensionada
+        tempCtx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
+        
+        // Converter para blob com qualidade reduzida
+        tempCanvas.toBlob(resolve, 'image/jpeg', quality);
+      });
+    }
+
+    // ---------- Novas funções para salvar no servidor
+    async function exportAndSaveImage() {
+      try {
+        // Desabilitar botão e mostrar progresso
+        btnEnviar.disabled = true;
+        btnEnviar.classList.add('exporting');
+        btnEnviar.querySelector('.enviar-icon').className = 'fas fa-spinner fa-spin enviar-icon';
+        btnEnviar.querySelector('.enviar-text').textContent = 'Salvando...';
+
+        // Renderizar frame
+        await renderFrame();
+        
+        // Converter canvas para blob com compressão otimizada
+        let blob = await new Promise(resolve => {
+          outCanvas.toBlob(resolve, 'image/jpeg', 0.85);
+        });
+
+        // Se o arquivo ainda for muito grande, redimensionar
+        if (blob.size > 2 * 1024 * 1024) { // Se maior que 2MB
+          console.log(`Imagem muito grande (${(blob.size / 1024 / 1024).toFixed(2)}MB), redimensionando...`);
+          blob = await compressImage(outCanvas, 0.7, 1024); // Reduzir para max 1024px
+        }
+
+        console.log(`Tamanho final da imagem: ${(blob.size / 1024 / 1024).toFixed(2)}MB`);
+
+        // Obter dados do usuário atual do contexto global
+        const userData = window.currentUserData || { id: 1, tt: 'Usuário Teste' };
+        
+        // Preparar dados para envio
+        const formData = new FormData();
+        formData.append('file', blob, 'post_image.jpg');
+        formData.append('userId', userData.id);
+        formData.append('type', 'image');
+        formData.append('team', userData.team || '');
+        formData.append('business', userData.business || '');
+
+        // Enviar para servidor
+        const response = await fetch('app/save_post.php', {
+          method: 'POST',
+          body: formData
+        });
+
+        // Verificar se a resposta é válida
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        const responseText = await response.text();
+        console.log('Resposta do servidor (imagem):', responseText);
+        
+        let result;
+        try {
+          result = JSON.parse(responseText);
+        } catch (e) {
+          throw new Error(`Resposta inválida do servidor: ${responseText.substring(0, 200)}...`);
+        }
+
+        if (result.success) {
+          // Usar função de notificação global se disponível
+          if (typeof window.notifySuccess === 'function') {
+            window.notifySuccess('Imagem salva com sucesso!');
+          } else {
+            alert('Imagem salva com sucesso!');
+          }
+          console.log('Post criado com ID:', result.postId);
+        } else {
+          throw new Error(result.error || 'Erro desconhecido');
+        }
+
+      } catch (error) {
+        console.error('Erro ao salvar imagem:', error);
+        // Usar função de notificação global se disponível
+        if (typeof window.notifyError === 'function') {
+          window.notifyError('Erro ao salvar imagem: ' + error.message);
+        } else {
+          alert('Erro ao salvar imagem: ' + error.message);
+        }
+      } finally {
+        // Restaurar botão
+        btnEnviar.disabled = false;
+        btnEnviar.classList.remove('exporting');
+        btnEnviar.querySelector('.enviar-icon').className = 'fas fa-paper-plane enviar-icon';
+        btnEnviar.querySelector('.enviar-text').textContent = 'Enviar';
+      }
+    }
+
+    async function exportAndSaveVideo() {
+      try {
+        // Desabilitar botão e mostrar progresso
+        btnEnviar.disabled = true;
+        btnEnviar.classList.add('exporting');
+        btnEnviar.querySelector('.enviar-icon').className = 'fas fa-spinner fa-spin enviar-icon';
+        btnEnviar.querySelector('.enviar-text').textContent = 'Processando vídeo...';
+
+        // Usar a função de exportação de vídeo existente mas modificada
+        const videoBlob = await exportVideoToBlob();
+
+        if (!videoBlob) {
+          throw new Error('Falha na geração do vídeo');
+        }
+
+        // Obter dados do usuário atual do contexto global
+        const userData = window.currentUserData || { id: 1, tt: 'Usuário Teste' };
+        
+        // Preparar dados para envio
+        const formData = new FormData();
+        formData.append('file', videoBlob, 'post_video.webm');
+        formData.append('userId', userData.id);
+        formData.append('type', 'video');
+        formData.append('team', userData.team || '');
+        formData.append('business', userData.business || '');
+
+        btnEnviar.querySelector('.enviar-text').textContent = 'Salvando vídeo...';
+
+        // Enviar para servidor
+        const response = await fetch('app/save_post.php', {
+          method: 'POST',
+          body: formData
+        });
+
+        // Verificar se a resposta é válida
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        const responseText = await response.text();
+        console.log('Resposta do servidor (vídeo):', responseText);
+        
+        let result;
+        try {
+          result = JSON.parse(responseText);
+        } catch (e) {
+          throw new Error(`Resposta inválida do servidor: ${responseText.substring(0, 200)}...`);
+        }
+
+        if (result.success) {
+          // Usar função de notificação global se disponível
+          if (typeof window.notifySuccess === 'function') {
+            window.notifySuccess('Vídeo salvo com sucesso!');
+          } else {
+            alert('Vídeo salvo com sucesso!');
+          }
+          console.log('Post criado com ID:', result.postId);
+        } else {
+          throw new Error(result.error || 'Erro desconhecido');
+        }
+
+      } catch (error) {
+        console.error('Erro ao salvar vídeo:', error);
+        // Usar função de notificação global se disponível
+        if (typeof window.notifyError === 'function') {
+          window.notifyError('Erro ao salvar vídeo: ' + error.message);
+        } else {
+          alert('Erro ao salvar vídeo: ' + error.message);
+        }
+      } finally {
+        // Restaurar botão
+        btnEnviar.disabled = false;
+        btnEnviar.classList.remove('exporting');
+        btnEnviar.querySelector('.enviar-icon').className = 'fas fa-paper-plane enviar-icon';
+        btnEnviar.querySelector('.enviar-text').textContent = 'Enviar';
+      }
+    }
+
+    // Função para exportar vídeo como blob (para salvamento no servidor)
+    async function exportVideoToBlob() {
+      return new Promise(async (resolve, reject) => {
+        try {
+          const fps = Math.max(10, Math.min(60, Number(vidFPS.value)||30));
+          const dur = Math.max(1, Number(vidDur.value)||6);
+          const totalFrames = Math.round(fps*dur);
+          
+          console.log(`Exportando vídeo como blob: ${dur}s × ${fps}fps = ${totalFrames} frames`);
+      
+          // Para vídeos de fundo, configurar reprodução
+          if (bgEl && bgEl.tagName === 'VIDEO') {
+            bgEl.currentTime = 0;
+            bgEl.playbackRate = 1.0;
+            const wasOriginallyMuted = bgEl.muted;
+            bgEl.muted = false;
+            bgEl.play();
+          }
+          
+          // Capturar stream do canvas
+          const canvasStream = outCanvas.captureStream();
+          
+          // Criar stream combinado com áudio se houver vídeo de fundo
+          let finalStream = canvasStream;
+          
+          if (bgEl && bgEl.tagName === 'VIDEO' && !bgEl.muted) {
+            try {
+              const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+              const source = audioContext.createMediaElementSource(bgEl);
+              const destination = audioContext.createMediaStreamDestination();
+              source.connect(destination);
+              source.connect(audioContext.destination);
+              
+              const videoTrack = canvasStream.getVideoTracks()[0];
+              const audioTrack = destination.stream.getAudioTracks()[0];
+              
+              finalStream = new MediaStream([videoTrack, audioTrack]);
+            } catch (error) {
+              console.warn('Erro ao capturar áudio, usando apenas vídeo:', error);
+              finalStream = canvasStream;
+            }
+          }
+          
+          // Configurar MediaRecorder
+          let selectedFormat = null;
+          const formats = [
+            'video/webm;codecs=vp8,opus',
+            'video/webm;codecs=vp9,opus',
+            'video/webm;codecs=vp8',
+            'video/webm;codecs=vp9', 
+            'video/webm',
+            'video/mp4'
+          ];
+          
+          for (const format of formats) {
+            if (MediaRecorder.isTypeSupported(format)) {
+              selectedFormat = format;
+              break;
+            }
+          }
+          
+          const rec = new MediaRecorder(finalStream, { 
+            mimeType: selectedFormat || 'video/webm',
+            videoBitsPerSecond: 2500000,
+            audioBitsPerSecond: 128000
+          });
+          
+          const chunks = [];
+          let recordingStartTime = Date.now();
+          
+          rec.ondataavailable = e => {
+            if(e.data.size) {
+              chunks.push(e.data);
+            }
+          };
+          
+          rec.onstop = () => {
+            const blob = new Blob(chunks, {type:'video/webm'});
+            console.log(`Blob de vídeo criado: ${blob.size} bytes`);
+            
+            // Restaurar estado do vídeo
+            if (bgEl && bgEl.tagName === 'VIDEO') {
+              bgEl.playbackRate = 1.0;
+            }
+            
+            resolve(blob);
+          };
+          
+          rec.onerror = (error) => {
+            console.error('Erro no MediaRecorder:', error);
+            reject(error);
+          };
+          
+          rec.start(100);
+          
+          const frameInterval = 1000 / fps;
+          
+          for (let i = 0; i < totalFrames; i++) {
+            const currentTime = i / fps;
+            const progress = Math.round((i / totalFrames) * 100);
+            
+            if (i % 30 === 0) {
+              console.log(`Frame ${i}/${totalFrames} (${currentTime.toFixed(2)}s) - ${progress}%`);
+            }
+            
+            await renderFrame(currentTime, false);
+            
+            const targetTime = recordingStartTime + (i + 1) * frameInterval;
+            const currentRealTime = Date.now();
+            const waitTime = Math.max(0, targetTime - currentRealTime);
+            
+            await new Promise(resolve => {
+              setTimeout(() => {
+                requestAnimationFrame(resolve);
+              }, waitTime);
+            });
+          }
+          
+          rec.stop();
+          
+        } catch (error) {
+          console.error('Erro durante exportação do blob:', error);
+          if (bgEl && bgEl.tagName === 'VIDEO') {
+            bgEl.playbackRate = 1.0;
+          }
+          reject(error);
+        }
+      });
     }
   
     // ---------- Função para atualizar informações de exportação

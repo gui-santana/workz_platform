@@ -17,6 +17,8 @@ php_flag display_startup_errors On
 php_flag display_errors On
 
 RewriteEngine On
+# Excluir arquivos estáticos das regras de rewrite
+RewriteCond %{REQUEST_URI} !\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot|pdf|zip|mp4|webm|avi|mov)$ [NC]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^/?(.*)$ /?username=/$1 [L,QSA]
