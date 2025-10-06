@@ -18,3 +18,6 @@ RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local
 
 # Limpa o cache do gerenciador de pacotes
 RUN rm -rf /var/cache/apk/*
+
+# Configura limites de upload do PHP
+COPY uploads.ini /usr/local/etc/php/conf.d/uploads.ini

@@ -25,7 +25,7 @@ class Database
     public static function getInstance(?string $databaseName = null): PDO
     {
         // Define o nome do banco, pegando do env se necessário
-        $dbName = $databaseName ?? ($_ENV['DB_NAME'] ?? '');
+        $dbName = $databaseName ?? ($_ENV['DB_NAME'] ?? ($_ENV['DB_DATABASE'] ?? ''));
         if ($dbName === '') {
             throw new \RuntimeException('Nome do banco de dados não informado.');
         }
@@ -36,9 +36,9 @@ class Database
         }
 
         // Carrega variáveis de ambiente
-        $host    = $_ENV['DB_HOST']     ?? '';
-        $user    = $_ENV['DB_USERNAME'] ?? '';
-        $pass    = $_ENV['DB_PASSWORD'] ?? '';
+        $host    = $_ENV['DB_HOST']     ?? 'mysql';
+        $user    = $_ENV['DB_USERNAME'] ?? 'root';
+        $pass    = $_ENV['DB_PASSWORD'] ?? 'root_password';
         $port    = $_ENV['DB_PORT']     ?? 3306;
         $charset = 'utf8mb4';
 

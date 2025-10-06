@@ -48,9 +48,12 @@ function handleFileUpload($pdo) {
 
     $file = $_FILES['file'];
     $userId = (int)$_POST['userId'];
-    $type = $_POST['type']; // 'image' ou 'video'
-    $team = $_POST['team'] ?? '';
-    $business = $_POST['business'] ?? '';
+    $type = $_POST['type']; // 'image' | 'video' | 'mixed' | numeric
+    // Escopo do post: dashboard (cm=0, em=0) ou página de entidade (team/em)
+    $cm = isset($_POST['team']) && is_numeric($_POST['team']) ? (int)$_POST['team'] : 0;
+    $em = isset($_POST['business']) && is_numeric($_POST['business']) ? (int)$_POST['business'] : 0;
+    if ($cm > 0) { $em = 0; }
+    if ($em > 0) { $cm = 0; }
 
     // Validar arquivo
     if ($file['error'] !== UPLOAD_ERR_OK) {
@@ -72,43 +75,58 @@ function handleFileUpload($pdo) {
         return;
     }
 
-    // Criar pasta de uploads se não existir
-    $uploadDir = 'uploads/posts/';
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0755, true);
+    // Criar pasta de uploads padronizada em public/uploads/posts/
+    $publicRoot = dirname(__DIR__); // .../public
+    $uploadSubdir = 'uploads/posts/';
+    $uploadDirAbs = $publicRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $uploadSubdir);
+    if (!is_dir($uploadDirAbs)) {
+        mkdir($uploadDirAbs, 0755, true);
     }
 
     // Gerar nome único para o arquivo
     $extension = pathinfo($file['name'], PATHINFO_EXTENSION);
     $fileName = uniqid() . '_' . time() . '.' . $extension;
-    $filePath = $uploadDir . $fileName;
+    $filePathAbs = $uploadDirAbs . $fileName;
+    $relativePath = $uploadSubdir . $fileName;
+    $publicUrl = '/' . $relativePath;
 
     // Mover arquivo
-    if (!move_uploaded_file($file['tmp_name'], $filePath)) {
+    if (!move_uploaded_file($file['tmp_name'], $filePathAbs)) {
         http_response_code(500);
         echo json_encode(['error' => 'Erro ao salvar arquivo']);
         return;
     }
 
-    // Preparar conteúdo JSON
+    // Mapear tipo para formato aceito pelo banco (inteiro se necessário)
+    $tpMap = ['image' => 1, 'video' => 2, 'mixed' => 3];
+    $tpDb = isset($tpMap[$type]) ? $tpMap[$type] : (is_numeric($type) ? (int)$type : 0);
+
+    // Preparar conteúdo JSON com suporte a carrossel (array de mídias)
     $content = [
-        'type' => $type,
-        'file' => $fileName,
-        'path' => $filePath,
-        'originalName' => $file['name'],
-        'size' => $file['size'],
-        'mimeType' => $fileMimeType
+        'media' => [
+            [
+                'type' => $type,
+                'file' => $fileName,
+                'path' => $relativePath,
+                'url'  => $publicUrl,
+                'originalName' => $file['name'],
+                'size' => (int)$file['size'],
+                'mimeType' => $fileMimeType
+            ]
+        ]
     ];
 
     // Salvar no banco de dados
     try {
-        $stmt = $pdo->prepare("INSERT INTO hpl (us, tp, dt, cm, em, ct) VALUES (?, ?, NOW(), ?, ?, ?)");
+        // Define status publicado (st = 1) para aparecer no feed
+        $stmt = $pdo->prepare("INSERT INTO hpl (us, tp, dt, cm, em, st, ct) VALUES (?, ?, NOW(), ?, ?, ?, ?)");
         $stmt->execute([
             $userId,
-            $type,
-            $team,
-            $business,
-            json_encode($content)
+            $tpDb,
+            $cm,
+            $em,
+            1,
+            json_encode($content, JSON_UNESCAPED_UNICODE)
         ]);
 
         $postId = $pdo->lastInsertId();
@@ -120,19 +138,20 @@ function handleFileUpload($pdo) {
             'success' => true,
             'postId' => $postId,
             'fileName' => $fileName,
-            'filePath' => $filePath,
+            'filePath' => $relativePath,
+            'url' => $publicUrl,
             'message' => 'Post salvo com sucesso!'
         ]);
 
     } catch (PDOException $e) {
         // Log do erro
         error_log("Erro ao salvar post no banco: " . $e->getMessage());
-        
+
         // Remover arquivo se erro no banco
-        if (file_exists($filePath)) {
-            unlink($filePath);
+        if (isset($filePathAbs) && file_exists($filePathAbs)) {
+            unlink($filePathAbs);
         }
-        
+
         http_response_code(500);
         echo json_encode(['error' => 'Erro ao salvar no banco de dados: ' . $e->getMessage()]);
     }
@@ -150,17 +169,23 @@ function handlePostData($pdo) {
     $userId = (int)$input['userId'];
     $content = $input['content'];
     $type = $input['type'] ?? 'mixed';
-    $team = $input['team'] ?? '';
-    $business = $input['business'] ?? '';
+    $tpMap = ['image' => 1, 'video' => 2, 'mixed' => 3];
+    $tpDb = isset($tpMap[$type]) ? $tpMap[$type] : (is_numeric($type) ? (int)$type : 0);
+    $cm = isset($input['team']) && is_numeric($input['team']) ? (int)$input['team'] : 0;
+    $em = isset($input['business']) && is_numeric($input['business']) ? (int)$input['business'] : 0;
+    if ($cm > 0) { $em = 0; }
+    if ($em > 0) { $cm = 0; }
 
     try {
-        $stmt = $pdo->prepare("INSERT INTO hpl (us, tp, dt, cm, em, ct) VALUES (?, ?, NOW(), ?, ?, ?)");
+        // Define status publicado (st = 1) para aparecer no feed
+        $stmt = $pdo->prepare("INSERT INTO hpl (us, tp, dt, cm, em, st, ct) VALUES (?, ?, NOW(), ?, ?, ?, ?)");
         $stmt->execute([
             $userId,
-            $type,
-            $team,
-            $business,
-            json_encode($content)
+            $tpDb,
+            $cm,
+            $em,
+            1,
+            json_encode($content, JSON_UNESCAPED_UNICODE)
         ]);
 
         $postId = $pdo->lastInsertId();

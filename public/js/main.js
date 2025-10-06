@@ -306,7 +306,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (/^https?:\/\//i.test(trimmed)) return trimmed;
 
         // If it starts with a known image path, treat it as a path.
-        if (trimmed.startsWith('/images/') || trimmed.startsWith('/users/')) {
+        if (
+            trimmed.startsWith('/images/') ||
+            trimmed.startsWith('/users/') ||
+            trimmed.startsWith('/uploads/') ||
+            trimmed.startsWith('/app/uploads/') ||
+            /^uploads\//i.test(trimmed)
+        ) {
             return trimmed;
         }
 
@@ -2909,6 +2915,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 author: getFeedUserSummary(row.us),
                 formattedDate: formatFeedTimestamp(row.dt),
             }));
+            // Preparar mídia do post a partir de ct (JSON)
+            let parsedCt = null;
+            try { parsedCt = typeof item?.ct === 'string' ? JSON.parse(item.ct) : (item?.ct || null); } catch (_) { parsedCt = null; }
+            const media0 = parsedCt && Array.isArray(parsedCt.media) ? parsedCt.media[0] : null;
+            const mmime = String(media0?.mimeType || '').toLowerCase();
+            let feedMediaType = media0?.type || (mmime.startsWith('video') ? 'video' : (mmime.startsWith('image') ? 'image' : null));
+            let feedMediaUrl = media0?.url || (media0?.path ? ('/' + String(media0.path).replace(/^\/+/, '')) : null);
+            // Define imagem de fundo preferindo a mídia (se for imagem)
+            let backgroundImage = null;
+            if (feedMediaType === 'image' && feedMediaUrl) {
+                backgroundImage = resolveBackgroundImage(feedMediaUrl, item?.tt, { size: 1024 });
+            } else {
+                backgroundImage = resolveBackgroundImage(item?.im, item?.tt, { size: 1024 });
+            }
             return {
                 ...item,
                 author: getFeedUserSummary(item.us),
@@ -2916,7 +2936,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 comments,
                 commentCount: comments.length,
                 formattedDate: formatFeedTimestamp(item.dt),
-                backgroundImage: resolveBackgroundImage(item.im, item.tt, { size: 1024 }),
+                backgroundImage,
+                feedMediaType,
+                feedMediaUrl,
+                ct: parsedCt || item?.ct,
             };
         });
     }
@@ -2966,14 +2989,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const authorName = escapeHtml(author?.name || 'Usuário');
             const avatarSrc = author?.avatar || resolveImageSrc(null, authorName, { size: 100 });
             const title = escapeHtml(post?.tt || '');
-            const caption = formatFeedRichText(post?.ct || '');
+            const captionRaw = (typeof post?.ct === 'string') ? post.ct : (post?.ct?.caption || post?.ct?.text || '');
+            const caption = formatFeedRichText(captionRaw || '');
             const formattedDate = escapeHtml(post?.formattedDate || '');
             const likeInfo = post?.likeInfo || {};
             const likeTotal = Number.isFinite(Number(likeInfo.total)) ? Number(likeInfo.total) : 0;
             const userLiked = !!likeInfo.userLiked;
             const likeLabel = likeTotal === 1 ? 'curtida' : 'curtidas';
             const postId = String(post?.id ?? '');
-            const backgroundStyle = post?.backgroundImage ? `background-image: ${post.backgroundImage};` : '';
+            const backgroundStyle = (post?.feedMediaType !== 'video' && post?.backgroundImage) ? `background-image: ${post.backgroundImage};` : '';
+            const mediaMarkup = (post?.feedMediaType === 'video' && post?.feedMediaUrl)
+                ? `<video class="absolute inset-0 w-full h-full object-cover" src="${post.feedMediaUrl}" muted autoplay loop playsinline></video>`
+                : '';
             const comments = Array.isArray(post?.comments) ? post.comments : [];
             const visibleComments = comments.slice(0, 2);
             const hiddenComments = comments.slice(2);
@@ -2991,6 +3018,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <article class="col-span-12 sm:col-span-6 lg:col-span-4" data-post-id="${postId}">
             <div class="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-2xl bg-gray-900 text-white">
                 <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}"></div>
+                ${mediaMarkup}
                 <div class="absolute inset-0 bg-gradient-to-b from-black/10 via-black/60 to-black/90"></div>
                 <div class="relative z-10 flex flex-col h-full justify-between">
                     <header class="flex items-center gap-3 p-4">

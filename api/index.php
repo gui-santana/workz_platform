@@ -20,6 +20,7 @@ use Workz\Platform\Controllers\TestController;
 use Workz\Platform\Controllers\UserController;
 use Workz\Platform\Controllers\GeneralController;
 use Workz\Platform\Controllers\TeamsController;
+use Workz\Platform\Controllers\PostsController;
 use Workz\Platform\Controllers\CompaniesController;
 
 use Workz\Platform\Middleware\AuthMiddleware;
@@ -88,6 +89,9 @@ $router->add('POST', '/api/companies/members/level', [CompaniesController::class
 $router->add('POST', '/api/companies/members/accept', [CompaniesController::class, 'acceptMember'], [AuthMiddleware::class, 'handle']);
 $router->add('POST', '/api/companies/members/reject', [CompaniesController::class, 'rejectMember'], [AuthMiddleware::class, 'handle']);
 
+// Posts (criar e feed)
+$router->add('POST', '/api/posts', [PostsController::class, 'create'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/posts/feed', [PostsController::class, 'feed'], [AuthMiddleware::class, 'handle']);
 
 // ==================================================
 // DESPACHO DA REQUISIÇÃO

@@ -1593,17 +1593,22 @@ const init = () => {
 
         // Obter dados do usuário atual do contexto global
         const userData = window.currentUserData || { id: 1, tt: 'Usuário Teste' };
+        // Determinar escopo (dashboard vs entidade)
+        const vt = String(window.viewType || '');
+        const vd = window.viewData || null;
+        const teamId = (vt === 'team' && vd && vd.id) ? Number(vd.id) || 0 : 0;
+        const businessId = (vt === 'business' && vd && vd.id) ? Number(vd.id) || 0 : 0;
         
         // Preparar dados para envio
         const formData = new FormData();
         formData.append('file', blob, 'post_image.jpg');
         formData.append('userId', userData.id);
         formData.append('type', 'image');
-        formData.append('team', userData.team || '');
-        formData.append('business', userData.business || '');
+        formData.append('team', teamId);
+        formData.append('business', businessId);
 
         // Enviar para servidor
-        const response = await fetch('app/save_post.php', {
+        const response = await fetch('/app/save_post.php', {
           method: 'POST',
           body: formData
         });
@@ -1670,19 +1675,24 @@ const init = () => {
 
         // Obter dados do usuário atual do contexto global
         const userData = window.currentUserData || { id: 1, tt: 'Usuário Teste' };
+        // Determinar escopo (dashboard vs entidade)
+        const vt = String(window.viewType || '');
+        const vd = window.viewData || null;
+        const teamId = (vt === 'team' && vd && vd.id) ? Number(vd.id) || 0 : 0;
+        const businessId = (vt === 'business' && vd && vd.id) ? Number(vd.id) || 0 : 0;
         
         // Preparar dados para envio
         const formData = new FormData();
         formData.append('file', videoBlob, 'post_video.webm');
         formData.append('userId', userData.id);
         formData.append('type', 'video');
-        formData.append('team', userData.team || '');
-        formData.append('business', userData.business || '');
+        formData.append('team', teamId);
+        formData.append('business', businessId);
 
         btnEnviar.querySelector('.enviar-text').textContent = 'Salvando vídeo...';
 
         // Enviar para servidor
-        const response = await fetch('app/save_post.php', {
+        const response = await fetch('/app/save_post.php', {
           method: 'POST',
           body: formData
         });
@@ -1736,8 +1746,9 @@ const init = () => {
     async function exportVideoToBlob() {
       return new Promise(async (resolve, reject) => {
         try {
-          const fps = Math.max(10, Math.min(60, Number(vidFPS.value)||30));
-          const dur = Math.max(1, Number(vidDur.value)||6);
+          // Reduzir FPS e duração máximos para diminuir o tamanho final
+          const fps = Math.max(10, Math.min(24, Number(vidFPS.value)||20));
+          const dur = Math.min(8, Math.max(1, Number(vidDur.value)||6));
           const totalFrames = Math.round(fps*dur);
           
           console.log(`Exportando vídeo como blob: ${dur}s × ${fps}fps = ${totalFrames} frames`);
@@ -1751,8 +1762,20 @@ const init = () => {
             bgEl.play();
           }
           
-          // Capturar stream do canvas
-          const canvasStream = outCanvas.captureStream();
+          // Canvas de gravação reduzido (downscale) para diminuir resolução
+          const recordCanvas = document.createElement('canvas');
+          const rw0 = outCanvas.width, rh0 = outCanvas.height;
+          const MAX_SIDE = 480; // lado máximo para gravar
+          const scale = Math.min(1, MAX_SIDE / Math.max(rw0, rh0));
+          const rw = Math.max(1, Math.round(rw0 * scale));
+          const rh = Math.max(1, Math.round(rh0 * scale));
+          recordCanvas.width = rw; recordCanvas.height = rh;
+          const rctx = recordCanvas.getContext('2d');
+
+          // Capturar stream do canvas reduzido no FPS desejado
+          const canvasStream = (typeof recordCanvas.captureStream === 'function')
+            ? recordCanvas.captureStream(fps)
+            : recordCanvas.captureStream();
           
           // Criar stream combinado com áudio se houver vídeo de fundo
           let finalStream = canvasStream;
@@ -1795,8 +1818,8 @@ const init = () => {
           
           const rec = new MediaRecorder(finalStream, { 
             mimeType: selectedFormat || 'video/webm',
-            videoBitsPerSecond: 2500000,
-            audioBitsPerSecond: 128000
+            videoBitsPerSecond: 500000, // 0.5 Mbps
+            audioBitsPerSecond: 64000    // 64 kbps
           });
           
           const chunks = [];
@@ -1837,7 +1860,11 @@ const init = () => {
               console.log(`Frame ${i}/${totalFrames} (${currentTime.toFixed(2)}s) - ${progress}%`);
             }
             
+            // Renderiza no canvas principal
             await renderFrame(currentTime, false);
+            // Copia e reduz para o canvas de gravação
+            rctx.clearRect(0,0,rw,rh);
+            rctx.drawImage(outCanvas, 0, 0, rw, rh);
             
             const targetTime = recordingStartTime + (i + 1) * frameInterval;
             const currentRealTime = Date.now();
