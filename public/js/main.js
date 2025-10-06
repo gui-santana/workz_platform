@@ -3016,17 +3016,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             return `
         <article class="col-span-12 sm:col-span-6 lg:col-span-4" data-post-id="${postId}">
-            <div class="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-2xl bg-gray-900 text-white">
+            <div class="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-lg bg-gray-900 text-white">
                 <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}"></div>
                 ${mediaMarkup}
-                <div class="absolute inset-0 bg-gradient-to-b from-black/10 via-black/60 to-black/90"></div>
+                <div class="absolute inset-0 bg-gradient-to-b from-black/10 via-black/10 to-black/60"></div>
                 <div class="relative z-10 flex flex-col h-full justify-between">
-                    <header class="flex items-center gap-3 p-4">
-                        <span class="w-11 h-11 rounded-full overflow-hidden border border-white/30 bg-black/40 flex items-center justify-center">
+                    <header class="flex items-center gap-2 p-4">
+                        <span class="w-9 h-9 rounded-full overflow-hidden border border-white/30 bg-black/40 flex items-center justify-center">
                             <img src="${avatarSrc}" alt="${authorName}" class="w-full h-full object-cover">
                         </span>
                         <div class="flex flex-col">
-                            <span class="font-semibold leading-tight">${authorName}</span>
+                            <span class="font-semibold text-s leading-tight">${authorName}</span>
                             ${formattedDate ? `<time class="text-xs text-white/70">${formattedDate}</time>` : ''}
                         </div>
                     </header>
