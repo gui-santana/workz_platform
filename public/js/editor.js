@@ -82,6 +82,18 @@ const init = () => {
     const exportSettings = document.getElementById('exportSettings');
     const vidDur = document.getElementById('vidDur');
     const vidFPS = document.getElementById('vidFPS');
+    const bgColorPicker = document.getElementById('bgColorPicker');
+    let bgSolidColor = '#ffffff';
+    try { bgSolidColor = localStorage.getItem('editor.bgColor') || '#ffffff'; } catch(_) {}
+    if (bgColorPicker) {
+      try { if (!bgColorPicker.value) bgColorPicker.value = bgSolidColor; else bgSolidColor = bgColorPicker.value; } catch(_) {}
+      const onBgColor = (e)=>{
+        bgSolidColor = (e && e.target && e.target.value) ? e.target.value : '#ffffff';
+        try { localStorage.setItem('editor.bgColor', bgSolidColor); } catch(_) {}
+      };
+      bgColorPicker.addEventListener('input', onBgColor);
+      bgColorPicker.addEventListener('change', onBgColor);
+    }
     
     // Listener para atualizar informações quando duração for alterada manualmente
     vidDur.addEventListener('input', updateVideoExportInfo);
@@ -1499,10 +1511,9 @@ const init = () => {
       const contentType = detectContentType();
       
       if (contentType === 'video') {
-        // Mostrar configurações de vídeo se necessário
+        // Mostrar configurações de vídeo se necessário, mas não bloquear o envio
         if (exportSettings.classList.contains('hidden')) {
           exportSettings.classList.remove('hidden');
-          return;
         }
         await exportAndSaveVideo();
       } else {
@@ -1746,20 +1757,28 @@ const init = () => {
     async function exportVideoToBlob() {
       return new Promise(async (resolve, reject) => {
         try {
-          // Reduzir FPS e duração máximos para diminuir o tamanho final
+          // FPS reduzido por padrão para tamanho menor, mas respeita o valor escolhido
           const fps = Math.max(10, Math.min(24, Number(vidFPS.value)||20));
-          const dur = Math.min(8, Math.max(1, Number(vidDur.value)||6));
+          // Duração: respeita controle do usuário ou duração do vídeo de fundo (até 60s)
+          let targetDur = Number(vidDur?.value);
+          if (!Number.isFinite(targetDur) || targetDur <= 0) {
+            const bgDur = (bgEl && bgEl.tagName === 'VIDEO' && isFinite(bgEl.duration)) ? bgEl.duration : 6;
+            targetDur = bgDur;
+          }
+          const dur = Math.max(1, Math.min(60, targetDur));
           const totalFrames = Math.round(fps*dur);
           
           console.log(`Exportando vídeo como blob: ${dur}s × ${fps}fps = ${totalFrames} frames`);
       
           // Para vídeos de fundo, configurar reprodução
+          let wasOriginallyMuted = null;
           if (bgEl && bgEl.tagName === 'VIDEO') {
             bgEl.currentTime = 0;
             bgEl.playbackRate = 1.0;
-            const wasOriginallyMuted = bgEl.muted;
+            wasOriginallyMuted = bgEl.muted;
             bgEl.muted = false;
-            bgEl.play();
+            bgEl.volume = 1.0;
+            try { await bgEl.play(); } catch(_) {}
           }
           
           // Canvas de gravação reduzido (downscale) para diminuir resolução
@@ -1786,7 +1805,9 @@ const init = () => {
               const source = audioContext.createMediaElementSource(bgEl);
               const destination = audioContext.createMediaStreamDestination();
               source.connect(destination);
-              source.connect(audioContext.destination);
+              // Opcional: tocar durante a gravação (comentar se não desejar ouvir)
+              // source.connect(audioContext.destination);
+              try { await audioContext.resume(); } catch(_) {}
               
               const videoTrack = canvasStream.getVideoTracks()[0];
               const audioTrack = destination.stream.getAudioTracks()[0];
@@ -1838,6 +1859,9 @@ const init = () => {
             // Restaurar estado do vídeo
             if (bgEl && bgEl.tagName === 'VIDEO') {
               bgEl.playbackRate = 1.0;
+              if (wasOriginallyMuted !== null) {
+                bgEl.muted = wasOriginallyMuted;
+              }
             }
             
             resolve(blob);
@@ -2117,7 +2141,7 @@ const init = () => {
           // Sempre usar o vídeo original - sem seeks, sem complicações
           drawCoverVideo(bgEl, 0, 0, outCanvas.width, outCanvas.height);
         }
-      } else { octx.fillStyle='#fff'; octx.fillRect(0,0,outCanvas.width,outCanvas.height); }
+      } else { octx.fillStyle = (typeof bgSolidColor !== 'undefined' && bgSolidColor) ? bgSolidColor : '#ffffff'; octx.fillRect(0,0,outCanvas.width,outCanvas.height); }
   
       const items = [...editor.querySelectorAll('.item')].sort((a,b)=> {
         const aZ = +getComputedStyle(a).zIndex || 0;
@@ -2364,3 +2388,6 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+
+
+

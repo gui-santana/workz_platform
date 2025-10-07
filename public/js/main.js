@@ -84,6 +84,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isRoot) {
                     if (this.mount._rootHandler) this.mount.removeEventListener('click', this.mount._rootHandler);
                     const rootHandler = (e) => {
+                        const profileCard = e.target.closest('#sidebar-profile-link');
+                        if (profileCard && this.mount.contains(profileCard)) {
+                            this.push({ view: ENTITY.PROFILE, title: currentUserData?.tt || 'Ajustes', payload: { data: currentUserData } });
+                            return;
+                        }
                         const it = e.target.closest('#people,#businesses,#teams,#desktop,#apps,#logout');
                         if (!it || !this.mount.contains(it)) return;
                         const id = it.id;
@@ -1758,7 +1763,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 { id: 'logout', icon: 'fa-sign-out-alt', label: 'Sair' }
             ]);
             html += `
-                <div data-sidebar-type="current-user" class="pointer w-full bg-white shadow-md rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
+                <div data-sidebar-type="current-user" data-sidebar-action="page-settings" class="pointer w-full bg-white shadow-md rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
                     <div data-sidebar-action="page-settings" class="grid grid-cols-4 items-center gap-3">
                         <div class="flex col-span-1 justify-center">
                             <img id="sidebar-profile-image" data-role="entity-image" class="w-full rounded-full object-cover" src="${resolveImageSrc(data?.im ?? currentUserData?.im, data?.tt ?? currentUserData?.tt, { size: 100 })}" alt="Foto do Utilizador">
@@ -2514,8 +2519,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 FPS
                                 <input id="vidFPS" type="number" min="10" max="60" step="1" value="30" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
                             </label>
-                        </div>
-                        <div id="videoExportInfo" class="text-xs text-slate-500 text-center mt-2 hidden">
+                            <label class="flex items-center gap-2 text-slate-600">Fundo <input id="bgColorPicker" type="color" value="#ffffff" class="h-8 w-10 border border-slate-200 rounded"></label> </div><div id="videoExportInfo" class="text-xs text-slate-500 text-center mt-2 hidden">
                             <i class="fa-solid fa-info-circle"></i> 
                             <span id="videoExportInfoText"></span>
                         </div>
@@ -2868,7 +2872,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 table: 'hpl_comments',
                 columns: ['id', 'pl', 'us', 'ds', 'dt'],
                 conditions: { pl: { op: 'IN', value: normalized } },
-                order: { by: 'dt', dir: 'ASC' },
+                order: { by: 'dt', dir: 'DESC' },
                 fetchAll: true,
             });
             const rows = Array.isArray(res?.data) ? res.data : [];
@@ -3002,24 +3006,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? `<video class="absolute inset-0 w-full h-full object-cover" src="${post.feedMediaUrl}" muted autoplay loop playsinline></video>`
                 : '';
             const comments = Array.isArray(post?.comments) ? post.comments : [];
-            const visibleComments = comments.slice(0, 2);
-            const hiddenComments = comments.slice(2);
-
-            const commentList = [
-                ...visibleComments.map((comment) => renderFeedComment(comment)),
-                ...hiddenComments.map((comment) => renderFeedComment(comment, { hidden: true })),
-            ].join('');
-
-            const showAllButton = hiddenComments.length
-                ? `<button type="button" class="text-xs font-semibold text-white/80 hover:text-white transition" data-feed-action="show-comments" data-post-id="${postId}">Ver todos os ${comments.length} comentários</button>`
-                : '';
+            const commentList = comments.map((comment) => renderFeedComment(comment)).join('');
+            const canDelete = (
+                currentUserData?.id && String(currentUserData.id) === String(post.us)
+            ) || (
+                Number(post.cm) > 0 && Array.isArray(userTeamsData) && userTeamsData.some(t => String(t.cm) === String(post.cm) && Number(t.st) === 1 && Number(t.nv) >= 3)
+            ) || (
+                Number(post.em) > 0 && Array.isArray(userBusinessesData) && userBusinessesData.some(b => String(b.em) === String(post.em) && Number(b.st) === 1 && Number(b.nv) >= 3)
+            );
 
             return `
         <article class="col-span-12 sm:col-span-6 lg:col-span-4" data-post-id="${postId}">
             <div class="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-lg bg-gray-900 text-white">
                 <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}"></div>
                 ${mediaMarkup}
-                <div class="absolute inset-0 bg-gradient-to-b from-black/10 via-black/10 to-black/60"></div>
+                <div class="absolute inset-0 bg-gradient-to-b from-black/10 via-black/10 to-black/40"></div>
                 <div class="relative z-10 flex flex-col h-full justify-between">
                     <header class="flex items-center gap-2 p-4">
                         <span class="w-9 h-9 rounded-full overflow-hidden border border-white/30 bg-black/40 flex items-center justify-center">
@@ -3030,6 +3031,18 @@ document.addEventListener('DOMContentLoaded', () => {
                             ${formattedDate ? `<time class="text-xs text-white/70">${formattedDate}</time>` : ''}
                         </div>
                     </header>
+                    <button type="button" class="absolute top-2 right-2 w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center backdrop-blur-sm" data-feed-action="open-post-menu" data-post-id="${postId}" data-media-url="${post?.feedMediaUrl || ''}" data-media-type="${post?.feedMediaType || ''}">
+                        <i class="fas fa-ellipsis-h"></i>
+                    </button>
+                    <div class="absolute top-12 right-2 w-44 bg-black/80 text-white rounded-xl shadow-lg border border-white/10 hidden z-40" data-role="post-menu" data-post-id="${postId}" data-media-url="${post?.feedMediaUrl || ''}" data-media-type="${post?.feedMediaType || ''}" data-can-delete="${canDelete ? '1' : '0'}">
+                        <button type="button" class="w-full text-left px-3 py-2 hover:bg-white/10" data-feed-action="download-media" data-post-id="${postId}">
+                            <i class="fas fa-download mr-2"></i>${post?.feedMediaType === 'video' ? 'Baixar vídeo' : 'Baixar imagem'}
+                        </button>
+                        <button type="button" class="w-full text-left px-3 py-2 hover:bg-white/10" data-feed-action="report-post" data-post-id="${postId}">
+                            <i class="fas fa-flag mr-2"></i>Denunciar
+                        </button>
+                        ${canDelete ? `<button type=\"button\" class=\"w-full text-left px-3 py-2 hover:bg-red-500/20 text-red-300\" data-feed-action=\"delete-post\" data-post-id=\"${postId}\"><i class=\\\"fas fa-trash mr-2\\\"></i>Excluir</button>` : ''}
+                    </div>
                     <div class="px-4 pb-5 space-y-4">
                         ${title ? `<h3 class="text-lg font-semibold text-white drop-shadow">${title}</h3>` : ''}
                         ${caption ? `<p class="text-sm text-white/90 leading-relaxed">${caption}</p>` : ''}
@@ -3037,10 +3050,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             <button type="button" class="flex items-center justify-center w-10 h-10 rounded-full bg-black/40 hover:bg-black/60 transition text-lg ${userLiked ? 'text-red-400' : 'text-white'}" data-feed-action="toggle-like" data-post-id="${postId}" data-liked="${userLiked ? '1' : '0'}" aria-pressed="${userLiked}">
                                 <i class="${userLiked ? 'fas' : 'far'} fa-heart"></i>
                             </button>
+                            <button type="button" class="flex items-center justify-center w-10 h-10 rounded-full bg-black/40 hover:bg-black/60 transition text-lg text-white" data-feed-action="open-comments" data-post-id="${postId}">
+                                <i class="far fa-comment"></i>
+                            </button>
                             <span class="text-sm text-white/90" data-role="like-count" data-post-id="${postId}" data-count="${likeTotal}">${likeTotal} ${likeLabel}</span>
                         </div>
-                        <div class="space-y-3" data-role="comment-block" data-post-id="${postId}">
-                            ${showAllButton}
+                        <div class="space-y-3 hidden" data-role="comment-block" data-post-id="${postId}">
                             <div class="space-y-3" data-role="comment-list" data-post-id="${postId}">
                                 ${commentList || '<p class="text-xs text-white/60" data-role="empty-comments">Ainda sem comentários.</p>'}
                             </div>
@@ -3056,7 +3071,56 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
 
         timeline.insertAdjacentHTML('beforeend', html);
+        enhanceFeedCards(newItems);
         ensureFeedInteractions();
+    }
+
+    function enhanceFeedCards(items) {
+        if (!Array.isArray(items) || !items.length) return;
+        items.forEach((post) => {
+            const postId = String(post?.id ?? '');
+            const article = document.querySelector(`[data-post-id="${postId}"]`);
+            if (!article) return;
+            // Seleciona de forma robusta o contêiner do card (primeiro div dentro do article)
+            const card = article.querySelector(':scope > div') || article.querySelector('div');
+            const commentBlock = article.querySelector(`[data-role="comment-block"][data-post-id="${postId}"]`);
+            if (!card || !commentBlock) return;
+            // Cria overlay e move bloco de comentários para dentro
+            const overlay = document.createElement('section');
+            overlay.className = 'absolute inset-0 bg-black/70 backdrop-blur-sm hidden z-30';
+            overlay.setAttribute('data-role','comment-overlay');
+            overlay.setAttribute('data-post-id', postId);
+            overlay.innerHTML = `
+                <div class="relative z-20 flex flex-col h-full p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-white font-semibold">Comentários</h4>
+                        <button type="button" class="w-9 h-9 rounded-full bg-white/15 hover:bg-white/25 text-white" data-feed-action="close-comments" data-post-id="${postId}">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>`;
+            const holder = overlay.querySelector('.flex.flex-col.h-full');
+            // Cria containers para lista (scroll) e formulário fixo no rodapé
+            const listHolder = document.createElement('div');
+            listHolder.className = 'flex-1 overflow-auto pr-1';
+            listHolder.setAttribute('data-role','list-holder');
+            holder.appendChild(listHolder);
+
+            const formHolder = document.createElement('div');
+            formHolder.className = 'pt-2';
+            formHolder.setAttribute('data-role','form-holder');
+            holder.appendChild(formHolder);
+
+            // Extrai lista e formulário do bloco original e move para a overlay
+            const list = commentBlock.querySelector('[data-role="comment-list"]');
+            if (list) { list.classList.add('space-y-3'); listHolder.appendChild(list); }
+            const form = commentBlock.querySelector('[data-feed-action="comment-form"]');
+            if (form) { form.classList.add('bg-white/10'); formHolder.appendChild(form); }
+            // Mantém bloco original oculto no card
+            commentBlock.classList.add('hidden');
+            // Insere overlay dentro do card (necessário para absolute inset-0)
+            card.appendChild(overlay);
+        });
     }
 
     function ensureFeedInteractions() {
@@ -3077,9 +3141,60 @@ document.addEventListener('DOMContentLoaded', () => {
             event.preventDefault();
             const postId = target.dataset.postId;
             if (postId) await togglePostLike(postId, target);
-        } else if (action === 'show-comments') {
+        } else if (action === 'open-comments') {
             event.preventDefault();
-            revealAllComments(target);
+            const postId = target.dataset.postId;
+            const overlay = timeline.querySelector(`[data-role="comment-overlay"][data-post-id="${postId}"]`);
+            if (overlay) overlay.classList.remove('hidden');
+        } else if (action === 'close-comments') {
+            event.preventDefault();
+            const postId = target.dataset.postId;
+            const overlay = timeline.querySelector(`[data-role="comment-overlay"][data-post-id="${postId}"]`);
+            if (overlay) overlay.classList.add('hidden');
+        } else if (action === 'open-post-menu') {
+            event.preventDefault();
+            const postId = target.dataset.postId;
+            timeline.querySelectorAll('[data-role="post-menu"]').forEach(menu => {
+                if (menu.dataset.postId !== postId) menu.classList.add('hidden');
+            });
+            const menu = timeline.querySelector(`[data-role="post-menu"][data-post-id="${postId}"]`);
+            if (menu) menu.classList.toggle('hidden');
+        } else if (action === 'download-media') {
+            event.preventDefault();
+            const postId = target.dataset.postId;
+            const menu = target.closest('[data-role="post-menu"]');
+            const url = menu?.dataset.mediaUrl || '';
+            const type = menu?.dataset.mediaType || '';
+            if (!url) { if (typeof notifyError === 'function') notifyError('Mídia indisponível.'); return; }
+            const a = document.createElement('a');
+            const ext = (() => { try { const u = new URL(url, window.location.origin); const p = u.pathname; const m = p.match(/\.([a-zA-Z0-9]+)$/); return m ? m[1] : (type==='video' ? 'webm' : 'jpg'); } catch(_) { return type==='video' ? 'webm' : 'jpg'; } })();
+            a.href = url; a.download = `post_${postId}.${ext}`; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+            if (menu) menu.classList.add('hidden');
+        } else if (action === 'report-post') {
+            event.preventDefault();
+            const menu = target.closest('[data-role="post-menu"]');
+            if (menu) menu.classList.add('hidden');
+            if (typeof notifySuccess === 'function') notifySuccess('Denúncia registrada. Obrigado por nos ajudar.');
+        } else if (action === 'delete-post') {
+            event.preventDefault();
+            const postId = Number(target.dataset.postId);
+            const menu = target.closest('[data-role="post-menu"]');
+            const canDelete = menu?.dataset?.canDelete === '1';
+            if (!canDelete) { if (typeof notifyError === 'function') notifyError('Você não tem permissão para excluir.'); return; }
+            const confirmed = await confirmDialog('Excluir esta publicação?', { danger: true, title: 'Confirmar exclusão' });
+            if (!confirmed) return;
+            try {
+                await apiClient.post('/delete', { db: 'workz_data', table: 'hpl', conditions: { id: postId } });
+                const article = timeline.querySelector(`[data-post-id="${postId}"]`);
+                if (article && article.parentElement) article.parentElement.removeChild(article);
+                if (typeof notifySuccess === 'function') notifySuccess('Publicação excluída.');
+            } catch (e) {
+                console.error('Failed to delete post', e);
+                if (typeof notifyError === 'function') notifyError('Não foi possível excluir a publicação.');
+            } finally {
+                if (menu) menu.classList.add('hidden');
+            }
+            
         }
     }
 
@@ -3132,8 +3247,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 adjustLikeButtonAppearance(button, false);
                 updateLikeCountElement(likeCountEl, currentCount - 1);
             } else {
-                const createdAt = new Date().toISOString();
-                await apiClient.post('/insert', { db: 'workz_data', table: 'lke', data: { pl: numericPostId, us: currentUserData.id, dt: createdAt } });
+                const now2 = new Date();
+                const dtStr2 = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}-${String(now2.getDate()).padStart(2,'0')} ${String(now2.getHours()).padStart(2,'0')}:${String(now2.getMinutes()).padStart(2,'0')}:${String(now2.getSeconds()).padStart(2,'0')}`;
+                await apiClient.post('/insert', { db: 'workz_data', table: 'lke', data: { pl: numericPostId, us: currentUserData.id, dt: dtStr2 } });
                 adjustLikeButtonAppearance(button, true);
                 updateLikeCountElement(likeCountEl, currentCount + 1);
             }
@@ -3179,8 +3295,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!postId || !Number.isFinite(numericPostId)) return;
 
         form.dataset.loading = '1';
-        const createdAt = new Date().toISOString();
-        const payload = { pl: numericPostId, us: currentUserData.id, ds: message, dt: createdAt };
+        const now = new Date();
+        const dtStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+        const payload = { pl: numericPostId, us: currentUserData.id, ds: message, dt: dtStr };
         try {
             const result = await apiClient.post('/insert', { db: 'workz_data', table: 'hpl_comments', data: payload });
             feedUserCache.set(String(currentUserData.id), { id: currentUserData.id, tt: currentUserData.tt, im: currentUserData.im });
@@ -3188,20 +3305,35 @@ document.addEventListener('DOMContentLoaded', () => {
                 id: result?.id ?? result?.insertId ?? Date.now(),
                 us: currentUserData.id,
                 ds: message,
-                dt: createdAt,
+                dt: dtStr,
                 author: {
                     id: currentUserData.id,
                     name: currentUserData.tt || 'Você',
                     avatar: resolveImageSrc(currentUserData.im, currentUserData.tt, { size: 80 }),
                 },
-                formattedDate: formatFeedTimestamp(createdAt),
+                formattedDate: formatFeedTimestamp(dtStr),
             };
-            const block = form.closest('[data-role="comment-block"]');
-            const list = block?.querySelector('[data-role="comment-list"]');
+            // Encontrar a lista dentro da overlay da própria publicação
+            const overlay = form.closest('[data-role="comment-overlay"]');
+            let list = overlay?.querySelector(`[data-role="comment-list"][data-post-id="${postId}"]`);
+            if (!list) {
+                list = document.querySelector(`[data-role="comment-list"][data-post-id="${postId}"]`);
+            }
+            if (!list && overlay) {
+                const holder = overlay.querySelector('[data-role="list-holder"]') || overlay;
+                list = document.createElement('div');
+                list.className = 'space-y-3';
+                list.setAttribute('data-role','comment-list');
+                list.setAttribute('data-post-id', postId);
+                holder.appendChild(list);
+            }
             if (list) {
                 const emptyState = list.querySelector('[data-role="empty-comments"]');
                 if (emptyState) emptyState.remove();
-                list.insertAdjacentHTML('beforeend', renderFeedComment(commentData));
+                list.insertAdjacentHTML('afterbegin', renderFeedComment(commentData));
+                try { list.scrollTop = 0; } catch (_) {}
+                // rolar para o fim para mostrar o novo comentário
+                try { list.scrollTop = list.scrollHeight; } catch (_) {}
             }
             if (input) input.value = '';
         } catch (error) {
@@ -4465,8 +4597,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Entrou em Ajustes a partir da página atual (fora do stack ou entidade corrente)
                 SidebarNav.setMount(sidebarContent);
                 SidebarNav.resetRoot(currentUserData);
-                let pageSettingsView = (el.parentNode.dataset.sidebarType === 'current-user') ? ENTITY.PROFILE : viewType;
-                let pageSettingsData = (el.parentNode.dataset.sidebarType === 'current-user') ? currentUserData : viewData;
+                const containerEl = el.closest('[data-sidebar-type]') || el.parentNode;
+                let pageSettingsView = (containerEl?.dataset?.sidebarType === 'current-user') ? ENTITY.PROFILE : viewType;
+                let pageSettingsData = (containerEl?.dataset?.sidebarType === 'current-user') ? currentUserData : viewData;
                 SidebarNav.push({ view: pageSettingsView, title: (pageSettingsData?.tt || 'Ajustes'), payload: { data: pageSettingsData, type: pageSettingsView } });
                 // listeners complementares (contatos etc.)
                 const settingsForm = document.querySelector('#settings-form');
@@ -6512,6 +6645,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isSidebarOpen && !clickedInsideSidebar && !clickedSidebarTrigger) {
             toggleSidebar(); // fecha
         }
+
+        // Fechar menus de post ao clicar fora do trigger/menu
+        const clickedPostMenu = !!target.closest('[data-role="post-menu"]');
+        const clickedPostMenuTrigger = !!target.closest('[data-feed-action="open-post-menu"]');
+        if (!clickedPostMenu && !clickedPostMenuTrigger) {
+            document.querySelectorAll('[data-role="post-menu"]').forEach(menu => menu.classList.add('hidden'));
+        }
+    });
+
+    // Fecha menus de post com tecla Escape
+    document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') {
+            document.querySelectorAll('[data-role="post-menu"]').forEach(menu => menu.classList.add('hidden'));
+        }
     });
 
     // Removido: fallback global. A navegação do sidebar é controlada por SidebarNav.
@@ -6695,3 +6842,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
+
+
+

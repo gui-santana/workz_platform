@@ -75,6 +75,29 @@ try {
     $pdo->prepare("DELETE FROM hpl WHERE id = ?")->execute([$testId]);
     $results[] = "Registro de teste removido";
     
+    // 5b. Criar tabela de comentários, se necessário
+    $stmt = $pdo->query("SHOW TABLES LIKE 'hpl_comments'");
+    $commentsTableExists = $stmt->fetch() !== false;
+    if (!$commentsTableExists) {
+        $createCommentsSQL = "
+        CREATE TABLE `hpl_comments` (
+          `id` int(11) NOT NULL AUTO_INCREMENT,
+          `pl` int(11) NOT NULL COMMENT 'ID do post (hpl.id)',
+          `us` int(11) NOT NULL COMMENT 'ID do usuário',
+          `ds` text NOT NULL COMMENT 'Conteúdo do comentário',
+          `dt` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Data/hora do comentário',
+          PRIMARY KEY (`id`),
+          KEY `idx_post` (`pl`),
+          KEY `idx_user` (`us`),
+          KEY `idx_dt` (`dt`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Comentários de posts do editor';
+        ";
+        $pdo->exec($createCommentsSQL);
+        $results[] = "Tabela 'hpl_comments' criada com sucesso";
+    } else {
+        $results[] = "Tabela 'hpl_comments' já existe";
+    }
+
     // 6. Contar registros existentes
     $stmt = $pdo->query("SELECT COUNT(*) as count FROM hpl");
     $count = $stmt->fetch()['count'];
