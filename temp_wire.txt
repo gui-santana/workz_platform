@@ -1,0 +1,51 @@
+function wireUnifiedSendFlow(root = document) {
+        const btn = root.querySelector('#btnEnviar');
+        if (!btn) return;
+        if (btn._unifiedHandler) {
+            try { btn.removeEventListener('click', btn._unifiedHandler, true); } catch(_) {}
+        }
+
+        const handler = async (ev) => {
+            ev.preventDefault();
+            if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+            if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+
+            // Detectar tipo de conteúdo olhando o DOM do editor
+            const editor = root.querySelector('#editor');
+            const bg = editor?.querySelector('.bg-media');
+            const hasVideoBg = !!bg && String(bg.tagName).toUpperCase() === 'VIDEO';
+            const hasAnimated = !!editor?.querySelector('.item[data-anim]:not([data-anim="none"])');
+            const isVideo = hasVideoBg || hasAnimated;
+
+            try {
+                let mediaDesc = null;
+                if (isVideo) {
+                    if (!window.EditorBridge?.exportVideoBlob) {
+                        notifyError('Exportação de vídeo indisponível.');
+                        return;
+                    }
+                    const videoBlob = await window.EditorBridge.exportVideoBlob();
+                    if (!videoBlob) { notifyError('Falha ao gerar vídeo.'); return; }
+                    const fd = new FormData();
+                    fd.append('files[]', videoBlob, `post_${Date.now()}.webm`);
+                    const up = await apiClient.upload('/posts/media', fd);
+                    if (up?.error || up?.status === 'error') { notifyError(up?.message || 'Falha no upload do vídeo'); return; }
+                    mediaDesc = Array.isArray(up?.media) ? up.media[0] : null;
+                } else {
+                    if (!window.EditorBridge?.renderFrame) { notifyError('Exportação de imagem indisponível.'); return; }
+                    await window.EditorBridge.renderFrame();
+                    const canvas = document.getElementById('outCanvas');
+                    if (!canvas || !canvas.toBlob) { notifyError('Canvas de saída indisponível.'); return; }
+                    let imgBlob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
+                    if (!imgBlob) { notifyError('Falha ao gerar imagem.'); return; }
+                    const fd = new FormData();
+                    fd.append('files[]', imgBlob, `post_${Date.now()}.jpg`);
+                    const up = await apiClient.upload('/posts/media', fd);
+                    if (up?.error || up?.status === 'error') { notifyError(up?.message || 'Falha no upload da imagem'); return; }
+                    mediaDesc = Array.isArray(up?.media) ? up.media[0] : null;
+                }
+
+                if (!mediaDesc) { notifyError('Mídia não recebida.'); return; }
+
+                // Se não há itens na galeria, publica direto como post único
+                const captionInput = 

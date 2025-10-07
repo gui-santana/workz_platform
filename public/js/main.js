@@ -31,27 +31,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const apiClient = new ApiClient();
 
-    // Variáveis Globais do Usuário
+    // Global user/page/feed state
     let currentUserData = null;
     let userPeople = [];
-    let userBusinesses = []; //Ids de empresa
+    let userBusinesses = [];
     let userTeams = [];
 
-    let userBusinessesData = [];// Condições do usuário nas empresas
-    let userTeamsData = []; // Condições do usuário nas equipes
-
+    let userBusinessesData = [];
+    let userTeamsData = [];
     let businessesJobs = {};
 
-    let memberStatus = null; // Status do usuário em páginas de negócio e de equipe
-    let memberLevel = null; // Nível do usuário em páginas de negócio e de equipe
-    let viewRestricted = false; // Restrição de acesso (ex.: equipe fora de negócios do usuário)
+    let memberStatus = null;
+    let memberLevel = null;
+    let viewRestricted = false;
 
-    // Variáveis Globais da Página
     let viewType = null;
     let viewId = null;
     let viewData = null;
 
-    // Variáveis Globais do Feed       
     const FEED_PAGE_SIZE = 6;
     let feedOffset = 0;
     let feedLoading = false;
@@ -59,6 +56,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const feedUserCache = new Map();
     let feedInteractionsAttached = false;
+
+    
 
     // Evita que cliques internos da sidebar acionem o handler global de fechar
     function installSidebarClickShield() {
@@ -284,6 +283,720 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    // Constantes de entidade para padronização
+
+    // =====================================================================
+    // 6. DOMAIN CONSTANTS & DATA MAPPERS
+    // =====================================================================
+
+    // (removido duplicado de ENTITY/ENTITY_TO_TYPE_MAP/ENTITY_TYPE_TO_TABLE_MAP)
+
+
+    // =====================================================================
+    // 4. MEDIA & UPLOAD UTILITIES
+    // =====================================================================
+
+    function resolveImageSrc(imValue, label = '', options = {}) {
+        const { size = 100, fallbackUrl = null } = options ?? {};
+        const raw = imValue ?? '';
+        const trimmed = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+
+        if (!trimmed) {
+            if (fallbackUrl) return fallbackUrl;
+            const initial = ((label ?? '').toString().trim().charAt(0) || '?').toUpperCase();
+            const safeInitial = encodeURIComponent(initial);
+            return `https://placehold.co/${size}x${size}/EFEFEF/333?text=${safeInitial}`;
+        }
+
+        if (/^data:image\//i.test(trimmed)) return trimmed;
+        if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+        // If it starts with a known image path, treat it as a path.
+        if (
+            trimmed.startsWith('/images/') ||
+            trimmed.startsWith('/users/') ||
+            trimmed.startsWith('/uploads/') ||
+            trimmed.startsWith('/app/uploads/') ||
+            /^uploads\//i.test(trimmed)
+        ) {
+            return trimmed;
+        }
+
+        // Otherwise, assume it's raw base64 data.
+        return `data:image/png;base64,${trimmed}`;
+    }
+
+    function resolveBackgroundImage(imValue, label = '', options = {}) {
+        const src = resolveImageSrc(imValue, label, options);
+        const sanitized = String(src || '').replace(/['\\]/g, '\\$&');
+        return `url('${sanitized}')`;
+    }
+
+    function applyEntityBackgroundImage(entityData = null) {
+        const coverEl = document.querySelector('#workz-content > div.col-span-12.rounded-b-3xl.h-48.bg-cover.bg-center');
+        if (!coverEl) return;
+
+        const hasImage = !!(entityData && entityData.bk);
+        if (hasImage) {
+            coverEl.style.backgroundImage = resolveBackgroundImage(entityData.bk, entityData.tt, { size: 1280 });
+        } else {
+            coverEl.style.backgroundImage = '';
+        }
+    }
+
+    function updateEntityBackgroundImageCache(entityType, entityId, imageUrl) {
+        const normalizedId = Number(entityId);
+        const resolvedUrl = imageUrl || null;
+        if (!Number.isFinite(normalizedId)) return;
+
+        if (entityType === 'people' && currentUserData && Number(currentUserData.id) === normalizedId) {
+            currentUserData.bk = resolvedUrl;
+        }
+
+        if (viewData && Number(viewData.id) === normalizedId) {
+            viewData.bk = resolvedUrl;
+        }
+
+        const matchesCurrentView =
+            (viewType === ENTITY.PROFILE && entityType === 'people') ||
+            (viewType === ENTITY.BUSINESS && entityType === 'businesses') ||
+            (viewType === ENTITY.TEAM && entityType === 'teams');
+
+        if (matchesCurrentView && viewData && Number(viewData.id) === normalizedId) {
+            applyEntityBackgroundImage(viewData);
+            return;
+        }
+
+        const isDashboardCurrentUser = viewType === 'dashboard' && entityType === 'people' && currentUserData && Number(currentUserData.id) === normalizedId;
+        if (isDashboardCurrentUser) {
+            applyEntityBackgroundImage(null);
+            return;
+        }
+
+        if (!viewData && viewType !== 'dashboard' && entityType === 'people' && currentUserData && Number(currentUserData.id) === normalizedId) {
+            applyEntityBackgroundImage(currentUserData);
+        }
+    }
+
+    // (removido duplicado de IMAGE_UPLOAD_STATE)
+
+    // Estado do editor de posts (carrossel)
+    // (removido duplicado de POST_MEDIA_STATE)
+
+    function getImageUploadInput() {
+        if (IMAGE_UPLOAD_STATE.input) return IMAGE_UPLOAD_STATE.input;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.style.display = 'none';
+        input.addEventListener('change', handleHeroImageSelection);
+        sidebarWrapper.appendChild(input);
+        IMAGE_UPLOAD_STATE.input = input;
+        return input;
+    }
+
+    function resetImageUploadState({ clearContext = true } = {}) {
+        if (clearContext) IMAGE_UPLOAD_STATE.context = null;
+        if (IMAGE_UPLOAD_STATE.input) {
+            IMAGE_UPLOAD_STATE.input.value = '';
+        }
+    }
+
+    function setupBackgroundImageUpload(sidebarContent, pageSettingsData, pageSettingsView) {
+        const changeBackgroundBtn = sidebarContent?.querySelector('[data-action="change-background"]');
+        if (!changeBackgroundBtn) return;
+
+        const entityType = ENTITY_TO_TYPE_MAP[pageSettingsView] || 'people';
+        const entityId = pageSettingsData?.id ?? currentUserData?.id;
+        if (!entityId) return;
+
+        const clickHandler = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const input = getImageUploadInput();
+            IMAGE_UPLOAD_STATE.context = {
+                entityType,
+                entityId,
+                view: pageSettingsView,
+                data: pageSettingsData,
+                messageContainer: sidebarContent.querySelector('#message') || document.getElementById('message'),
+                imageType: 'bk',
+                aspectRatio: 20 / 3,
+                outputWidth: 1920,
+                outputHeight: 288
+            };
+            input.value = '';
+            input.click();
+        };
+
+        if (changeBackgroundBtn._uploadHandler) {
+            changeBackgroundBtn.removeEventListener('click', changeBackgroundBtn._uploadHandler);
+        }
+        changeBackgroundBtn.addEventListener('click', clickHandler);
+        changeBackgroundBtn._uploadHandler = clickHandler;
+    }
+
+    function setupRemoveBackgroundImage(sidebarContent, pageSettingsData, pageSettingsView) {
+        const removeBtn = sidebarContent?.querySelector('[data-action="remove-background"]');
+        if (!removeBtn) return;
+
+        const entityType = ENTITY_TO_TYPE_MAP[pageSettingsView] || 'people';
+        const entityId = pageSettingsData?.id ?? currentUserData?.id;
+
+        const clickHandler = async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (await confirmDialog('Tem certeza que deseja remover a imagem de fundo?', { danger: true })) {
+                try {
+                    const { db, table } = ENTITY_TYPE_TO_TABLE_MAP[entityType];
+                    await apiClient.post('/update', { db, table, data: { bk: null }, conditions: { id: entityId } });
+
+                    if (pageSettingsData) pageSettingsData.bk = null;
+                    updateEntityBackgroundImageCache(entityType, entityId, null);
+
+                    SidebarNav.render();
+                    notifySuccess('Imagem de fundo removida.');
+                } catch (error) {
+                    console.error('[background] remove error', error);
+                    notifyError('Não foi possível remover a imagem de fundo.');
+                }
+            }
+        };
+
+        if (removeBtn._removeHandler) {
+            removeBtn.removeEventListener('click', removeBtn._removeHandler);
+        }
+        removeBtn.addEventListener('click', clickHandler);
+        removeBtn._removeHandler = clickHandler;
+    }
+
+    function setupHeroImageUpload(sidebarContent, pageSettingsData, pageSettingsView) {
+        const heroImage = sidebarContent?.querySelector('#sidebar-profile-image');
+        if (!heroImage) return;
+
+        const entityType = ENTITY_TO_TYPE_MAP[pageSettingsView] || 'people';
+        const entityId = pageSettingsData?.id ?? currentUserData?.id;
+        if (!entityId) return;
+
+        const clickHandler = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const input = getImageUploadInput();
+            IMAGE_UPLOAD_STATE.context = {
+                entityType,
+                entityId,
+                view: pageSettingsView,
+                data: pageSettingsData,
+                messageContainer: sidebarContent.querySelector('#message') || document.getElementById('message')
+            };
+            input.value = '';
+            input.click();
+        };
+
+        heroImage.style.cursor = 'pointer';
+        heroImage.classList.add('cursor-pointer');
+        if (heroImage._uploadHandler) {
+            heroImage.removeEventListener('click', heroImage._uploadHandler);
+        }
+        heroImage.addEventListener('click', clickHandler);
+        heroImage._uploadHandler = clickHandler;
+    }
+
+    function handleHeroImageSelection(event) {
+        const input = event.target;
+        const file = input?.files?.[0];
+        const context = IMAGE_UPLOAD_STATE.context;
+        if (!file || !context) {
+            resetImageUploadState();
+            return;
+        }
+
+        if (!file.type.startsWith('image/')) {
+            const container = context.messageContainer || document.getElementById('message');
+            if (container) {
+                showMessage(container, 'Selecione um arquivo de imagem válido.', 'warning', { dismissAfter: 5000 });
+            }
+            resetImageUploadState();
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result;
+            if (!dataUrl) {
+                const container = context.messageContainer || document.getElementById('message');
+                if (container) {
+                    showMessage(container, 'Não foi possível ler o arquivo selecionado.', 'error', { dismissAfter: 5000 });
+                }
+                resetImageUploadState();
+                return;
+            }
+
+            openImageCropperView({
+                entityContext: { ...context },
+                imageDataUrl: dataUrl,
+                fileName: file.name,
+                fileType: file.type,
+                fileSize: file.size
+            });
+        };
+        reader.onerror = () => {
+            const container = context.messageContainer || document.getElementById('message');
+            if (container) {
+                void showMessage(container, 'Falha ao carregar a imagem selecionada.', 'error', { dismissAfter: 5000 });
+            }
+            resetImageUploadState();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function openImageCropperView(cropPayload) {
+        if (!cropPayload?.entityContext?.entityId) {
+            resetImageUploadState();
+            return;
+        }
+
+        SidebarNav.push({
+            view: 'image-crop',
+            title: 'Editar imagem',
+            payload: {
+                data: cropPayload.entityContext.data,
+                type: cropPayload.entityContext.view,
+                crop: { ...cropPayload }
+            }
+        });
+    }
+
+    // Inicializa o seletor e a bandeja de múltiplas mídias no editor de posts
+    function initPostEditorGallery(root = document) {
+        const picker = root.querySelector('#postMediaPicker');
+        const tray = root.querySelector('#postMediaTray');
+        const publishBtn = root.querySelector('#publishGalleryBtn');
+        const captionInput = root.querySelector('#postCaption');
+
+        if (!picker || !tray || !publishBtn) return;
+
+        if (!POST_MEDIA_STATE.initialized) {
+            POST_MEDIA_STATE.items = [];
+            POST_MEDIA_STATE.initialized = true;
+        }
+
+        const renderTray = () => {
+            const items = POST_MEDIA_STATE.items || [];
+            if (!items.length) {
+                tray.innerHTML = `<div class="text-sm text-slate-500">Nenhuma mídia adicionada ainda.</div>`;
+                return;
+            }
+            let html = '<div class="grid grid-cols-3 gap-2">';
+            items.forEach((m, i) => {
+                const isVideo = String(m.type).toLowerCase() === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video');
+                const mediaEl = isVideo
+                    ? `<video src="${m.url}" class="w-full h-24 object-cover rounded-xl" muted loop playsinline></video>`
+                    : `<img src="${m.url}" class="w-full h-24 object-cover rounded-xl"/>`;
+                const isActive = (POST_MEDIA_STATE.activeIndex === i);
+                html += `
+                    <div class="relative group ${isActive ? 'ring-2 ring-indigo-500 rounded-xl' : ''}" data-index="${i}">
+                        ${mediaEl}
+                        <span class="absolute top-1 left-1 text-xs bg-black/60 text-white rounded px-1">${i+1}/${items.length}</span>
+                        <div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-left\" title=\"Mover para a esquerda\"><i class=\"fas fa-arrow-left text-[10px]\"></i></button>
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-right\" title=\"Mover para a direita\"><i class=\"fas fa-arrow-right text-[10px]\"></i></button>
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-red-600/80 text-white flex items-center justify-center\" data-action=\"remove\" title=\"Remover\"><i class=\"fas fa-trash text-[10px]\"></i></button>
+                        </div>
+                    </div>`;
+            });
+            html += '</div>';
+            tray.innerHTML = html;
+        };
+
+        const handleReorderOrRemove = (ev) => {
+            const btn = ev.target.closest('button[data-action]');
+            if (!btn || !tray.contains(btn)) return;
+            const card = btn.closest('[data-index]');
+            const idx = Number(card?.dataset?.index ?? -1);
+            if (!Number.isFinite(idx) || idx < 0) return;
+            const action = btn.dataset.action;
+            const items = POST_MEDIA_STATE.items;
+            if (!Array.isArray(items) || !items.length) return;
+            if (action === 'remove') {
+                items.splice(idx, 1);
+            } else if (action === 'move-left' && idx > 0) {
+                const [it] = items.splice(idx, 1);
+                items.splice(idx - 1, 0, it);
+            } else if (action === 'move-right' && idx < items.length - 1) {
+                const [it] = items.splice(idx, 1);
+                items.splice(idx + 1, 0, it);
+            }
+            renderTray();
+        };
+
+        const ensureBridge = (cb) => {
+            if (window.EditorBridge && typeof cb === 'function') { cb(); return; }
+            setTimeout(() => ensureBridge(cb), 100);
+        };
+
+        const switchToMedia = (idx) => {
+            const items = POST_MEDIA_STATE.items || [];
+            if (!items[idx]) return;
+            // Salvar layout atual no item ativo
+            if (POST_MEDIA_STATE.activeIndex != null && window.EditorBridge?.serialize) {
+                try {
+                    const layout = window.EditorBridge.serialize();
+                    POST_MEDIA_STATE.items[POST_MEDIA_STATE.activeIndex].layout = layout;
+                } catch (_) {}
+            }
+            POST_MEDIA_STATE.activeIndex = idx;
+            renderTray();
+            const it = items[idx];
+            const type = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image';
+            const apply = () => {
+                try { window.EditorBridge?.setBackground?.(it.url || (it.path ? ('/'+String(it.path).replace(/^\/+/, '')) : ''), type); } catch(_) {}
+                if (window.EditorBridge?.load) {
+                    if (it.layout) { try { window.EditorBridge.load(it.layout); } catch(_) {} }
+                    else { try { window.EditorBridge.load({ items: [] }); } catch(_) {} }
+                }
+            };
+            ensureBridge(apply);
+        };
+
+        const handlePickerChange = async (ev) => {
+            const files = Array.from(ev.target.files || []);
+            if (!files.length) return;
+            const remain = 10 - (POST_MEDIA_STATE.items?.length || 0);
+            const toSend = files.slice(0, Math.max(0, remain));
+            if (!toSend.length) {
+                notifyError('Limite de 10 mídias por post.');
+                return;
+            }
+            const fd = new FormData();
+            toSend.forEach(f => fd.append('files[]', f, f.name));
+            const res = await apiClient.upload('/posts/media', fd);
+            if (res?.error || res?.status === 'error') {
+                notifyError(res?.message || 'Falha no upload das mídias.');
+                return;
+            }
+            const media = Array.isArray(res?.media) ? res.media : [];
+            if (!media.length) {
+                notifyError('Nenhuma mídia válida recebida.');
+                return;
+            }
+            POST_MEDIA_STATE.items.push(...media);
+            picker.value = '';
+            renderTray();
+            if (POST_MEDIA_STATE.activeIndex == null) {
+                switchToMedia(0);
+            }
+        };
+
+        const computePostType = (items) => {
+            const types = new Set((items||[]).map(m => (String(m.type||'').toLowerCase().startsWith('video') || String(m.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image'));
+            if (types.size === 1) return types.has('video') ? 'video' : 'image';
+            return 'mixed';
+        };
+
+        const handlePublish = async () => {
+            const items = POST_MEDIA_STATE.items || [];
+            if (!items.length) {
+                notifyError('Adicione ao menos uma mídia.');
+                return;
+            }
+            const caption = (captionInput?.value || '').toString().trim();
+            const tp = computePostType(items);
+
+            // Pré-processamento: gerar composições quando houver layout (imagem e vídeo)
+            if (window.EditorBridge) {
+                publishBtn.disabled = true; publishBtn.textContent = 'Publicando...';
+                // Guardar índice ativo para restaurar
+                const prevIdx = POST_MEDIA_STATE.activeIndex;
+
+                // Capturar layout atual do item ativo
+                if (POST_MEDIA_STATE.activeIndex != null && window.EditorBridge?.serialize) {
+                    try {
+                        const layoutNow = window.EditorBridge.serialize();
+                        if (items[POST_MEDIA_STATE.activeIndex]) {
+                            items[POST_MEDIA_STATE.activeIndex].layout = layoutNow;
+                        }
+                    } catch (_) {}
+                }
+                for (let i = 0; i < items.length; i++) {
+                    const it = items[i];
+                    const isVideo = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
+                    // layout será salvo automaticamente ao alternar via switchToMedia
+                    if (!it.layout) continue;
+                    if (isVideo) {
+                        // Compor vídeo com layout
+                        await new Promise((resolve)=>{
+                            const then = async () => {
+                                try {
+                                    const vblob = await window.EditorBridge.exportVideoBlob();
+                                    if (vblob) {
+                                        const fd2 = new FormData();
+                                        fd2.append('files[]', vblob, `composite_${Date.now()}.webm`);
+                                        const up = await apiClient.upload('/posts/media', fd2);
+                                        const first = Array.isArray(up?.media) ? up.media[0] : null;
+                                        if (first) {
+                                            it.originalUrl = it.url; it.originalPath = it.path; it.originalMime = it.mimeType;
+                                            it.url = first.url; it.path = first.path; it.mimeType = first.mimeType;
+                                        }
+                                    }
+                                } catch(_) {}
+                                resolve();
+                            };
+                            switchToMedia(i); setTimeout(then, 200);
+                        });
+                    } else {
+                        // Compor imagem com layout
+                        await new Promise((resolve)=>{
+                            const then = async () => { try { await window.EditorBridge.renderFrame(); } catch(_){} resolve(); };
+                            switchToMedia(i); setTimeout(then, 150);
+                        });
+                        try {
+                            const canvas = document.getElementById('outCanvas');
+                            if (canvas && canvas.toBlob) {
+                                const blob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
+                                if (blob) {
+                                    const fd2 = new FormData();
+                                    fd2.append('files[]', blob, `composite_${Date.now()}.jpg`);
+                                    const up = await apiClient.upload('/posts/media', fd2);
+                                    const first = Array.isArray(up?.media) ? up.media[0] : null;
+                                    if (first) {
+                                        // manter referência do original
+                                        it.originalUrl = it.url; it.originalPath = it.path; it.originalMime = it.mimeType;
+                                        it.url = first.url; it.path = first.path; it.mimeType = first.mimeType;
+                                    }
+                                }
+                            }
+                        } catch(_) {}
+                    }
+                }
+                // Restaurar índice
+                if (prevIdx != null) { POST_MEDIA_STATE.activeIndex = prevIdx; switchToMedia(prevIdx); }
+                publishBtn.disabled = false; publishBtn.textContent = 'Publicar';
+            }
+
+            const vt = String(viewType || '');
+            const vd = viewData || null;
+            const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
+            const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
+
+            const payload = { tp, cm, em, ct: { caption, media: items } };
+            const res = await apiClient.post('/posts', payload);
+            if (res?.error || res?.status === 'error') {
+                notifyError(res?.message || 'Não foi possível publicar o post.');
+                return;
+            }
+            notifySuccess('Post publicado!');
+            POST_MEDIA_STATE.items = [];
+            if (captionInput) captionInput.value = '';
+            renderTray();
+            resetFeed();
+            loadFeed();
+        };
+
+        if (picker._galleryHandler) { picker.removeEventListener('change', picker._galleryHandler); }
+        picker.addEventListener('change', handlePickerChange);
+        picker._galleryHandler = handlePickerChange;
+
+        const trayClick = (ev) => {
+            // Bloqueia propagação para não acionar listeners globais que fecham a sidebar
+            if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+            const btn = ev.target.closest('button[data-action]');
+            if (btn) { handleReorderOrRemove(ev); return; }
+            const card = ev.target.closest('[data-index]');
+            if (!card || !tray.contains(card)) return;
+            const idx = Number(card.dataset.index || '-1');
+            if (!Number.isFinite(idx) || idx < 0) return;
+            switchToMedia(idx);
+        };
+        if (tray._galleryHandler) { tray.removeEventListener('click', tray._galleryHandler); }
+        tray.addEventListener('click', trayClick);
+        tray._galleryHandler = trayClick;
+
+        if (publishBtn) {
+            publishBtn.classList.add('hidden'); // manter somente um botão visível
+            if (publishBtn._galleryHandler) { publishBtn.removeEventListener('click', publishBtn._galleryHandler); }
+            publishBtn.addEventListener('click', handlePublish);
+            publishBtn._galleryHandler = handlePublish;
+        }
+        renderTray();
+
+        // Se já houver itens (ex.: retorno ao editor), focar o primeiro
+        if ((POST_MEDIA_STATE.items?.length||0) > 0 && POST_MEDIA_STATE.activeIndex == null) {
+            switchToMedia(0);
+        }
+    }
+
+    // Integra captura do editor -> adiciona na galeria automaticamente
+    function setupEditorCaptureBridge(root = document) {
+        const handler = async (e) => {
+            const detail = e?.detail || {};
+            const blob = detail.blob || null;
+            const type = (detail.type || '').toLowerCase();
+            if (!blob) return;
+            try {
+                const fd = new FormData();
+                const name = type === 'video' ? `capture_${Date.now()}.webm` : `capture_${Date.now()}.jpg`;
+                fd.append('files[]', blob, name);
+                const up = await apiClient.upload('/posts/media', fd);
+                const media = Array.isArray(up?.media) ? up.media[0] : null;
+                if (media) {
+                    // Capturar layout atual do editor para compor posteriormente
+                    try { if (window.EditorBridge?.serialize) { media.layout = window.EditorBridge.serialize(); } } catch(_) {}
+                    POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
+                    POST_MEDIA_STATE.items.push(media);
+                    POST_MEDIA_STATE.activeIndex = POST_MEDIA_STATE.items.length - 1;
+                    initPostEditorGallery(root);
+                    notifySuccess('Mídia adicionada à galeria.');
+                } else {
+                    notifyError('Falha ao adicionar captura à galeria.');
+                }
+            } catch (err) {
+                console.error('[capture->gallery] error', err);
+                notifyError('Erro ao enviar captura.');
+            }
+        };
+        if (window._editorCaptureHandler) window.removeEventListener('editor:capture', window._editorCaptureHandler);
+        window.addEventListener('editor:capture', handler);
+        window._editorCaptureHandler = handler;
+    }
+
+    // Unifica pontos de entrada de mídia (captura e rótulos) para a galeria
+    function wireUnifiedMediaAdders(root = document) {
+        const isMobileLike = () => {
+            try {
+                return (
+                    ('ontouchstart' in window) ||
+                    (navigator.maxTouchPoints && navigator.maxTouchPoints > 1) ||
+                    (window.matchMedia && window.matchMedia('(pointer:coarse)').matches)
+                );
+            } catch (_) { return false; }
+        };
+
+        const picker = root.querySelector('#postMediaPicker');
+        if (!picker) return;
+
+        // 1) Captura: no desktop, redireciona o clique para o seletor da galeria
+        const captureBtn = root.querySelector('#captureButton');
+        if (captureBtn) {
+            const onCaptureClick = (ev) => {
+                // Em dispositivos móveis, manter o fluxo nativo (gera editor:capture)
+                if (isMobileLike()) return;
+                ev.preventDefault();
+                if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+                if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+                try { initPostEditorGallery(root); } catch (_) {}
+                picker.click();
+            };
+            try { captureBtn.removeEventListener('click', captureBtn._unifyGalleryHandler, true); } catch (_) {}
+            captureBtn.addEventListener('click', onCaptureClick, true);
+            captureBtn._unifyGalleryHandler = onCaptureClick;
+        }
+
+        // 2) Toolbar superior: rótulo do bgUpload passa a abrir o seletor da galeria
+        const bgInput = root.querySelector('#bgUpload');
+        const bgLabel = bgInput ? bgInput.closest('label') : null;
+        if (bgLabel) {
+            const onBgLabelClick = (ev) => {
+                ev.preventDefault();
+                if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+                if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+                try { initPostEditorGallery(root); } catch (_) {}
+                picker.click();
+            };
+            try { bgLabel.removeEventListener('click', bgLabel._unifyGalleryHandler, true); } catch (_) {}
+            bgLabel.addEventListener('click', onBgLabelClick, true);
+            bgLabel._unifyGalleryHandler = onBgLabelClick;
+        }
+    }
+
+    // Unifica o botão "Enviar" do editor ao fluxo da galeria
+    function wireUnifiedSendFlow(root = document) {
+        const btn = root.querySelector('#btnEnviar');
+        if (!btn) return;
+        if (btn._unifiedHandler) {
+            try { btn.removeEventListener('click', btn._unifiedHandler, true); } catch(_) {}
+        }
+
+        const handler = async (ev) => {
+            ev.preventDefault();
+            if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+            if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+            
+            // Se a galeria já tem itens, publicar usando o fluxo da galeria
+            const galleryItems = POST_MEDIA_STATE.items || [];
+            if (Array.isArray(galleryItems) && galleryItems.length > 0) {
+                const hiddenPublish = root.querySelector('#publishGalleryBtn');
+                if (hiddenPublish) { hiddenPublish.click(); return; }
+                try { initPostEditorGallery(root); setTimeout(() => root.querySelector('#publishGalleryBtn')?.click(), 0); } catch (_) {}
+                return;
+            }
+
+            // Caso não haja itens na galeria: exportar conteúdo atual (imagem/vídeo) e publicar direto
+            
+            // Detectar tipo de conteúdo olhando o DOM do editor
+            const editor = root.querySelector('#editor');
+            const bg = editor?.querySelector('.bg-media');
+            const hasVideoBg = !!bg && String(bg.tagName).toUpperCase() === 'VIDEO';
+            const hasAnimated = !!editor?.querySelector('.item[data-anim]:not([data-anim="none"])');
+            const isVideo = hasVideoBg || hasAnimated;
+
+            try {
+                let mediaDesc = null;
+                if (isVideo) {
+                    if (!window.EditorBridge?.exportVideoBlob) { notifyError('Exportação de vídeo indisponível.'); return; }
+                    const videoBlob = await window.EditorBridge.exportVideoBlob();
+                    if (!videoBlob) { notifyError('Falha ao gerar vídeo.'); return; }
+                    const fd = new FormData();
+                    fd.append('files[]', videoBlob, `post_${Date.now()}.webm`);
+                    const up = await apiClient.upload('/posts/media', fd);
+                    if (up?.error || up?.status === 'error') { notifyError(up?.message || 'Falha no upload do vídeo'); return; }
+                    mediaDesc = Array.isArray(up?.media) ? up.media[0] : null;
+                } else {
+                    if (!window.EditorBridge?.renderFrame) { notifyError('Exportação de imagem indisponível.'); return; }
+                    await window.EditorBridge.renderFrame();
+                    const canvas = document.getElementById('outCanvas');
+                    if (!canvas || !canvas.toBlob) { notifyError('Canvas de saída indisponível.'); return; }
+                    let imgBlob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
+                    if (!imgBlob) { notifyError('Falha ao gerar imagem.'); return; }
+                    const fd = new FormData();
+                    fd.append('files[]', imgBlob, `post_${Date.now()}.jpg`);
+                    const up = await apiClient.upload('/posts/media', fd);
+                    if (up?.error || up?.status === 'error') { notifyError(up?.message || 'Falha no upload da imagem'); return; }
+                    mediaDesc = Array.isArray(up?.media) ? up.media[0] : null;
+                }
+
+                if (!mediaDesc) { notifyError('Mídia não recebida.'); return; }
+
+                // Publicar post único
+                const captionInput = root.querySelector('#postCaption');
+                const caption = (captionInput?.value || '').toString().trim();
+
+                const vt = String(viewType || '');
+                const vd = viewData || null;
+                const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
+                const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
+
+                const tp = isVideo ? 'video' : 'image';
+                const payload = { tp, cm, em, ct: { caption, media: [mediaDesc] } };
+                const res = await apiClient.post('/posts', payload);
+                if (res?.error || res?.status === 'error') { notifyError(res?.message || 'Não foi possível publicar.'); return; }
+                notifySuccess('Post publicado!');
+                resetFeed();
+                loadFeed();
+            } catch (err) {
+                console.error('[unified-send] error', err);
+                notifyError('Falha ao processar envio.');
+            }
+        };
+
+        btn.addEventListener('click', handler, true);
+        btn._unifiedHandler = handler;
+    }
+    // (removidos duplicados de variáveis globais e installSidebarClickShield)
+
+
+    // Navegação estilo iOS para o sidebar (stack)
+    /* Duplicate SidebarNav removed */
     // Constantes de entidade para padronização
 
     // =====================================================================
@@ -676,7 +1389,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const type = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image';
             const apply = () => {
                 try { window.EditorBridge?.setBackground?.(it.url || (it.path ? ('/'+String(it.path).replace(/^\/+/, '')) : ''), type); } catch(_) {}
-                if (it.layout && window.EditorBridge?.load) { try { window.EditorBridge.load(it.layout); } catch(_) {} }
+                if (window.EditorBridge?.load) {
+                    if (it.layout) { try { window.EditorBridge.load(it.layout); } catch(_) {} }
+                    else { try { window.EditorBridge.load({ items: [] }); } catch(_) {} }
+                }
             };
             ensureBridge(apply);
         };
@@ -725,39 +1441,71 @@ document.addEventListener('DOMContentLoaded', () => {
             const caption = (captionInput?.value || '').toString().trim();
             const tp = computePostType(items);
 
-            // Opcional: para imagens com layout, pré-renderiza e substitui pela composição
-            if (window.EditorBridge?.renderFrame) {
+            // Pré-processamento: gerar composições quando houver layout (imagem e vídeo)
+            if (window.EditorBridge) {
                 publishBtn.disabled = true; publishBtn.textContent = 'Publicando...';
                 // Guardar índice ativo para restaurar
                 const prevIdx = POST_MEDIA_STATE.activeIndex;
+
+                // Capturar layout atual do item ativo
+                if (POST_MEDIA_STATE.activeIndex != null && window.EditorBridge?.serialize) {
+                    try {
+                        const layoutNow = window.EditorBridge.serialize();
+                        if (items[POST_MEDIA_STATE.activeIndex]) {
+                            items[POST_MEDIA_STATE.activeIndex].layout = layoutNow;
+                        }
+                    } catch (_) {}
+                }
                 for (let i = 0; i < items.length; i++) {
                     const it = items[i];
                     const isVideo = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
-                    if (isVideo) continue;
+                    // layout será salvo automaticamente ao alternar via switchToMedia
                     if (!it.layout) continue;
-                    // Aplicar mídia e layout no editor e renderizar
-                    await new Promise((resolve)=>{
-                        const then = async () => { try { await window.EditorBridge.renderFrame(); } catch(_){} resolve(); };
-                        POST_MEDIA_STATE.activeIndex = i; switchToMedia(i); setTimeout(then, 150);
-                    });
-                    // Extrair canvas e enviar como nova mídia
-                    try {
-                        const canvas = document.getElementById('outCanvas');
-                        if (canvas && canvas.toBlob) {
-                            const blob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
-                            if (blob) {
-                                const fd2 = new FormData();
-                                fd2.append('files[]', blob, `composite_${Date.now()}.jpg`);
-                                const up = await apiClient.upload('/posts/media', fd2);
-                                const first = Array.isArray(up?.media) ? up.media[0] : null;
-                                if (first) {
-                                    // manter referência do original
-                                    it.originalUrl = it.url; it.originalPath = it.path; it.originalMime = it.mimeType;
-                                    it.url = first.url; it.path = first.path; it.mimeType = first.mimeType;
+                    if (isVideo) {
+                        // Compor vídeo com layout
+                        await new Promise((resolve)=>{
+                            const then = async () => {
+                                try {
+                                    const vblob = await window.EditorBridge.exportVideoBlob();
+                                    if (vblob) {
+                                        const fd2 = new FormData();
+                                        fd2.append('files[]', vblob, `composite_${Date.now()}.webm`);
+                                        const up = await apiClient.upload('/posts/media', fd2);
+                                        const first = Array.isArray(up?.media) ? up.media[0] : null;
+                                        if (first) {
+                                            it.originalUrl = it.url; it.originalPath = it.path; it.originalMime = it.mimeType;
+                                            it.url = first.url; it.path = first.path; it.mimeType = first.mimeType;
+                                        }
+                                    }
+                                } catch(_) {}
+                                resolve();
+                            };
+                            switchToMedia(i); setTimeout(then, 200);
+                        });
+                    } else {
+                        // Compor imagem com layout
+                        await new Promise((resolve)=>{
+                            const then = async () => { try { await window.EditorBridge.renderFrame(); } catch(_){} resolve(); };
+                            switchToMedia(i); setTimeout(then, 150);
+                        });
+                        try {
+                            const canvas = document.getElementById('outCanvas');
+                            if (canvas && canvas.toBlob) {
+                                const blob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
+                                if (blob) {
+                                    const fd2 = new FormData();
+                                    fd2.append('files[]', blob, `composite_${Date.now()}.jpg`);
+                                    const up = await apiClient.upload('/posts/media', fd2);
+                                    const first = Array.isArray(up?.media) ? up.media[0] : null;
+                                    if (first) {
+                                        // manter referência do original
+                                        it.originalUrl = it.url; it.originalPath = it.path; it.originalMime = it.mimeType;
+                                        it.url = first.url; it.path = first.path; it.mimeType = first.mimeType;
+                                    }
                                 }
                             }
-                        }
-                    } catch(_) {}
+                        } catch(_) {}
+                    }
                 }
                 // Restaurar índice
                 if (prevIdx != null) { POST_MEDIA_STATE.activeIndex = prevIdx; switchToMedia(prevIdx); }
@@ -783,8 +1531,11 @@ document.addEventListener('DOMContentLoaded', () => {
             loadFeed();
         };
 
+        if (picker._galleryHandler) { picker.removeEventListener('change', picker._galleryHandler); }
         picker.addEventListener('change', handlePickerChange);
-        tray.addEventListener('click', (ev) => {
+        picker._galleryHandler = handlePickerChange;
+
+        const trayClick = (ev) => {
             // Bloqueia propagação para não acionar listeners globais que fecham a sidebar
             if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
             const btn = ev.target.closest('button[data-action]');
@@ -794,14 +1545,138 @@ document.addEventListener('DOMContentLoaded', () => {
             const idx = Number(card.dataset.index || '-1');
             if (!Number.isFinite(idx) || idx < 0) return;
             switchToMedia(idx);
-        });
-        publishBtn.addEventListener('click', handlePublish);
+        };
+        if (tray._galleryHandler) { tray.removeEventListener('click', tray._galleryHandler); }
+        tray.addEventListener('click', trayClick);
+        tray._galleryHandler = trayClick;
+
+        if (publishBtn) {
+            publishBtn.classList.add('hidden'); // manter somente um botão visível
+            if (publishBtn._galleryHandler) { publishBtn.removeEventListener('click', publishBtn._galleryHandler); }
+            publishBtn.addEventListener('click', handlePublish);
+            publishBtn._galleryHandler = handlePublish;
+        }
         renderTray();
 
         // Se já houver itens (ex.: retorno ao editor), focar o primeiro
         if ((POST_MEDIA_STATE.items?.length||0) > 0 && POST_MEDIA_STATE.activeIndex == null) {
             switchToMedia(0);
         }
+    }
+
+    // Integra captura do editor -> adiciona na galeria automaticamente
+    function setupEditorCaptureBridge(root = document) {
+        const handler = async (e) => {
+            const detail = e?.detail || {};
+            const blob = detail.blob || null;
+            const type = (detail.type || '').toLowerCase();
+            if (!blob) return;
+            try {
+                const fd = new FormData();
+                const name = type === 'video' ? `capture_${Date.now()}.webm` : `capture_${Date.now()}.jpg`;
+                fd.append('files[]', blob, name);
+                const up = await apiClient.upload('/posts/media', fd);
+                const media = Array.isArray(up?.media) ? up.media[0] : null;
+                if (media) {
+                    // Capturar layout atual do editor para compor posteriormente
+                    try { if (window.EditorBridge?.serialize) { media.layout = window.EditorBridge.serialize(); } } catch(_) {}
+                    POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
+                    POST_MEDIA_STATE.items.push(media);
+                    POST_MEDIA_STATE.activeIndex = POST_MEDIA_STATE.items.length - 1;
+                    initPostEditorGallery(root);
+                    notifySuccess('Mídia adicionada à galeria.');
+                } else {
+                    notifyError('Falha ao adicionar captura à galeria.');
+                }
+            } catch (err) {
+                console.error('[capture->gallery] error', err);
+                notifyError('Erro ao enviar captura.');
+            }
+        };
+        if (window._editorCaptureHandler) window.removeEventListener('editor:capture', window._editorCaptureHandler);
+        window.addEventListener('editor:capture', handler);
+        window._editorCaptureHandler = handler;
+    }
+
+    // Unifica o botão "Enviar" do editor ao fluxo da galeria
+    function wireUnifiedSendFlow(root = document) {
+        const btn = root.querySelector('#btnEnviar');
+        if (!btn) return;
+        if (btn._unifiedHandler) {
+            try { btn.removeEventListener('click', btn._unifiedHandler, true); } catch(_) {}
+        }
+
+        const handler = async (ev) => {
+            ev.preventDefault();
+            if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+            if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+
+            // Se houver itens na galeria, delega a publicação para o botão oculto
+            const galleryItems = POST_MEDIA_STATE.items || [];
+            if (Array.isArray(galleryItems) && galleryItems.length > 0) {
+                const hiddenPublish = root.querySelector('#publishGalleryBtn');
+                if (hiddenPublish) { hiddenPublish.click(); return; }
+                try { initPostEditorGallery(root); setTimeout(() => root.querySelector('#publishGalleryBtn')?.click(), 0); } catch (_) {}
+                return;
+            }
+
+            // Caso contrário, exporta o conteúdo atual (vídeo ou imagem) e publica como post único
+            const editor = root.querySelector('#editor');
+            const bg = editor?.querySelector('.bg-media');
+            const hasVideoBg = !!bg && String(bg.tagName).toUpperCase() === 'VIDEO';
+            const hasAnimated = !!editor?.querySelector('.item[data-anim]:not([data-anim="none"])');
+            const isVideo = hasVideoBg || hasAnimated;
+
+            try {
+                let mediaDesc = null;
+                if (isVideo) {
+                    if (!window.EditorBridge?.exportVideoBlob) { notifyError('Exportação de vídeo indisponível.'); return; }
+                    const videoBlob = await window.EditorBridge.exportVideoBlob();
+                    if (!videoBlob) { notifyError('Falha ao gerar vídeo.'); return; }
+                    const fd = new FormData();
+                    fd.append('files[]', videoBlob, `post_${Date.now()}.webm`);
+                    const up = await apiClient.upload('/posts/media', fd);
+                    if (up?.error || up?.status === 'error') { notifyError(up?.message || 'Falha no upload do vídeo'); return; }
+                    mediaDesc = Array.isArray(up?.media) ? up.media[0] : null;
+                } else {
+                    if (!window.EditorBridge?.renderFrame) { notifyError('Exportação de imagem indisponível.'); return; }
+                    await window.EditorBridge.renderFrame();
+                    const canvas = document.getElementById('outCanvas');
+                    if (!canvas || !canvas.toBlob) { notifyError('Canvas de saída indisponível.'); return; }
+                    let imgBlob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
+                    if (!imgBlob) { notifyError('Falha ao gerar imagem.'); return; }
+                    const fd = new FormData();
+                    fd.append('files[]', imgBlob, `post_${Date.now()}.jpg`);
+                    const up = await apiClient.upload('/posts/media', fd);
+                    if (up?.error || up?.status === 'error') { notifyError(up?.message || 'Falha no upload da imagem'); return; }
+                    mediaDesc = Array.isArray(up?.media) ? up.media[0] : null;
+                }
+
+                if (!mediaDesc) { notifyError('Mídia não recebida.'); return; }
+
+                const captionInput = root.querySelector('#postCaption');
+                const caption = (captionInput?.value || '').toString().trim();
+
+                const vt = String(viewType || '');
+                const vd = viewData || null;
+                const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
+                const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
+
+                const tp = isVideo ? 'video' : 'image';
+                const payload = { tp, cm, em, ct: { caption, media: [mediaDesc] } };
+                const res = await apiClient.post('/posts', payload);
+                if (res?.error || res?.status === 'error') { notifyError(res?.message || 'Não foi possível publicar.'); return; }
+                notifySuccess('Post publicado!');
+                resetFeed();
+                loadFeed();
+            } catch (err) {
+                console.error('[unified-send] error', err);
+                notifyError('Falha ao processar envio.');
+            }
+        };
+
+        btn.addEventListener('click', handler, true);
+        btn._unifiedHandler = handler;
     }
 
     function initializeImageCropperView(sidebarMount, cropData) {
@@ -2735,13 +3610,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </section>
             
-                <!-- Botão Enviar destacado -->
+                <!-- Botão Publicar -->
                 <section class="editor-card">
                     <div class="flex flex-col items-center gap-4">
                         <button type="button" id="btnEnviar" class="enviar-button" title="Enviar conteúdo">
                             <div class="enviar-inner">
                                 <i class="fas fa-paper-plane enviar-icon"></i>
-                                <span class="enviar-text">Enviar</span>
+                                <span class="enviar-text">Publicar</span>
                             </div>
                         </button>
                         
@@ -3264,8 +4139,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const slides = post.media.map((m, idx) => {
                     const mtype = String(m.type || '').toLowerCase();
                     const murl = m.url || (m.path ? ('/' + String(m.path).replace(/^\/+/, '')) : '');
-                    const inner = (mtype === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video'))
-                        ? `<video src="${murl}" class="absolute inset-0 w-full h-full object-cover" muted loop playsinline></video>`
+                    const isVid = (mtype === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video'));
+                    const inner = isVid
+                        ? `<video src="${murl}" class="absolute inset-0 w-full h-full object-cover" ${idx===0 ? 'autoplay' : ''} muted loop playsinline data-carousel-video></video>`
                         : `<img src="${murl}" class="absolute inset-0 w-full h-full object-cover"/>`;
                     return `<div class="inline-block align-top w-full h-full relative">${inner}</div>`;
                 }).join('');
@@ -3274,7 +4150,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="h-full whitespace-nowrap transition-transform duration-300 ease-out" data-carousel-track style="transform: translateX(0);">
                         ${slides}
                     </div>
-                    <div class="absolute inset-x-0 bottom-2 flex items-center justify-center gap-2 text-xs">
+                    <div class="absolute inset-x-0 bottom-2 z-30 flex items-center justify-center gap-2 text-xs">
                         <button type="button" class="px-2 py-1 rounded-full bg-black/40 text-white" data-feed-action="prev-slide" data-post-id="${postId}">&#10094;</button>
                         <span class="rounded-full bg-black/40 text-white px-2 py-1" data-role="carousel-indicator" data-post-id="${postId}">1/${post.media.length}</span>
                         <button type="button" class="px-2 py-1 rounded-full bg-black/40 text-white" data-feed-action="next-slide" data-post-id="${postId}">&#10095;</button>
@@ -3339,7 +4215,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             </div>
                             <form class="flex items-center gap-2 bg-black/40 rounded-full px-3 py-2" data-feed-action="comment-form" data-post-id="${postId}">
                                 <input type="text" name="comment" class="flex-1 bg-transparent border-none text-sm text-white placeholder-white/60 focus:outline-none" placeholder="Adicione um comentário..." autocomplete="off" maxlength="300">
-                                <button type="submit" class="text-sm font-semibold text-white hover:text-indigo-200 transition">Enviar</button>
+                                <button type="submit" class="text-sm font-semibold text-white hover:text-indigo-200 transition">Publicar</button>
                             </form>
                         </div>
                     </div>
@@ -3398,6 +4274,20 @@ document.addEventListener('DOMContentLoaded', () => {
             commentBlock.classList.add('hidden');
             // Insere overlay dentro do card (necessário para absolute inset-0)
             card.appendChild(overlay);
+
+            // Autoplay do primeiro vídeo em carrossel
+            try {
+                const carousel = article.querySelector(`[data-role="carousel"][data-post-id="${postId}"]`);
+                if (carousel) {
+                    const track = carousel.querySelector('[data-carousel-track]');
+                    const firstVid = track?.children?.[0]?.querySelector('video');
+                    if (firstVid) {
+                        firstVid.muted = true; firstVid.playsInline = true; firstVid.autoplay = true;
+                        // Forçar reprodução após inserção no DOM
+                        setTimeout(() => { try { firstVid.play(); } catch(_) {} }, 50);
+                    }
+                }
+            } catch (_) {}
         });
     }
 
@@ -3464,6 +4354,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     menu.dataset.mediaType = opener.dataset.mediaType;
                 }
             }
+            // Controlar reprodução dos vídeos no carrossel
+            try {
+                const vids = track.querySelectorAll('video');
+                vids.forEach(v => { try { v.pause(); v.currentTime = 0; } catch(_){} });
+                const currentVid = track.children[index]?.querySelector('video');
+                if (currentVid) {
+                    currentVid.muted = true; currentVid.playsInline = true; currentVid.autoplay = true;
+                    currentVid.play().catch(()=>{});
+                }
+            } catch(_) {}
         } else if (action === 'download-media') {
             event.preventDefault();
             const postId = target.dataset.postId;
@@ -4404,6 +5304,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(() => {
                     // Inicializa a UI de múltiplas mídias (carrossel)
                     try { initPostEditorGallery(sidebarWrapper); } catch (_) {}
+                    try { setupEditorCaptureBridge(sidebarWrapper); } catch (_) {}
+                    // Unifica o botão Enviar com a galeria
+                    try { wireUnifiedSendFlow(sidebarWrapper); } catch (_) {}
+                    // Unifica captura e rótulos para adicionar mídia na galeria
+                    try { wireUnifiedMediaAdders(sidebarWrapper); } catch (_) {}
                     console.log('Procurando elementos diretamente na sidebar...');
                     console.log('Conteúdo atual da sidebar:', sidebarWrapper.innerHTML.substring(0, 500));
 
@@ -4880,6 +5785,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     setTimeout(() => {
                         // Inicializa a UI de múltiplas mídias (carrossel)
                         try { initPostEditorGallery(sidebarWrapper); } catch (_) {}
+                        try { setupEditorCaptureBridge(sidebarWrapper); } catch (_) {}
+                        // Unifica o botão Enviar com a galeria
+                        try { wireUnifiedSendFlow(sidebarWrapper); } catch (_) {}
+                        // Unifica captura e rótulos para adicionar mídia na galeria
+                        try { wireUnifiedMediaAdders(sidebarWrapper); } catch (_) {}
                         // Buscar elementos diretamente no sidebarWrapper
                         const appShellInSidebar = sidebarWrapper.querySelector('#appShell');
                         const gridCanvasInSidebar = sidebarWrapper.querySelector('#gridCanvas');

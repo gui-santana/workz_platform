@@ -734,7 +734,8 @@ const init = () => {
                 // Se chegou até aqui, a imagem está válida
                 const url = URL.createObjectURL(blob);
                 
-                // Desligar câmera completamente e aplicar foto
+                // Notificar main.js para adicionar à galeria e aplicar foto
+                try { window.dispatchEvent(new CustomEvent('editor:capture', { detail: { blob, type: 'image' } })); } catch(_) {}
                 stopCameraCompletely();
                 setBackgroundMedia(url, 'image', false); // false = permanente
                 
@@ -842,10 +843,9 @@ const init = () => {
             console.log('Track de gravação parada:', track.kind);
           });
           
-          // Desligar câmera completamente após gravação
+          // Notificar galeria e aplicar vídeo como fundo
+          try { window.dispatchEvent(new CustomEvent('editor:capture', { detail: { blob, type: 'video' } })); } catch(_) {}
           stopCameraCompletely();
-          
-          // Aplicar vídeo como fundo
           setBackgroundMedia(url, 'video', false); // false = permanente
           
           // Atualizar duração do vídeo
@@ -2387,7 +2387,8 @@ const init = () => {
         setBackground: (url, type) => { try { setBackgroundMedia(url, (type||'image'), false); } catch(_){} },
         serialize: () => { try { return serializeLayout(); } catch(_) { return { items: [] }; } },
         load: (data) => { try { return loadLayout(data||{ items: [] }); } catch(_){} },
-        renderFrame: async () => { try { await renderFrame(); } catch(_){} }
+        renderFrame: async () => { try { await renderFrame(); } catch(_){} },
+        exportVideoBlob: async () => { try { return await exportVideoToBlob(); } catch(_) { return null; } }
       };
     } catch(_) {}
 };
