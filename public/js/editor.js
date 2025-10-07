@@ -2381,6 +2381,15 @@ const init = () => {
         height: parseFloat(computedStyle.height) || 200
       };
     }
+    // Expor ponte para integração externa (main.js)
+    try {
+      window.EditorBridge = {
+        setBackground: (url, type) => { try { setBackgroundMedia(url, (type||'image'), false); } catch(_){} },
+        serialize: () => { try { return serializeLayout(); } catch(_) { return { items: [] }; } },
+        load: (data) => { try { return loadLayout(data||{ items: [] }); } catch(_){} },
+        renderFrame: async () => { try { await renderFrame(); } catch(_){} }
+      };
+    } catch(_) {}
 };
 
 if (document.readyState === 'loading') {

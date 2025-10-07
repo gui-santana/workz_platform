@@ -115,4 +115,124 @@ class PostsController
             'offset' => $offset,
         ]);
     }
+
+    // Upload de mídias (imagens/vídeos) para uso em posts. Aceita múltiplos arquivos.
+    public function uploadMedia(?object $payload): void
+    {
+        if (!$payload) {
+            http_response_code(401);
+            echo json_encode(['status' => 'error', 'message' => 'Unauthorized']);
+            return;
+        }
+
+        // Garante estrutura de arquivos mesmo quando apenas um arquivo é enviado
+        $files = $_FILES['files'] ?? $_FILES['file'] ?? null;
+        if (!$files) {
+            http_response_code(400);
+            echo json_encode(['status' => 'error', 'message' => 'Nenhum arquivo enviado. Use o campo files[].']);
+            return;
+        }
+
+        // Normaliza o array de arquivos (multi ou single)
+        $normalized = [];
+        if (is_array($files['name'])) {
+            $count = count($files['name']);
+            for ($i = 0; $i < $count; $i++) {
+                $normalized[] = [
+                    'name' => $files['name'][$i],
+                    'type' => $files['type'][$i] ?? '',
+                    'tmp_name' => $files['tmp_name'][$i] ?? '',
+                    'error' => $files['error'][$i] ?? UPLOAD_ERR_NO_FILE,
+                    'size' => $files['size'][$i] ?? 0,
+                ];
+            }
+        } else {
+            $normalized[] = $files;
+        }
+
+        $maxItems = 10;
+        if (count($normalized) > $maxItems) {
+            http_response_code(413);
+            echo json_encode(['status' => 'error', 'message' => 'Número máximo de arquivos excedido. (máx. 10)']);
+            return;
+        }
+
+        // Limites e validações
+        $maxSize = 64 * 1024 * 1024; // 64MB
+        $allowedImages = [
+            'image/jpeg' => 'jpg',
+            'image/png'  => 'png',
+            'image/webp' => 'webp',
+        ];
+        $allowedVideos = [
+            'video/mp4'  => 'mp4',
+            'video/webm' => 'webm',
+        ];
+
+        $publicRoot = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'public';
+        $uploadDir = $publicRoot . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'posts';
+        if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true)) {
+            http_response_code(500);
+            echo json_encode(['status' => 'error', 'message' => 'Não foi possível preparar o diretório de uploads.']);
+            return;
+        }
+
+        $output = [];
+        foreach ($normalized as $file) {
+            if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                continue; // ignora arquivos inválidos
+            }
+            if (($file['size'] ?? 0) <= 0 || ($file['size'] ?? 0) > $maxSize) {
+                continue;
+            }
+
+            // Tentar detectar mime real
+            $tmp = $file['tmp_name'];
+            $mime = @mime_content_type($tmp) ?: ($file['type'] ?? '');
+            $type = '';
+            $ext = '';
+            if (isset($allowedImages[$mime])) { $type = 'image'; $ext = $allowedImages[$mime]; }
+            elseif (isset($allowedVideos[$mime])) { $type = 'video'; $ext = $allowedVideos[$mime]; }
+            else { continue; }
+
+            $unique = uniqid('post_', true);
+            $filename = $unique . '.' . $ext;
+            $target = $uploadDir . DIRECTORY_SEPARATOR . $filename;
+            if (!move_uploaded_file($tmp, $target)) {
+                continue;
+            }
+
+            $relative = '/uploads/posts/' . $filename;
+            $descriptor = [
+                'type' => $type,
+                'url' => $relative,
+                'path' => ltrim($relative, '/'),
+                'originalName' => $file['name'] ?? $filename,
+                'size' => (int)($file['size'] ?? 0),
+                'mimeType' => $mime,
+            ];
+            // Enriquecer metadados de imagem
+            if ($type === 'image') {
+                $info = @getimagesize($target);
+                if ($info) {
+                    $descriptor['w'] = $info[0] ?? null;
+                    $descriptor['h'] = $info[1] ?? null;
+                }
+            }
+            $output[] = $descriptor;
+        }
+
+        if (!$output) {
+            http_response_code(422);
+            echo json_encode(['status' => 'error', 'message' => 'Nenhuma mídia válida foi enviada.']);
+            return;
+        }
+
+        http_response_code(200);
+        echo json_encode([
+            'status' => 'success',
+            'media' => $output,
+            'count' => count($output),
+        ]);
+    }
 }

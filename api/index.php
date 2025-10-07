@@ -92,6 +92,8 @@ $router->add('POST', '/api/companies/members/reject', [CompaniesController::clas
 // Posts (criar e feed)
 $router->add('POST', '/api/posts', [PostsController::class, 'create'], [AuthMiddleware::class, 'handle']);
 $router->add('POST', '/api/posts/feed', [PostsController::class, 'feed'], [AuthMiddleware::class, 'handle']);
+// Upload de mídias para posts (imagens/vídeos, múltiplos arquivos)
+$router->add('POST', '/api/posts/media', [PostsController::class, 'uploadMedia'], [AuthMiddleware::class, 'handle']);
 
 // ==================================================
 // DESPACHO DA REQUISIÇÃO

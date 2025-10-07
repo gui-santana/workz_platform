@@ -1,0 +1,461 @@
+startup();
+            } else {
+                await showMessage(messageContainer, result?.error || 'Credenciais inválidas. Verifique seus dados.', 'error', { dismissAfter: 6000 });
+            }
+        } catch (error) {
+            console.error('[login] error', error);
+            await showMessage(messageContainer, 'Não foi possível fazer login agora. Tente novamente.', 'error', { dismissAfter: 6000 });
+        } finally {
+            setButtonLoading(submitBtn, false);
+        }
+    }
+
+    async function handleRegister(event) {
+        event.preventDefault();
+        const registerForm = event.target;
+        const messageContainer = registerForm.previousElementSibling?.id === 'message'
+            ? registerForm.previousElementSibling
+            : document.getElementById('message');
+
+        const formValues = {
+            name: (registerForm.name.value || '').trim(),
+            email: (registerForm.email.value || '').trim(),
+            password: registerForm.password.value || '',
+            repeat: registerForm['password-repeat'].value || ''
+        };
+
+        if (!formValues.name) {
+            await showMessage(messageContainer, 'Informe seu nome completo.', 'error', { dismissAfter: 6000 });
+            registerForm.name.focus();
+            return;
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(formValues.email)) {
+            await showMessage(messageContainer, 'Informe um e-mail válido.', 'error', { dismissAfter: 6000 });
+            registerForm.email.focus();
+            return;
+        }
+
+        if (!passwordMeetsRules(formValues.password)) {
+            await showMessage(
+                messageContainer,
+                'A senha deve ter pelo menos 8 caracteres, incluindo letras maiúsculas, minúsculas, números e um caractere especial.',
+                'error',
+                { dismissAfter: 7000 }
+            );
+            registerForm.password.focus();
+            return;
+        }
+
+        if (formValues.password !== formValues.repeat) {
+            await showMessage(messageContainer, 'As senhas não coincidem.', 'error', { dismissAfter: 6000 });
+            registerForm['password-repeat'].focus();
+            return;
+        }
+
+        const submitBtn = registerForm.querySelector('button[type="submit"]');
+        setButtonLoading(submitBtn, true, 'Criando conta...');
+
+        try {
+            const result = await apiClient.post('/register', {
+                name: formValues.name,
+                email: formValues.email,
+                password: formValues.password,
+                'password-repeat': formValues.repeat
+            });
+
+            if (result?.token) {
+                localStorage.setItem('jwt_token', result.token);
+                showLoading();
+                startup();
+                return;
+            }
+
+            const message = result?.error || result?.message || 'Não foi possível criar a conta. Tente novamente.';
+            await showMessage(messageContainer, message, 'error', { dismissAfter: 6000 });
+        } catch (error) {
+            console.error('[register] error', error);
+            await showMessage(messageContainer, 'Não foi possível criar a conta no momento. Tente novamente.', 'error', { dismissAfter: 6000 });
+        } finally {
+            setButtonLoading(submitBtn, false);
+        }
+    }
+
+    function handleLogout() {
+        localStorage.removeItem('jwt_token');
+        window.location.href = '/';
+    }
+
+    // ===================================================================
+    // 🔐 REGISTER / LOGIN
+    // ===================================================================
+
+    async function renderRegisterUI() {
+        const mainWrapperInit = document.getElementById('main-wrapper-init');
+        await renderTemplate(mainWrapperInit, 'register', null, () => {
+            // Adiciona os listeners aos elementos de registo
+            const registerForm = document.getElementById('register-form');
+            if (registerForm) {
+                const submitHandler = (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    if (typeof ev.stopImmediatePropagation === 'function') {
+                        ev.stopImmediatePropagation();
+                    }
+                    handleRegister(ev);
+                };
+                registerForm.addEventListener('submit', submitHandler, true);
+                registerForm.onsubmit = submitHandler;
+                registerForm.dataset.jsVersion = '2024-02-15-1';
+            }
+            document.getElementById('show-login-link').addEventListener('click', (e) => {
+                e.preventDefault();
+                renderLoginUI();
+            });
+        });
+    }
+
+    async function renderLoginUI() {
+        const mainWrapperInit = document.getElementById('main-wrapper-init');
+        await renderTemplate(mainWrapperInit, 'login', null, () => {
+            // Adiciona os listeners APENAS depois de renderizar a UI de login.
+            const loginForm = document.getElementById('login-form');
+            if (loginForm) {
+                const submitHandler = (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    if (typeof ev.stopImmediatePropagation === 'function') {
+                        ev.stopImmediatePropagation();
+                    }
+                    handleLogin(ev);
+                };
+                loginForm.addEventListener('submit', submitHandler, true);
+                loginForm.onsubmit = submitHandler;
+                loginForm.dataset.jsVersion = '2024-02-15-1';
+            }
+            document.getElementById('google-login-btn').addEventListener('click', () => window.location.href = '/api/auth/google/redirect');
+            document.getElementById('microsoft-login-btn').addEventListener('click', () => window.location.href = '/api/auth/microsoft/redirect');
+            document.getElementById('show-register-link').addEventListener('click', (e) => {
+                e.preventDefault();
+                renderRegisterUI();
+            });
+            hideLoading({ delay: 250 });
+        });
+    }
+
+    // ===================================================================
+    // 🔄 RENDERIZAÇÃO DA INTERFACE
+    // ===================================================================
+
+
+    // =====================================================================
+    // 9. STARTUP FLOW & EVENT BINDINGS
+    // =====================================================================
+
+    function startClock() {
+        const clock = document.querySelector('#wClock');
+        if (!clock) {
+            return; // Stop if clock element is not on the page
+        }
+        const today = new Date();
+        let h = today.getHours();
+        let m = today.getMinutes();
+        h = checkTime(h);
+        m = checkTime(m);
+
+        clock.innerHTML = h + ":" + m;
+
+        setTimeout(startClock, 1000);
+    }
+
+    function checkTime(i) {
+        return (i < 10 ? "0" : "") + i;
+    }
+
+    function topBarScroll() {
+
+        const topBar = document.querySelector('#topbar');
+        const logo = document.querySelector('.logo-menu');
+
+        mainWrapper.scroll(function () {
+            if (mainWrapper.scrollTop() > 17.5) {
+                topBar.addClass('shadow-3xl bg-gray-100');
+                logo.attr('src', '/images/logos/workz/90x47.png');
+                logo.css({
+                    'width': '90px',
+                    'height': '47px',
+                    'transition': 'width 0.5s, height 0.5s'
+                });
+            } else {
+                topBar.removeClass('shadow-3xl bg-gray-100');
+                logo.attr('src', '/images/logos/workz/145x76.png');
+                logo.css({
+                    'width': '145px',
+                    'height': '76px',
+                    'transition': 'width 0.5s, height 0.5s'
+                });
+
+            }
+        });
+    }
+
+    startup();
+
+    setupSidebarFormConfirmation();
+
+
+
+    document.addEventListener('submit', (event) => {
+        if (!event.target?.matches?.('#change-password-form')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') {
+            event.stopImmediatePropagation();
+        }
+        handleChangePassword(event);
+    }, true);
+
+    document.addEventListener('click', function (event) {
+        const target = event.target;
+        const activeSwal = document.querySelector('.swal-overlay:not(.swal-hidden)');
+        if (activeSwal && activeSwal.contains(target)) {
+            return;
+        }
+        const isSidebarOpen = !sidebarWrapper.classList.contains('w-0');
+        const clickedInsideSidebar = sidebarWrapper.contains(target);
+        const clickedSidebarTrigger = !!target.closest('#sidebarTrigger');
+
+        const actionBtn = target.closest('[data-sidebar-action]');
+        const actionType = actionBtn?.dataset?.sidebarAction;
+        const actionInsideSidebar = actionBtn ? sidebarWrapper.contains(actionBtn) : false;
+        if (actionType === 'sidebar-back') {
+            // Deixa o handler de histórico cuidar; não limpar/trocar o sidebar aqui
+            event.preventDefault();
+            return;
+        }
+        if (actionType === 'stack-back') {
+            event.preventDefault();
+            if (typeof SidebarNav !== 'undefined') SidebarNav.back();
+            return;
+        }
+        if (actionBtn && !isSidebarOpen) {
+            event.preventDefault();
+            toggleSidebar(actionBtn);
+            return;
+        } else if (actionBtn && isSidebarOpen && actionBtn.id !== 'close') {
+            // Se o botão pertence ao conteúdo da sidebar, deixe os handlers internos cuidarem
+            if (actionInsideSidebar) {
+                return;
+            }
+            event.preventDefault();
+            toggleSidebar(actionBtn, false);
+            return;
+        } else if (actionBtn && isSidebarOpen && actionBtn.id === 'close') {
+            toggleSidebar();
+        }
+
+        if (isSidebarOpen && !clickedInsideSidebar && !clickedSidebarTrigger) {
+            toggleSidebar(); // fecha
+        }
+
+        // Fechar menus de post ao clicar fora do trigger/menu
+        const clickedPostMenu = !!target.closest('[data-role="post-menu"]');
+        const clickedPostMenuTrigger = !!target.closest('[data-feed-action="open-post-menu"]');
+        if (!clickedPostMenu && !clickedPostMenuTrigger) {
+            document.querySelectorAll('[data-role="post-menu"]').forEach(menu => menu.classList.add('hidden'));
+        }
+    });
+
+    // Fecha menus de post com tecla Escape
+    document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') {
+            document.querySelectorAll('[data-role="post-menu"]').forEach(menu => menu.classList.add('hidden'));
+        }
+    });
+
+    // Removido: fallback global. A navegação do sidebar é controlada por SidebarNav.
+
+    // Opções das máscaras
+    const phoneMaskOptions = {
+        // duas máscaras: 8 ou 9 dígitos
+        mask: [
+            { mask: '(00) 0000-0000' },
+            { mask: '(00) 00000-0000' },
+            { mask: '+00 (00) 0000-0000' },
+            { mask: '+00 (00) 00000-0000' },
+        ]
+    };
+
+    const cpfMaskOptions = {
+        mask: [
+            { mask: '000.000.000-00' },
+            { mask: '00.000.000/0000-00' }
+        ]
+    };
+
+    const cepMaskOptions = {
+        mask: '00000-000'
+    };
+
+    // Função segura para aplicar IMask
+    function applyMask(id, options) {
+        const el = document.getElementById(id);
+        if (!el) {
+            console.warn('[mask] elemento #' + id + ' nao encontrado no DOM no momento da aplicacao');
+            return null;
+        }
+        if (el.dataset.maskInitialized === '1') {
+            return el._imaskInstance || null;
+        }
+        const instance = IMask(el, options);
+        el.dataset.maskInitialized = '1';
+        el._imaskInstance = instance;
+        return instance;
+    }
+
+    function initMasks() {
+        applyMask('phone', phoneMaskOptions);
+        applyMask('cpf', cpfMaskOptions);
+        applyMask('zip_code', cepMaskOptions);
+    }
+
+    function passwordMeetsRules(password) {
+        if (!password) return false;
+        return password.length >= 8
+            && /[a-z]/.test(password)
+            && /[A-Z]/.test(password)
+            && /\d/.test(password)
+            && /[@$!%*?&.#]/.test(password);
+    }
+
+    async function handleChangePassword(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const form = event.target;
+        const getField = (name) => form.querySelector(`[name="${name}"]`);
+        const fields = {
+            current: getField('current_password'),
+            next: getField('new_password'),
+            repeat: getField('new_password_repeat'),
+            id: getField('id')
+        };
+
+        const values = {
+            current: (fields.current?.value ?? '').trim(),
+            next: (fields.next?.value ?? '').trim(),
+            repeat: (fields.repeat?.value ?? '').trim(),
+            id: fields.id?.value ?? ''
+        };
+
+
+        let messageContainer = form.previousElementSibling;
+        if (!messageContainer?.matches?.('[data-role="message"]')) {
+            messageContainer = form.parentElement?.querySelector('[data-role="message"]') ?? null;
+        }
+
+        if (!messageContainer) {
+            console.error('[password] message container not found for change-password form');
+            return;
+        }
+
+        const missingField = Object.entries({
+            'Senha atual': values.current,
+            'Nova senha': values.next,
+            'Confirmação da nova senha': values.repeat
+        }).find(([, value]) => !value);
+
+        if (missingField) {
+            await showMessage(messageContainer, `Preencha o campo "${missingField[0]}" antes de continuar.`, 'error', { dismissAfter: 6000 });
+            const key = missingField[0] === 'Senha atual' ? 'current' : missingField[0] === 'Nova senha' ? 'next' : 'repeat';
+            fields[key]?.focus?.();
+            return;
+        }
+
+        if (values.next === values.current) {
+            await showMessage(messageContainer, 'A nova senha deve ser diferente da senha atual.', 'error', { dismissAfter: 6000 });
+            fields.next?.focus?.();
+            return;
+        }
+
+        if (values.next !== values.repeat) {
+            await showMessage(messageContainer, 'As senhas não coincidem.', 'error', { dismissAfter: 6000 });
+            fields.repeat?.focus?.();
+            return;
+        }
+
+        if (!passwordMeetsRules(values.next)) {
+            await showMessage(messageContainer, 'A nova senha deve ter pelo menos 8 caracteres, incluir letras maiúsculas e minúsculas, números e um caractere especial.', 'error', { dismissAfter: 7000 });
+            fields.next?.focus?.();
+            return;
+        }
+
+        const submitButton = form.querySelector('button[type="submit"]');
+        setButtonLoading(submitButton, true, 'Alterando...');
+
+        try {
+            const payload = {
+                userId: values.id,
+                currentPassword: values.current,
+                newPassword: values.next
+            };
+
+            const result = await apiClient.post('/change-password', payload);
+
+            if (result?.status === 'success') {
+                await showMessage(messageContainer, result.message || 'Senha alterada com sucesso!', 'success', { dismissAfter: 4000 });
+                form.reset();
+            } else {
+                const errorMessage = result?.message || result?.error || 'Falha ao alterar a senha. Verifique os dados informados.';
+                await showMessage(messageContainer, errorMessage, 'error', { dismissAfter: 6000 });
+            }
+        } catch (error) {
+            console.error('[password] change error', error);
+            await showMessage(messageContainer, 'Não foi possível alterar a senha no momento. Tente novamente.', 'error', { dismissAfter: 6000 });
+        } finally {
+            setButtonLoading(submitButton, false);
+        }
+    }
+
+    function setupSidebarFormConfirmation() {
+        if (!sidebarWrapper || typeof confirmDialog !== 'function') return;
+
+        const confirmationText = 'Você tem certeza de que deseja continuar?';
+
+        sidebarWrapper.addEventListener('submit', async (event) => {
+            const form = event.target;
+            if (!(form instanceof HTMLFormElement)) return;
+
+            if (form.dataset.skipConfirm === '1') {
+                delete form.dataset.skipConfirm;
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+            if (typeof event.stopImmediatePropagation === 'function') {
+                event.stopImmediatePropagation();
+            }
+
+            const confirmed = await confirmDialog(confirmationText, { title: 'Confirmar ação', danger: true });
+            if (!confirmed) return;
+
+            form.dataset.skipConfirm = '1';
+            if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+            } else {
+                form.submit();
+            }
+        }, true);
+    }
+
+    function onlyNumbers(str) {
+        return str.replace(/\D/g, ''); // remove tudo que não for número
+    }
+
+});
+
+
+
+

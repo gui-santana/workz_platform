@@ -60,6 +60,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const feedUserCache = new Map();
     let feedInteractionsAttached = false;
 
+    // Evita que cliques internos da sidebar acionem o handler global de fechar
+    function installSidebarClickShield() {
+        if (!sidebarWrapper) return;
+        const stopper = (e) => {
+            const target = e.target;
+            // Permitir apenas cliques em botões/links com data-sidebar-action subirem
+            const isAction = !!(target && target.closest && target.closest('[data-sidebar-action]'));
+            if (!isAction && sidebarWrapper.contains(target)) {
+                // Interrompe a propagação antes de atingir o document,
+                // mas após os handlers internos já terem processado o clique
+                e.stopPropagation();
+            }
+        };
+        // Apenas em 'click' e no bubble phase (capture = false),
+        // para não bloquear os handlers internos da sidebar
+        try { sidebarWrapper.addEventListener('click', stopper, false); } catch (_) {}
+    }
+
 
     // Navegação estilo iOS para o sidebar (stack)
     const SidebarNav = {
@@ -383,6 +401,13 @@ document.addEventListener('DOMContentLoaded', () => {
         cropper: null
     };
 
+    // Estado do editor de posts (carrossel)
+    const POST_MEDIA_STATE = {
+        initialized: false,
+        items: [], // { type, url, path, mimeType, size, w?, h?, layout? }
+        activeIndex: null
+    };
+
     function getImageUploadInput() {
         if (IMAGE_UPLOAD_STATE.input) return IMAGE_UPLOAD_STATE.input;
         const input = document.createElement('input');
@@ -565,6 +590,218 @@ document.addEventListener('DOMContentLoaded', () => {
                 crop: { ...cropPayload }
             }
         });
+    }
+
+    // Inicializa o seletor e a bandeja de múltiplas mídias no editor de posts
+    function initPostEditorGallery(root = document) {
+        const picker = root.querySelector('#postMediaPicker');
+        const tray = root.querySelector('#postMediaTray');
+        const publishBtn = root.querySelector('#publishGalleryBtn');
+        const captionInput = root.querySelector('#postCaption');
+
+        if (!picker || !tray || !publishBtn) return;
+
+        if (!POST_MEDIA_STATE.initialized) {
+            POST_MEDIA_STATE.items = [];
+            POST_MEDIA_STATE.initialized = true;
+        }
+
+        const renderTray = () => {
+            const items = POST_MEDIA_STATE.items || [];
+            if (!items.length) {
+                tray.innerHTML = `<div class="text-sm text-slate-500">Nenhuma mídia adicionada ainda.</div>`;
+                return;
+            }
+            let html = '<div class="grid grid-cols-3 gap-2">';
+            items.forEach((m, i) => {
+                const isVideo = String(m.type).toLowerCase() === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video');
+                const mediaEl = isVideo
+                    ? `<video src="${m.url}" class="w-full h-24 object-cover rounded-xl" muted loop playsinline></video>`
+                    : `<img src="${m.url}" class="w-full h-24 object-cover rounded-xl"/>`;
+                const isActive = (POST_MEDIA_STATE.activeIndex === i);
+                html += `
+                    <div class="relative group ${isActive ? 'ring-2 ring-indigo-500 rounded-xl' : ''}" data-index="${i}">
+                        ${mediaEl}
+                        <span class="absolute top-1 left-1 text-xs bg-black/60 text-white rounded px-1">${i+1}/${items.length}</span>
+                        <div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-left\" title=\"Mover para a esquerda\"><i class=\"fas fa-arrow-left text-[10px]\"></i></button>
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-right\" title=\"Mover para a direita\"><i class=\"fas fa-arrow-right text-[10px]\"></i></button>
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-red-600/80 text-white flex items-center justify-center\" data-action=\"remove\" title=\"Remover\"><i class=\"fas fa-trash text-[10px]\"></i></button>
+                        </div>
+                    </div>`;
+            });
+            html += '</div>';
+            tray.innerHTML = html;
+        };
+
+        const handleReorderOrRemove = (ev) => {
+            const btn = ev.target.closest('button[data-action]');
+            if (!btn || !tray.contains(btn)) return;
+            const card = btn.closest('[data-index]');
+            const idx = Number(card?.dataset?.index ?? -1);
+            if (!Number.isFinite(idx) || idx < 0) return;
+            const action = btn.dataset.action;
+            const items = POST_MEDIA_STATE.items;
+            if (!Array.isArray(items) || !items.length) return;
+            if (action === 'remove') {
+                items.splice(idx, 1);
+            } else if (action === 'move-left' && idx > 0) {
+                const [it] = items.splice(idx, 1);
+                items.splice(idx - 1, 0, it);
+            } else if (action === 'move-right' && idx < items.length - 1) {
+                const [it] = items.splice(idx, 1);
+                items.splice(idx + 1, 0, it);
+            }
+            renderTray();
+        };
+
+        const ensureBridge = (cb) => {
+            if (window.EditorBridge && typeof cb === 'function') { cb(); return; }
+            setTimeout(() => ensureBridge(cb), 100);
+        };
+
+        const switchToMedia = (idx) => {
+            const items = POST_MEDIA_STATE.items || [];
+            if (!items[idx]) return;
+            // Salvar layout atual no item ativo
+            if (POST_MEDIA_STATE.activeIndex != null && window.EditorBridge?.serialize) {
+                try {
+                    const layout = window.EditorBridge.serialize();
+                    POST_MEDIA_STATE.items[POST_MEDIA_STATE.activeIndex].layout = layout;
+                } catch (_) {}
+            }
+            POST_MEDIA_STATE.activeIndex = idx;
+            renderTray();
+            const it = items[idx];
+            const type = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image';
+            const apply = () => {
+                try { window.EditorBridge?.setBackground?.(it.url || (it.path ? ('/'+String(it.path).replace(/^\/+/, '')) : ''), type); } catch(_) {}
+                if (it.layout && window.EditorBridge?.load) { try { window.EditorBridge.load(it.layout); } catch(_) {} }
+            };
+            ensureBridge(apply);
+        };
+
+        const handlePickerChange = async (ev) => {
+            const files = Array.from(ev.target.files || []);
+            if (!files.length) return;
+            const remain = 10 - (POST_MEDIA_STATE.items?.length || 0);
+            const toSend = files.slice(0, Math.max(0, remain));
+            if (!toSend.length) {
+                notifyError('Limite de 10 mídias por post.');
+                return;
+            }
+            const fd = new FormData();
+            toSend.forEach(f => fd.append('files[]', f, f.name));
+            const res = await apiClient.upload('/posts/media', fd);
+            if (res?.error || res?.status === 'error') {
+                notifyError(res?.message || 'Falha no upload das mídias.');
+                return;
+            }
+            const media = Array.isArray(res?.media) ? res.media : [];
+            if (!media.length) {
+                notifyError('Nenhuma mídia válida recebida.');
+                return;
+            }
+            POST_MEDIA_STATE.items.push(...media);
+            picker.value = '';
+            renderTray();
+            if (POST_MEDIA_STATE.activeIndex == null) {
+                switchToMedia(0);
+            }
+        };
+
+        const computePostType = (items) => {
+            const types = new Set((items||[]).map(m => (String(m.type||'').toLowerCase().startsWith('video') || String(m.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image'));
+            if (types.size === 1) return types.has('video') ? 'video' : 'image';
+            return 'mixed';
+        };
+
+        const handlePublish = async () => {
+            const items = POST_MEDIA_STATE.items || [];
+            if (!items.length) {
+                notifyError('Adicione ao menos uma mídia.');
+                return;
+            }
+            const caption = (captionInput?.value || '').toString().trim();
+            const tp = computePostType(items);
+
+            // Opcional: para imagens com layout, pré-renderiza e substitui pela composição
+            if (window.EditorBridge?.renderFrame) {
+                publishBtn.disabled = true; publishBtn.textContent = 'Publicando...';
+                // Guardar índice ativo para restaurar
+                const prevIdx = POST_MEDIA_STATE.activeIndex;
+                for (let i = 0; i < items.length; i++) {
+                    const it = items[i];
+                    const isVideo = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
+                    if (isVideo) continue;
+                    if (!it.layout) continue;
+                    // Aplicar mídia e layout no editor e renderizar
+                    await new Promise((resolve)=>{
+                        const then = async () => { try { await window.EditorBridge.renderFrame(); } catch(_){} resolve(); };
+                        POST_MEDIA_STATE.activeIndex = i; switchToMedia(i); setTimeout(then, 150);
+                    });
+                    // Extrair canvas e enviar como nova mídia
+                    try {
+                        const canvas = document.getElementById('outCanvas');
+                        if (canvas && canvas.toBlob) {
+                            const blob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
+                            if (blob) {
+                                const fd2 = new FormData();
+                                fd2.append('files[]', blob, `composite_${Date.now()}.jpg`);
+                                const up = await apiClient.upload('/posts/media', fd2);
+                                const first = Array.isArray(up?.media) ? up.media[0] : null;
+                                if (first) {
+                                    // manter referência do original
+                                    it.originalUrl = it.url; it.originalPath = it.path; it.originalMime = it.mimeType;
+                                    it.url = first.url; it.path = first.path; it.mimeType = first.mimeType;
+                                }
+                            }
+                        }
+                    } catch(_) {}
+                }
+                // Restaurar índice
+                if (prevIdx != null) { POST_MEDIA_STATE.activeIndex = prevIdx; switchToMedia(prevIdx); }
+                publishBtn.disabled = false; publishBtn.textContent = 'Publicar';
+            }
+
+            const vt = String(viewType || '');
+            const vd = viewData || null;
+            const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
+            const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
+
+            const payload = { tp, cm, em, ct: { caption, media: items } };
+            const res = await apiClient.post('/posts', payload);
+            if (res?.error || res?.status === 'error') {
+                notifyError(res?.message || 'Não foi possível publicar o post.');
+                return;
+            }
+            notifySuccess('Post publicado!');
+            POST_MEDIA_STATE.items = [];
+            if (captionInput) captionInput.value = '';
+            renderTray();
+            resetFeed();
+            loadFeed();
+        };
+
+        picker.addEventListener('change', handlePickerChange);
+        tray.addEventListener('click', (ev) => {
+            // Bloqueia propagação para não acionar listeners globais que fecham a sidebar
+            if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+            const btn = ev.target.closest('button[data-action]');
+            if (btn) { handleReorderOrRemove(ev); return; }
+            const card = ev.target.closest('[data-index]');
+            if (!card || !tray.contains(card)) return;
+            const idx = Number(card.dataset.index || '-1');
+            if (!Number.isFinite(idx) || idx < 0) return;
+            switchToMedia(idx);
+        });
+        publishBtn.addEventListener('click', handlePublish);
+        renderTray();
+
+        // Se já houver itens (ex.: retorno ao editor), focar o primeiro
+        if ((POST_MEDIA_STATE.items?.length||0) > 0 && POST_MEDIA_STATE.activeIndex == null) {
+            switchToMedia(0);
+        }
     }
 
     function initializeImageCropperView(sidebarMount, cropData) {
@@ -2526,7 +2763,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     </div>
                 </section>
-            
+
+                <!-- Galeria (carrossel) - upload múltiplo e publicação -->
+                <section class="editor-card">
+                    <h3 class="text-sm font-semibold text-slate-700 mb-2">Galeria (múltiplas mídias)</h3>
+                    <div class="space-y-3">
+                        <textarea id="postCaption" class="w-full border border-slate-200 rounded-2xl p-3 text-sm" rows="2" placeholder="Escreva uma legenda (opcional)"></textarea>
+                        <div class="flex items-center gap-2">
+                            <label class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-sm cursor-pointer" for="postMediaPicker">
+                                <i class="fas fa-images mr-2"></i>Adicionar mídias
+                            </label>
+                            <input id="postMediaPicker" class="hidden" type="file" multiple accept="image/*,video/*">
+                            <span class="text-xs text-slate-500">Máx. 10 itens por post</span>
+                            <button id="publishGalleryBtn" type="button" class="ml-auto px-3 py-2 rounded-2xl bg-indigo-600 text-white text-sm hover:bg-indigo-700">Publicar</button>
+                        </div>
+                        <div id="postMediaTray" class="min-h-16"></div>
+                    </div>
+                </section>
+
                 <canvas id="outCanvas" width="900" height="1200" class="hidden"></canvas>
                 
                 <!-- Elementos ocultos para captura -->
@@ -2922,7 +3176,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Preparar mídia do post a partir de ct (JSON)
             let parsedCt = null;
             try { parsedCt = typeof item?.ct === 'string' ? JSON.parse(item.ct) : (item?.ct || null); } catch (_) { parsedCt = null; }
-            const media0 = parsedCt && Array.isArray(parsedCt.media) ? parsedCt.media[0] : null;
+            const mediaList = (parsedCt && Array.isArray(parsedCt.media)) ? parsedCt.media : [];
+            const media0 = mediaList[0] || null;
             const mmime = String(media0?.mimeType || '').toLowerCase();
             let feedMediaType = media0?.type || (mmime.startsWith('video') ? 'video' : (mmime.startsWith('image') ? 'image' : null));
             let feedMediaUrl = media0?.url || (media0?.path ? ('/' + String(media0.path).replace(/^\/+/, '')) : null);
@@ -2944,6 +3199,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 feedMediaType,
                 feedMediaUrl,
                 ct: parsedCt || item?.ct,
+                media: mediaList,
+                hasCarousel: Array.isArray(mediaList) && mediaList.length > 1,
             };
         });
     }
@@ -3001,10 +3258,31 @@ document.addEventListener('DOMContentLoaded', () => {
             const userLiked = !!likeInfo.userLiked;
             const likeLabel = likeTotal === 1 ? 'curtida' : 'curtidas';
             const postId = String(post?.id ?? '');
-            const backgroundStyle = (post?.feedMediaType !== 'video' && post?.backgroundImage) ? `background-image: ${post.backgroundImage};` : '';
-            const mediaMarkup = (post?.feedMediaType === 'video' && post?.feedMediaUrl)
-                ? `<video class="absolute inset-0 w-full h-full object-cover" src="${post.feedMediaUrl}" muted autoplay loop playsinline></video>`
-                : '';
+            const backgroundStyle = (!post?.hasCarousel && post?.feedMediaType !== 'video' && post?.backgroundImage) ? `background-image: ${post.backgroundImage};` : '';
+            let mediaMarkup = '';
+            if (post?.hasCarousel && Array.isArray(post.media)) {
+                const slides = post.media.map((m, idx) => {
+                    const mtype = String(m.type || '').toLowerCase();
+                    const murl = m.url || (m.path ? ('/' + String(m.path).replace(/^\/+/, '')) : '');
+                    const inner = (mtype === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video'))
+                        ? `<video src="${murl}" class="absolute inset-0 w-full h-full object-cover" muted loop playsinline></video>`
+                        : `<img src="${murl}" class="absolute inset-0 w-full h-full object-cover"/>`;
+                    return `<div class="inline-block align-top w-full h-full relative">${inner}</div>`;
+                }).join('');
+                mediaMarkup = `
+                <div class="absolute inset-0 overflow-hidden" data-role="carousel" data-post-id="${postId}" data-index="0">
+                    <div class="h-full whitespace-nowrap transition-transform duration-300 ease-out" data-carousel-track style="transform: translateX(0);">
+                        ${slides}
+                    </div>
+                    <div class="absolute inset-x-0 bottom-2 flex items-center justify-center gap-2 text-xs">
+                        <button type="button" class="px-2 py-1 rounded-full bg-black/40 text-white" data-feed-action="prev-slide" data-post-id="${postId}">&#10094;</button>
+                        <span class="rounded-full bg-black/40 text-white px-2 py-1" data-role="carousel-indicator" data-post-id="${postId}">1/${post.media.length}</span>
+                        <button type="button" class="px-2 py-1 rounded-full bg-black/40 text-white" data-feed-action="next-slide" data-post-id="${postId}">&#10095;</button>
+                    </div>
+                </div>`;
+            } else if (post?.feedMediaType === 'video' && post?.feedMediaUrl) {
+                mediaMarkup = `<video class="absolute inset-0 w-full h-full object-cover" src="${post.feedMediaUrl}" muted autoplay loop playsinline></video>`;
+            }
             const comments = Array.isArray(post?.comments) ? post.comments : [];
             const commentList = comments.map((comment) => renderFeedComment(comment)).join('');
             const canDelete = (
@@ -3021,7 +3299,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}"></div>
                 ${mediaMarkup}
                 <div class="absolute inset-0 bg-gradient-to-b from-black/10 via-black/10 to-black/40"></div>
-                <div class="relative z-10 flex flex-col h-full justify-between">
+                <div class="relative z-1 flex flex-col h-full justify-between">
                     <header class="flex items-center gap-2 p-4">
                         <span class="w-9 h-9 rounded-full overflow-hidden border border-white/30 bg-black/40 flex items-center justify-center">
                             <img src="${avatarSrc}" alt="${authorName}" class="w-full h-full object-cover">
@@ -3159,6 +3437,33 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const menu = timeline.querySelector(`[data-role="post-menu"][data-post-id="${postId}"]`);
             if (menu) menu.classList.toggle('hidden');
+        } else if (action === 'prev-slide' || action === 'next-slide') {
+            event.preventDefault();
+            const postId = target.dataset.postId;
+            const carousel = timeline.querySelector(`[data-role="carousel"][data-post-id="${postId}"]`);
+            if (!carousel) return;
+            const track = carousel.querySelector('[data-carousel-track]');
+            if (!track) return;
+            const total = track.children.length;
+            if (!total) return;
+            let index = Number(carousel.dataset.index || '0') || 0;
+            if (action === 'prev-slide') index = Math.max(0, index - 1);
+            else index = Math.min(total - 1, index + 1);
+            carousel.dataset.index = String(index);
+            track.style.transform = `translateX(${-index * 100}%)`;
+            const indicator = timeline.querySelector(`[data-role="carousel-indicator"][data-post-id="${postId}"]`);
+            if (indicator) indicator.textContent = `${index + 1}/${total}`;
+            const opener = timeline.querySelector(`[data-feed-action="open-post-menu"][data-post-id="${postId}"]`);
+            const activeMedia = track.children[index]?.querySelector('img,video');
+            if (opener && activeMedia) {
+                opener.dataset.mediaUrl = activeMedia.getAttribute('src') || '';
+                opener.dataset.mediaType = activeMedia.tagName.toLowerCase() === 'video' ? 'video' : 'image';
+                const menu = timeline.querySelector(`[data-role="post-menu"][data-post-id="${postId}"]`);
+                if (menu) {
+                    menu.dataset.mediaUrl = opener.dataset.mediaUrl;
+                    menu.dataset.mediaType = opener.dataset.mediaType;
+                }
+            }
         } else if (action === 'download-media') {
             event.preventDefault();
             const postId = target.dataset.postId;
@@ -4097,6 +4402,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }, async () => {
                 // Callback executado após a renderização completa
                 setTimeout(() => {
+                    // Inicializa a UI de múltiplas mídias (carrossel)
+                    try { initPostEditorGallery(sidebarWrapper); } catch (_) {}
                     console.log('Procurando elementos diretamente na sidebar...');
                     console.log('Conteúdo atual da sidebar:', sidebarWrapper.innerHTML.substring(0, 500));
 
@@ -4571,6 +4878,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }, async () => {
                     // Callback executado após a renderização completa
                     setTimeout(() => {
+                        // Inicializa a UI de múltiplas mídias (carrossel)
+                        try { initPostEditorGallery(sidebarWrapper); } catch (_) {}
                         // Buscar elementos diretamente no sidebarWrapper
                         const appShellInSidebar = sidebarWrapper.querySelector('#appShell');
                         const gridCanvasInSidebar = sidebarWrapper.querySelector('#gridCanvas');
@@ -6385,7 +6694,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result?.token) {
                 localStorage.setItem('jwt_token', result.token);
                 showLoading();
-                startup();
+                installSidebarClickShield();
+    startup();
             } else {
                 await showMessage(messageContainer, result?.error || 'Credenciais inválidas. Verifique seus dados.', 'error', { dismissAfter: 6000 });
             }
@@ -6455,7 +6765,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result?.token) {
                 localStorage.setItem('jwt_token', result.token);
                 showLoading();
-                startup();
+                installSidebarClickShield();
+    startup();
                 return;
             }
 
@@ -6587,6 +6898,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    installSidebarClickShield();
     startup();
 
     setupSidebarFormConfirmation();
@@ -6610,7 +6922,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         const isSidebarOpen = !sidebarWrapper.classList.contains('w-0');
-        const clickedInsideSidebar = sidebarWrapper.contains(target);
+        const clickedInsideSidebar = !!(sidebarWrapper && sidebarWrapper.contains(target));
         const clickedSidebarTrigger = !!target.closest('#sidebarTrigger');
 
         const actionBtn = target.closest('[data-sidebar-action]');
@@ -6642,7 +6954,11 @@ document.addEventListener('DOMContentLoaded', () => {
             toggleSidebar();
         }
 
-        if (isSidebarOpen && !clickedInsideSidebar && !clickedSidebarTrigger) {
+        // Clique dentro da sidebar nunca deve fechá-la
+        if (clickedInsideSidebar) {
+            return;
+        }
+        if (isSidebarOpen && !clickedSidebarTrigger) {
             toggleSidebar(); // fecha
         }
 
@@ -6842,6 +7158,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
-
-
-
