@@ -4541,9 +4541,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const action = el.dataset.sidebarAction;
             if (action === 'settings') {
                 // Página principal de configurações (atalhos gerais)
+                // Use apenas o sistema de navegação do SidebarNav para renderizar e anexar handlers
                 SidebarNav.setMount(sidebarContent);
-                SidebarNav.resetRoot(currentUserData);
-                renderTemplate(sidebarContent, templates.sidebarPageSettings, { data: currentUserData, origin: 'stack' }, () => { });
+                SidebarNav.resetRoot(currentUserData); // já chama SidebarNav.render() e configura os eventos do root
 
             } else if (action === 'post-editor') {
                 console.log('toggleSidebar: Processando action post-editor');
