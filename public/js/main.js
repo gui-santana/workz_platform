@@ -584,7 +584,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const renderTray = () => {
             const items = POST_MEDIA_STATE.items || [];
             if (!items.length) {
-                tray.innerHTML = `<div class="text-sm text-slate-500">Nenhuma mídia adicionada ainda.</div>`;
+                tray.innerHTML = `<p class="text-sm text-center">Nenhuma mídia adicionada ainda.</p>`;
                 return;
             }
             let html = '<div class="grid grid-cols-3 gap-2">';
@@ -774,6 +774,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 publishBtn.disabled = false; publishBtn.textContent = 'Publicar';
             }
 
+            // Upload pendente de itens sem layout (originais) somente no publish
+            for (let i = 0; i < items.length; i++) {
+                const it = items[i];
+                if (!it?.path) {
+                    const fileObj = it.file || null;
+                    if (fileObj) {
+                        try {
+                            const fd3 = new FormData();
+                            const isVid = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
+                            const preferredName = it.fileName || (isVid ? `post_${Date.now()}.webm` : `post_${Date.now()}.jpg`);
+                            fd3.append('files[]', fileObj, preferredName);
+                            const up3 = await apiClient.upload('/posts/media', fd3);
+                            const first3 = Array.isArray(up3?.media) ? up3.media[0] : null;
+                            if (first3) {
+                                const keepLayout = it.layout ? { layout: it.layout } : {};
+                                items[i] = { ...first3, ...keepLayout };
+                            }
+                        } catch(_) {}
+                    }
+                }
+            }
+
             const vt = String(viewType || '');
             const vd = viewData || null;
             const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
@@ -907,6 +929,71 @@ document.addEventListener('DOMContentLoaded', () => {
             bgLabel.addEventListener('click', onBgLabelClick, true);
             bgLabel._unifyGalleryHandler = onBgLabelClick;
         }
+    }
+
+    // Substitui o upload imediato do seletor por estratégia local-first
+    function setupLocalFirstGalleryUpload(root = document) {
+        const picker = root.querySelector('#postMediaPicker');
+        if (!picker) return;
+        if (picker._galleryHandler) {
+            try { picker.removeEventListener('change', picker._galleryHandler); } catch(_) {}
+        }
+        const handler = (ev) => {
+            const files = Array.from(ev.target.files || []);
+            if (!files.length) return;
+            const remain = 10 - (POST_MEDIA_STATE.items?.length || 0);
+            const toSend = files.slice(0, Math.max(0, remain));
+            if (!toSend.length) return;
+            const mediaLocals = toSend.map((f) => {
+                const isVid = (f.type||'').toLowerCase().startsWith('video');
+                const objUrl = URL.createObjectURL(f);
+                return {
+                    url: objUrl,
+                    path: null,
+                    mimeType: f.type || (isVid ? 'video/*' : 'image/*'),
+                    type: isVid ? 'video' : 'image',
+                    file: f,
+                    fileName: f.name || (isVid ? `post_${Date.now()}.webm` : `post_${Date.now()}.jpg`)
+                };
+            });
+            POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
+            POST_MEDIA_STATE.items.push(...mediaLocals);
+            try { initPostEditorGallery(root); } catch(_) {}
+            if (POST_MEDIA_STATE.activeIndex == null) { try { switchToMedia?.(0); } catch(_) {} }
+        };
+        picker.addEventListener('change', handler);
+        picker._galleryHandler = handler;
+    }
+
+    // Substitui a ponte de captura para estratégia local-first (sem upload imediato)
+    function setupEditorCaptureBridgeLocal(root = document) {
+        if (window._editorCaptureHandler) {
+            try { window.removeEventListener('editor:capture', window._editorCaptureHandler); } catch(_) {}
+        }
+        const handler = (e) => {
+            const detail = e?.detail || {};
+            const blob = detail.blob || null;
+            const type = (detail.type || '').toLowerCase();
+            if (!blob) return;
+            const name = type === 'video' ? `capture_${Date.now()}.webm` : `capture_${Date.now()}.jpg`;
+            const objUrl = URL.createObjectURL(blob);
+            const media = {
+                url: objUrl,
+                path: null,
+                mimeType: blob.type || (type === 'video' ? 'video/webm' : 'image/jpeg'),
+                type: type || ((blob.type||'').toLowerCase().startsWith('video') ? 'video' : 'image'),
+                file: blob,
+                fileName: name
+            };
+            try { if (window.EditorBridge?.serialize) { media.layout = window.EditorBridge.serialize(); } } catch(_) {}
+            POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
+            POST_MEDIA_STATE.items.push(media);
+            POST_MEDIA_STATE.activeIndex = POST_MEDIA_STATE.items.length - 1;
+            try { initPostEditorGallery(root); } catch(_) {}
+            if (typeof notifySuccess === 'function') notifySuccess('Mídia adicionada à galeria.');
+        };
+        window.addEventListener('editor:capture', handler);
+        window._editorCaptureHandler = handler;
     }
 
     // Unifica o botão "Enviar" do editor ao fluxo da galeria
@@ -1510,6 +1597,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Restaurar índice
                 if (prevIdx != null) { POST_MEDIA_STATE.activeIndex = prevIdx; switchToMedia(prevIdx); }
                 publishBtn.disabled = false; publishBtn.textContent = 'Publicar';
+            }
+
+            // Upload pendente de itens sem layout (originais) somente no publish
+            for (let i = 0; i < items.length; i++) {
+                const it = items[i];
+                if (!it?.path) {
+                    const fileObj = it.file || null;
+                    if (fileObj) {
+                        try {
+                            const fd3 = new FormData();
+                            const isVid = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
+                            const preferredName = it.fileName || (isVid ? `post_${Date.now()}.webm` : `post_${Date.now()}.jpg`);
+                            fd3.append('files[]', fileObj, preferredName);
+                            const up3 = await apiClient.upload('/posts/media', fd3);
+                            const first3 = Array.isArray(up3?.media) ? up3.media[0] : null;
+                            if (first3) {
+                                const keepLayout = it.layout ? { layout: it.layout } : {};
+                                items[i] = { ...first3, ...keepLayout };
+                            }
+                        } catch(_) {}
+                    }
+                }
             }
 
             const vt = String(viewType || '');
@@ -3475,63 +3584,61 @@ document.addEventListener('DOMContentLoaded', () => {
             html += cards.join('');
             html += `<button id="add-job-btn" class="w-full py-2 px-4 bg-green-500 text-white font-semibold rounded-3xl hover:bg-green-700 transition-colors mt-4">Adicionar Experiência Profissional</button>`;
         } else if (view === 'post-editor') {
-            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle || 'Voltar', title: navTitle || 'Editor de Posts' });
+            
+            const postCaption = UI.sectionCard(UI.rowTextarea('postCaption', 'Legenda', ''));
+            
+            html += UI.renderCloseHeader();
             html += `
-            <div id="appShell">    
-                <section class="editor-card flex flex-col gap-5">
-                <!-- Toolbar superior minimalista -->
-                <div class="top-toolbar">
-                    <label for="bgUpload" class="tool-icon" title="Plano de fundo">
-                        <i class="fas fa-image"></i>
-                        <input type="file" id="bgUpload" accept="image/*,video/*">
-                    </label>
-                    <button type="button" id="btnAddText" class="tool-icon" title="Adicionar texto">
-                        <i class="fas fa-font"></i>
-                    </button>
-                    <button type="button" id="btnAddImg" class="tool-icon" title="Adicionar imagem">
-                        <i class="fas fa-image"></i>
-                    </button>
-                    <button type="button" id="btnAddElement" class="tool-icon" title="Adicionar elemento">
-                        <i class="fas fa-plus"></i>
-                    </button>
-                    <button type="button" id="btnCameraMode" class="tool-icon hidden" title="Usar câmera (requer permissão)">
-                        <i class="fas fa-camera"></i>
-                    </button>
-                    <div class="toolbar-divider"></div>
+            <h1 class="text-center text-gray-500 text-xl font-bold">Criar Publicação</h1>
+            <div id="appShell" class="gap-6 flex flex-col">    
+                <section class="editor-card">
+                    <!-- Toolbar superior minimalista -->
+                    <div class="top-toolbar">
+                        <label for="bgUpload" class="tool-icon" title="Plano de fundo">
+                            <i class="fas fa-image"></i>
+                            <input type="file" id="bgUpload" accept="image/*,video/*">
+                        </label>
+                        <button type="button" id="btnAddText" class="tool-icon" title="Adicionar texto">
+                            <i class="fas fa-font"></i>
+                        </button>
+                        <button type="button" id="btnAddImg" class="tool-icon" title="Adicionar imagem">
+                            <i class="fas fa-image"></i>
+                        </button>                        
+                        <button type="button" id="btnCameraMode" class="tool-icon hidden" title="Usar câmera (requer permissão)">
+                            <i class="fas fa-camera"></i>
+                        </button>
+                        <div class="toolbar-divider"></div>
 
-                    <button type="button" id="btnSaveJSON" class="tool-icon" title="Salvar layout">
-                        <i class="fas fa-save"></i>
-                    </button>
-                    <label class="tool-icon" for="loadJSON" title="Carregar layout">
-                        <i class="fas fa-folder-open"></i>
-                        <input type="file" id="loadJSON" accept="application/json" class="sr-only">
-                    </label>
-                </div>
-            
-                <!-- Editor viewport com botão de captura sobreposto -->
-                <div id="editorViewport">
-                    <div id="editor">
-                        <canvas id="gridCanvas" width="900" height="1200"></canvas>
-                        <div id="guideX" class="guide guide-x" style="display:none; top:50%"></div>
-                        <div id="guideY" class="guide guide-y" style="display:none; left:50%"></div>
-                    </div>                    
-                    <!-- Botão de captura estilo Instagram Stories -->
-                    <div class="capture-overlay">
-                    <button type="button" id="captureButton" class="capture-button" title="Toque para foto, segure para vídeo">
-                        <div class="capture-inner">
-                            <i class="fa-solid fa-camera capture-icon"></i>
-                        </div>
-                        <div class="capture-hint">
-                            <i class="fa-solid fa-hand-pointer"></i>
-                        </div>
-                    </button>
+                        <button type="button" id="btnSaveJSON" class="tool-icon" title="Salvar layout">
+                            <i class="fas fa-save"></i>
+                        </button>
+                        <label class="tool-icon" for="loadJSON" title="Carregar layout">
+                            <i class="fas fa-folder-open"></i>
+                            <input type="file" id="loadJSON" accept="application/json" class="sr-only">
+                        </label>
                     </div>
-                </div>
-            
-                <div class="flex flex-wrap gap-3 items-center text-xs text-slate-500 justify-between">
-                    <span id="captureHint">Dica: <strong>Toque</strong> para foto, <strong>segure</strong> para vídeo</span>
-                    <span>Proporção fixa 3:4 • 900 × 1200 px</span>
-                </div>
+                </section>
+                
+                <section class="editor-card">
+                    <!-- Editor viewport com botão de captura sobreposto -->
+                    <div id="editorViewport" class="bg-white rounded-2xl shadow-md">
+                        <div id="editor" class="rounded-2xl">
+                            <canvas id="gridCanvas" width="900" height="1200"></canvas>
+                            <div id="guideX" class="guide guide-x" style="display:none; top:50%"></div>
+                            <div id="guideY" class="guide guide-y" style="display:none; left:50%"></div>
+                        </div>                    
+                        <!-- Botão de captura estilo Instagram Stories -->
+                        <div class="capture-overlay">
+                        <button type="button" id="captureButton" class="capture-button" title="Toque para foto, segure para vídeo">
+                            <div class="capture-inner">
+                                <i class="fa-solid fa-camera capture-icon"></i>
+                            </div>
+                            <div class="capture-hint">
+                                <i class="fa-solid fa-hand-pointer"></i>
+                            </div>
+                        </button>
+                        </div>
+                    </div>                                    
                 </section>
             
                 <section id="itemBar" class="editor-card control-panel" style="display:none">
@@ -3609,50 +3716,48 @@ document.addEventListener('DOMContentLoaded', () => {
                         </button>
                     </div>
                 </section>
+                `;
+
+                html += postCaption;
+
+                html += `
+                <!-- Galeria (carrossel) - upload múltiplo e publicação -->
+                <section class="editor-card">                                                               
+                    <div class="flex items-center gap-2">                            
+                        <input id="postMediaPicker" class="hidden" type="file" multiple accept="image/*,video/*">                            
+                        <button id="publishGalleryBtn" type="button" class="ml-auto px-3 py-2 rounded-2xl bg-indigo-600 text-white text-sm hover:bg-indigo-700">Publicar</button>
+                    </div>
+                    <div id="postMediaTray" class=""></div>                   
+                </section>
             
                 <!-- Botão Publicar -->
                 <section class="editor-card">
                     <div class="flex flex-col items-center gap-4">
-                        <button type="button" id="btnEnviar" class="enviar-button" title="Enviar conteúdo">
+                        <!-- Configurações de exportação (ocultas por padrão) -->
+                        <div id="exportSettings" class="export-settings hidden">
+                            <div class="flex flex-wrap gap-3 items-center justify-center text-sm">
+                                <label class="flex items-center gap-2 text-slate-600">
+                                    Duração (s)
+                                    <input id="vidDur" type="number" min="1" step="0.5" value="6" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
+                                </label>
+                                <label class="flex items-center gap-2 text-slate-600">
+                                    FPS
+                                    <input id="vidFPS" type="number" min="10" max="60" step="1" value="30" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
+                                </label>
+                                <label class="flex items-center gap-2 text-slate-600">Fundo <input id="bgColorPicker" type="color" value="#ffffff" class="h-8 w-10 border border-slate-200 rounded"></label> </div><div id="videoExportInfo" class="text-xs text-slate-500 text-center mt-2 hidden">
+                                <i class="fa-solid fa-info-circle"></i> 
+                                <span id="videoExportInfoText"></span>
+                            </div>
+                        </div>                                            
+
+                        <button type="button" id="btnEnviar"  title="Enviar conteúdo" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">
                             <div class="enviar-inner">
                                 <i class="fas fa-paper-plane enviar-icon"></i>
                                 <span class="enviar-text">Publicar</span>
                             </div>
                         </button>
                         
-                        <!-- Configurações de exportação (ocultas por padrão) -->
-                        <div id="exportSettings" class="export-settings hidden">
-                        <div class="flex flex-wrap gap-3 items-center justify-center text-sm">
-                            <label class="flex items-center gap-2 text-slate-600">
-                                Duração (s)
-                                <input id="vidDur" type="number" min="1" step="0.5" value="6" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
-                            </label>
-                            <label class="flex items-center gap-2 text-slate-600">
-                                FPS
-                                <input id="vidFPS" type="number" min="10" max="60" step="1" value="30" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
-                            </label>
-                            <label class="flex items-center gap-2 text-slate-600">Fundo <input id="bgColorPicker" type="color" value="#ffffff" class="h-8 w-10 border border-slate-200 rounded"></label> </div><div id="videoExportInfo" class="text-xs text-slate-500 text-center mt-2 hidden">
-                            <i class="fa-solid fa-info-circle"></i> 
-                            <span id="videoExportInfoText"></span>
-                        </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Galeria (carrossel) - upload múltiplo e publicação -->
-                <section class="editor-card">
-                    <h3 class="text-sm font-semibold text-slate-700 mb-2">Galeria (múltiplas mídias)</h3>
-                    <div class="space-y-3">
-                        <textarea id="postCaption" class="w-full border border-slate-200 rounded-2xl p-3 text-sm" rows="2" placeholder="Escreva uma legenda (opcional)"></textarea>
-                        <div class="flex items-center gap-2">
-                            <label class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-sm cursor-pointer" for="postMediaPicker">
-                                <i class="fas fa-images mr-2"></i>Adicionar mídias
-                            </label>
-                            <input id="postMediaPicker" class="hidden" type="file" multiple accept="image/*,video/*">
-                            <span class="text-xs text-slate-500">Máx. 10 itens por post</span>
-                            <button id="publishGalleryBtn" type="button" class="ml-auto px-3 py-2 rounded-2xl bg-indigo-600 text-white text-sm hover:bg-indigo-700">Publicar</button>
-                        </div>
-                        <div id="postMediaTray" class="min-h-16"></div>
+                        
                     </div>
                 </section>
 
@@ -5309,6 +5414,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     try { wireUnifiedSendFlow(sidebarWrapper); } catch (_) {}
                     // Unifica captura e rótulos para adicionar mídia na galeria
                     try { wireUnifiedMediaAdders(sidebarWrapper); } catch (_) {}
+                    // Estratégia local-first: override de picker e captura
+                    try { setupLocalFirstGalleryUpload(sidebarWrapper); } catch (_) {}
+                    try { setupEditorCaptureBridgeLocal(sidebarWrapper); } catch (_) {}
                     console.log('Procurando elementos diretamente na sidebar...');
                     console.log('Conteúdo atual da sidebar:', sidebarWrapper.innerHTML.substring(0, 500));
 
@@ -5790,6 +5898,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         try { wireUnifiedSendFlow(sidebarWrapper); } catch (_) {}
                         // Unifica captura e rótulos para adicionar mídia na galeria
                         try { wireUnifiedMediaAdders(sidebarWrapper); } catch (_) {}
+                        // Estratégia local-first: override de picker e captura
+                        try { setupLocalFirstGalleryUpload(sidebarWrapper); } catch (_) {}
+                        try { setupEditorCaptureBridgeLocal(sidebarWrapper); } catch (_) {}
                         // Buscar elementos diretamente no sidebarWrapper
                         const appShellInSidebar = sidebarWrapper.querySelector('#appShell');
                         const gridCanvasInSidebar = sidebarWrapper.querySelector('#gridCanvas');

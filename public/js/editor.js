@@ -50,7 +50,6 @@ const init = () => {
     const bgUpload = document.getElementById('bgUpload');
     const btnAddText = document.getElementById('btnAddText');
     const btnAddImg = document.getElementById('btnAddImg');
-    const btnAddElement = document.getElementById('btnAddElement');
     const itemBar = document.getElementById('itemBar');
     const textControls = document.getElementById('textControls');
     const animControls = document.getElementById('animControls');
@@ -210,13 +209,6 @@ const init = () => {
         createImageItem(url);
       };
       input.click();
-    });
-    
-    // Menu de elementos adicionais
-    btnAddElement.addEventListener('click', ()=>{
-      // Por enquanto, criar uma caixa de texto como fallback
-      // Futuramente pode abrir um menu com formas, stickers, etc.
-      createTextBox('Novo elemento');
     });
 
     // ---------- Câmera: Captura Direta no Canvas
