@@ -378,8 +378,7 @@ body.is-rotating .h-rot {
   color:#111827;
   line-height:1.35;
   overflow:hidden;
-  background:rgba(255,255,255,.86);
-  box-shadow:0 20px 45px -32px rgba(15,23,42,0.5);
+  background:rgba(255,255,255,.86);  
   display:flex;
   align-items:center;
   justify-content:flex-start;
@@ -391,8 +390,7 @@ body.is-rotating .h-rot {
   justify-content:flex-end;
 }
 .image-item {
-  display: block;
-  box-shadow: 0 20px 45px -32px rgba(15, 23, 42, 0.5);
+  display: block;  
   border-radius: 0.85rem;
   position: relative;
   overflow: visible;
@@ -983,19 +981,19 @@ ilos para o editor de posts */
 /* Estilos para guias de alinhamento */
 .guide {
   position: absolute;
-  background: #ef4444;
+  background: #ea580c;
   z-index: 999;
   pointer-events: none;
 }
 
 .guide-x {
   width: 100%;
-  height: 1px;
+  height: 3px;
 }
 
 .guide-y {
   height: 100%;
-  width: 1px;
+  width: 3px;
 }
 
 /* Estados de redimensionamento */
@@ -1022,4 +1020,93 @@ ilos para o editor de posts */
   .h-nw, .h-ne, .h-sw, .h-se {
     margin: -8px;
   }
+}
+
+/* ===== UX: Handles com área de clique maior ===== */
+:root {
+  --handle-size: 16px;
+  --handle-hit: 28px; /* alvo maior para mouse/touch */
+}
+
+/* Dimensões e área de acerto ampliada sem inflar o visual */
+#handlesOverlay .handle {
+  box-sizing: content-box;
+  width: calc(var(--handle-size) * var(--editor-scale));
+  height: calc(var(--handle-size) * var(--editor-scale));
+  padding: calc((var(--handle-hit) - var(--handle-size)) / 2 * var(--editor-scale));
+  background-clip: content-box;
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 1000;
+}
+
+/* Sempre visíveis quando selecionado (reforço) */
+.item.selected .handle { display: block !important; }
+#handlesOverlay .handle { display: block !important; }
+#handlesOverlay .handle { visibility: visible !important; opacity: 1 !important; }
+#handlesOverlay .handle {
+  background: #3b82f6;
+  border: 2px solid #ffffff;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(59,130,246,0.25), 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* Manter translate ao aplicar estados visuais no overlay */
+#handlesOverlay .handle:hover { transform: translate(-50%, -50%) scale(1.2); }
+#handlesOverlay .handle:active { transform: translate(-50%, -50%) scale(1.1); }
+body.is-resizing #handlesOverlay .handle { transform: translate(-50%, -50%) scale(1.3) !important; }
+body.is-rotating #handlesOverlay .h-rot { transform: translate(-50%, -50%) scale(1.3) !important; }
+
+/* ===== Loader do Editor ===== */
+#editorViewport .editor-loader {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 23, 0.45);
+  backdrop-filter: blur(3px);
+  z-index: 10050;
+}
+#editorViewport .editor-loader .panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  box-shadow: 0 10px 30px rgba(2,6,23,0.25), inset 0 1px 0 rgba(255,255,255,0.8);
+  color: #0f172a;
+  font-weight: 600;
+}
+#editorViewport .editor-loader .spinner {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 2.5px solid #c7d2fe;
+  border-top-color: #3b82f6;
+  animation: editorSpin .8s linear infinite;
+}
+@keyframes editorSpin { to { transform: rotate(360deg); } }
+
+/* Posições dos cantos – ancorados no limite, com parte clicável para dentro */
+#handlesOverlay .h-nw { cursor: nwse-resize; }
+#handlesOverlay .h-ne { cursor: nesw-resize; }
+#handlesOverlay .h-sw { cursor: nesw-resize; }
+#handlesOverlay .h-se { cursor: nwse-resize; }
+
+/* Novos handles de borda – facilitam o redimensionamento pelos lados */
+#handlesOverlay .h-n { cursor: ns-resize; }
+#handlesOverlay .h-s { cursor: ns-resize; }
+#handlesOverlay .h-e { cursor: ew-resize; }
+#handlesOverlay .h-w { cursor: ew-resize; }
+
+/* Rotação – maior área de clique, mantendo visual compacto */
+#handlesOverlay .h-rot {
+  cursor: grab;
+}
+#handlesOverlay .h-rot:active { cursor: grabbing; }
+
+/* Ajustes para touch – alvos ligeiramente maiores */
+@media (pointer: coarse) {
+  :root { --handle-hit: 36px; }
 }

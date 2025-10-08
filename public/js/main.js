@@ -619,7 +619,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const items = POST_MEDIA_STATE.items;
             if (!Array.isArray(items) || !items.length) return;
             if (action === 'remove') {
-                items.splice(idx, 1);
+                const removed = items.splice(idx, 1)[0];
+                try { if (removed?.url && String(removed.url).startsWith('blob:')) URL.revokeObjectURL(removed.url); } catch(_) {}
             } else if (action === 'move-left' && idx > 0) {
                 const [it] = items.splice(idx, 1);
                 items.splice(idx - 1, 0, it);
@@ -815,9 +816,9 @@ document.addEventListener('DOMContentLoaded', () => {
             loadFeed();
         };
 
-        if (picker._galleryHandler) { picker.removeEventListener('change', picker._galleryHandler); }
-        picker.addEventListener('change', handlePickerChange);
-        picker._galleryHandler = handlePickerChange;
+        // Preferir estratégia local-first: não fazer upload no change
+        try { if (picker._galleryHandler) { picker.removeEventListener('change', picker._galleryHandler); } } catch(_) {}
+        try { setupLocalFirstGalleryUpload(root); } catch(_) {}
 
         const trayClick = (ev) => {
             // Bloqueia propagação para não acionar listeners globais que fecham a sidebar
@@ -850,36 +851,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Integra captura do editor -> adiciona na galeria automaticamente
     function setupEditorCaptureBridge(root = document) {
-        const handler = async (e) => {
-            const detail = e?.detail || {};
-            const blob = detail.blob || null;
-            const type = (detail.type || '').toLowerCase();
-            if (!blob) return;
-            try {
-                const fd = new FormData();
-                const name = type === 'video' ? `capture_${Date.now()}.webm` : `capture_${Date.now()}.jpg`;
-                fd.append('files[]', blob, name);
-                const up = await apiClient.upload('/posts/media', fd);
-                const media = Array.isArray(up?.media) ? up.media[0] : null;
-                if (media) {
-                    // Capturar layout atual do editor para compor posteriormente
-                    try { if (window.EditorBridge?.serialize) { media.layout = window.EditorBridge.serialize(); } } catch(_) {}
-                    POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
-                    POST_MEDIA_STATE.items.push(media);
-                    POST_MEDIA_STATE.activeIndex = POST_MEDIA_STATE.items.length - 1;
-                    initPostEditorGallery(root);
-                    notifySuccess('Mídia adicionada à galeria.');
-                } else {
-                    notifyError('Falha ao adicionar captura à galeria.');
-                }
-            } catch (err) {
-                console.error('[capture->gallery] error', err);
-                notifyError('Erro ao enviar captura.');
-            }
-        };
-        if (window._editorCaptureHandler) window.removeEventListener('editor:capture', window._editorCaptureHandler);
-        window.addEventListener('editor:capture', handler);
-        window._editorCaptureHandler = handler;
+        // Redireciona para o modo local-first (sem upload imediato)
+        try { if (window._editorCaptureHandler) window.removeEventListener('editor:capture', window._editorCaptureHandler); } catch(_) {}
+        try { setupEditorCaptureBridgeLocal(root); } catch(_) {}
     }
 
     // Unifica pontos de entrada de mídia (captura e rótulos) para a galeria
@@ -1444,7 +1418,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const items = POST_MEDIA_STATE.items;
             if (!Array.isArray(items) || !items.length) return;
             if (action === 'remove') {
-                items.splice(idx, 1);
+                const removed = items.splice(idx, 1)[0];
+                try { if (removed?.url && String(removed.url).startsWith('blob:')) URL.revokeObjectURL(removed.url); } catch(_) {}
             } else if (action === 'move-left' && idx > 0) {
                 const [it] = items.splice(idx, 1);
                 items.splice(idx - 1, 0, it);
@@ -1640,9 +1615,9 @@ document.addEventListener('DOMContentLoaded', () => {
             loadFeed();
         };
 
-        if (picker._galleryHandler) { picker.removeEventListener('change', picker._galleryHandler); }
-        picker.addEventListener('change', handlePickerChange);
-        picker._galleryHandler = handlePickerChange;
+        // Preferir estratégia local-first: não fazer upload no change
+        try { if (picker._galleryHandler) { picker.removeEventListener('change', picker._galleryHandler); } } catch(_) {}
+        try { setupLocalFirstGalleryUpload(root); } catch(_) {}
 
         const trayClick = (ev) => {
             // Bloqueia propagação para não acionar listeners globais que fecham a sidebar
@@ -1675,36 +1650,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Integra captura do editor -> adiciona na galeria automaticamente
     function setupEditorCaptureBridge(root = document) {
-        const handler = async (e) => {
-            const detail = e?.detail || {};
-            const blob = detail.blob || null;
-            const type = (detail.type || '').toLowerCase();
-            if (!blob) return;
-            try {
-                const fd = new FormData();
-                const name = type === 'video' ? `capture_${Date.now()}.webm` : `capture_${Date.now()}.jpg`;
-                fd.append('files[]', blob, name);
-                const up = await apiClient.upload('/posts/media', fd);
-                const media = Array.isArray(up?.media) ? up.media[0] : null;
-                if (media) {
-                    // Capturar layout atual do editor para compor posteriormente
-                    try { if (window.EditorBridge?.serialize) { media.layout = window.EditorBridge.serialize(); } } catch(_) {}
-                    POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
-                    POST_MEDIA_STATE.items.push(media);
-                    POST_MEDIA_STATE.activeIndex = POST_MEDIA_STATE.items.length - 1;
-                    initPostEditorGallery(root);
-                    notifySuccess('Mídia adicionada à galeria.');
-                } else {
-                    notifyError('Falha ao adicionar captura à galeria.');
-                }
-            } catch (err) {
-                console.error('[capture->gallery] error', err);
-                notifyError('Erro ao enviar captura.');
-            }
-        };
-        if (window._editorCaptureHandler) window.removeEventListener('editor:capture', window._editorCaptureHandler);
-        window.addEventListener('editor:capture', handler);
-        window._editorCaptureHandler = handler;
+        // Redireciona para o modo local-first (sem upload imediato)
+        try { if (window._editorCaptureHandler) window.removeEventListener('editor:capture', window._editorCaptureHandler); } catch(_) {}
+        try { setupEditorCaptureBridgeLocal(root); } catch(_) {}
     }
 
     // Unifica o botão "Enviar" do editor ao fluxo da galeria
@@ -2389,44 +2337,46 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button id="sidebarTrigger" data-sidebar-action="settings"><img class="page-thumb h-11 w-11 shadow-lg object-cover rounded-full" src="/images/no-image.jpg" /></button>
                 </div>
             </div>                                         
-            <div id="workz-content" class="max-w-screen-xl mx-auto clearfix grid grid-cols-12 gap-6">                               
+            <div id="workz-content" class="max-w-screen-xl mx-auto clearfix grid grid-cols-12 gap-6">
             </div>        
         `,
 
         workzContent: `
             <div class="col-span-12 rounded-b-3xl h-48 bg-gray-200 bg-cover bg-center"></div>
-            <div class="col-span-12 sm:col-span-8 lg:col-span-9 flex flex-col grid grid-cols-12 gap-x-6 -mt-24 ml-6">
-                <!-- Coluna da Esquerda (Menu de Navegação) -->
-                <aside class="w-full flex col-span-4 lg:col-span-3 flex flex-col gap-y-6">                                        
-                    <div class="aspect-square w-full rounded-full shadow-lg border-4 border-white overflow-hidden">                        
-                        <img id="profile-image" class="w-full h-full object-cover" src="${resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 240 })}" alt="${currentUserData?.tt}">                        
-                    </div>
-                    <div class="bg-white p-3 rounded-3xl font-semibold shadow-lg grow">
-                        <nav class="mt-1">
-                            <ul id="custom-menu" class="space-y-2"></ul>
-                        </nav>
-                        <hr class="mt-3 mb-3">
-                        <nav class="mb-1">
-                            <ul id="standard-menu" class="space-y-2">
-                                <li><button data-action="list-people" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-user-friends fa-stack-1x text-gray-700"></i></span><span class="truncate">Pessoas</span></button></li>
-                                <li><button data-action="list-businesses" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-briefcase fa-stack-1x text-gray-700"></i></span><span class="truncate">Negócios</span></button></li>
-                                <li><button data-action="list-teams" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-users fa-stack-1x text-gray-700"></i></span><span class="truncate">Equipes</span></button></li>
-                                <li><button data-action="logout" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-sign-out-alt fa-stack-1x text-gray-700"></i></span><span class="truncate">Sair</span></button></li>
-                            </ul>
-                        </nav>
-                    </div>
+            <div class="col-span-12 clearfix grid grid-cols-12 gap-6 mx-6">
+                <div class="col-span-12 sm:col-span-8 lg:col-span-9 flex flex-col grid grid-cols-12 gap-x-6 -mt-24">
+                    <!-- Coluna da Esquerda (Menu de Navegação) -->
+                    <aside class="w-full flex col-span-4 lg:col-span-3 flex flex-col gap-y-6">                                        
+                        <div class="aspect-square w-full rounded-full shadow-lg border-4 border-white overflow-hidden">                        
+                            <img id="profile-image" class="w-full h-full object-cover" src="${resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 240 })}" alt="${currentUserData?.tt}">                        
+                        </div>
+                        <div class="bg-white p-3 rounded-3xl font-semibold shadow-lg grow">
+                            <nav class="mt-1">
+                                <ul id="custom-menu" class="space-y-2"></ul>
+                            </nav>
+                            <hr class="mt-3 mb-3">
+                            <nav class="mb-1">
+                                <ul id="standard-menu" class="space-y-2">
+                                    <li><button data-action="list-people" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-user-friends fa-stack-1x text-gray-700"></i></span><span class="truncate">Pessoas</span></button></li>
+                                    <li><button data-action="list-businesses" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-briefcase fa-stack-1x text-gray-700"></i></span><span class="truncate">Negócios</span></button></li>
+                                    <li><button data-action="list-teams" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-users fa-stack-1x text-gray-700"></i></span><span class="truncate">Equipes</span></button></li>
+                                    <li><button data-action="logout" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-sign-out-alt fa-stack-1x text-gray-700"></i></span><span class="truncate">Sair</span></button></li>
+                                </ul>
+                            </nav>
+                        </div>
+                    </aside>
+                    <!-- Coluna do Meio (Conteúdo Principal) -->
+                    <main class="col-span-8 lg:col-span-9 flex-col relative space-y-6">                        
+                        <div id="main-content" class="w-full"></div>
+                        <div id="editor-trigger" class="shadow-lg w-full bg-white rounded-3xl text-center"></div>
+                    </main>
+                    <!-- Feed de Publicações -->
+                    <div id="timeline" class="col-span-12 flex flex-col grid grid-cols-12 gap-6 pt-6"></div>
+                    <div id="feed-sentinel" class="h-10"></div>
+                </div>
+                <aside id="widget-wrapper" class="col-span-12 sm:col-span-4 lg:col-span-3 flex flex-col gap-y-6 -mt-24">
                 </aside>
-                <!-- Coluna do Meio (Conteúdo Principal) -->
-                <main class="col-span-8 lg:col-span-9 flex-col relative space-y-6">                        
-                    <div id="main-content" class="w-full"></div>
-                    <div id="editor-trigger" class="shadow-lg w-full bg-white rounded-3xl text-center"></div>
-                </main>
-                <!-- Feed de Publicações -->
-                <div id="timeline" class="col-span-12 flex flex-col grid grid-cols-12 gap-6 pt-6"></div>
-                <div id="feed-sentinel" class="h-10"></div>
             </div>
-            <aside id="widget-wrapper" class="col-span-12 sm:col-span-4 lg:col-span-3 flex flex-col gap-y-6 -mt-24 mr-6">                    
-            </aside>        
         `,
 
         mainContent: `
@@ -2874,7 +2824,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     templates.sidebarPageSettings = async ({ view = null, data = null, type = null, origin = null, prevTitle = null, navTitle = null, crop = null }) => {
-        console.log('sidebarPageSettings executado com:', { view, data: !!data, type, origin, prevTitle, navTitle, crop });
 
         const personalizationCard = (d) => {
             const hasBk = d?.bk;
@@ -3512,7 +3461,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else if (view === 'billing') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
-            console.log(data, view, type);
             html += `<div class="bg-white rounded-2xl shadow-md p-4">Cobrança e Recebimento</div>`;
         } else if (view === 'transactions') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
@@ -3535,7 +3483,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         ? `<button title="Cancelar" data-action="reject-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-b-2xl"><i class="fas fa-ban"></i> Cancelar Assinatura</button>`
                         : `<button title="Renovar" data-action="revert-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-b-2xl"><i class="fas fa-undo"></i> Renovar Assinatura</button>`
                         ;
-                    console.log(app);
                     return `
                         <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
                             <div class="pt-4 px-4 col-span-4 flex items-center truncate">
@@ -3593,7 +3540,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div id="appShell" class="gap-6 flex flex-col">    
                 <section class="editor-card">
                     <!-- Toolbar superior minimalista -->
-                    <div class="top-toolbar">
+                    <div class="flex items-center gap-6">
                         <label for="bgUpload" class="tool-icon" title="Plano de fundo">
                             <i class="fas fa-image"></i>
                             <input type="file" id="bgUpload" accept="image/*,video/*">
@@ -3606,9 +3553,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         </button>                        
                         <button type="button" id="btnCameraMode" class="tool-icon hidden" title="Usar câmera (requer permissão)">
                             <i class="fas fa-camera"></i>
-                        </button>
-                        <div class="toolbar-divider"></div>
-
+                        </button>                        
                         <button type="button" id="btnSaveJSON" class="tool-icon" title="Salvar layout">
                             <i class="fas fa-save"></i>
                         </button>
@@ -3774,7 +3719,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     async function appendWidget(type = 'people', gridList, count) {
-        console.log(`Adicionando widget: ${type}, count: ${count}`);
 
         // people aqui são IDs; resolvemos antes de tudo
         let resolved = await fetchByIds(gridList, type);
@@ -3817,7 +3761,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Verificar se o widget já existe e removê-lo
         const existingWidget = widgetWrapper.querySelector(`#widget-${type}`);
         if (existingWidget) {
-            console.log(`Removendo widget duplicado: ${type}`);
             existingWidget.remove();
         }
 
@@ -3963,7 +3906,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function customMenu() {
-        console.log('customMenu chamada, viewType:', viewType);
         const customMenu = document.querySelector('#custom-menu');
         const standardMenu = document.querySelector('#standard-menu');
 
@@ -4023,7 +3965,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).format(date);
         } catch (error) {
-            console.warn('Failed to format timestamp', input, error);
             return '';
         }
     }
@@ -4222,7 +4163,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Filtrar apenas posts que não existem
         const newItems = items.filter(post => !existingPostIds.has(String(post?.id ?? '')));
-        console.log(`appendFeed: ${items.length} posts recebidos, ${existingPostIds.size} existentes, ${newItems.length} novos`);
         if (!newItems.length) return;
 
         const html = newItems.map((post) => {
@@ -4494,10 +4434,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const confirmed = await confirmDialog('Excluir esta publicação?', { danger: true, title: 'Confirmar exclusão' });
             if (!confirmed) return;
             try {
-                await apiClient.post('/delete', { db: 'workz_data', table: 'hpl', conditions: { id: postId } });
+                // Backend faz cascade delete (post + mídias)
+                const json = await apiClient.post('/app/delete_post.php', { id: postId });
+                if (json?.error) { throw new Error(json?.error || 'Falha ao excluir'); }
                 const article = timeline.querySelector(`[data-post-id="${postId}"]`);
                 if (article && article.parentElement) article.parentElement.removeChild(article);
                 if (typeof notifySuccess === 'function') notifySuccess('Publicação excluída.');
+                // Nada a limpar no cliente; servidor já remove mídias
             } catch (e) {
                 console.error('Failed to delete post', e);
                 if (typeof notifyError === 'function') notifyError('Não foi possível excluir a publicação.');
@@ -4507,6 +4450,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
         }
     }
+
+    // (remoção de mídia agora é responsabilidade do backend em /app/delete_post.php)
 
     function adjustLikeButtonAppearance(button, liked) {
         button.dataset.liked = liked ? '1' : '0';
@@ -5375,16 +5320,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 sidebarWrapper.classList.add('shadow-2xl');
             }
 
-            console.log('Classes depois:', sidebarWrapper.className);
-
             // Forçar largura via CSS inline para sobrescrever qualquer CSS conflitante
             sidebarWrapper.style.width = '33.333333%'; // equivalente a w-1/3
             sidebarWrapper.style.minWidth = '300px'; // largura mínima
 
             // Verificar se a sidebar está visível
             const rect = sidebarWrapper.getBoundingClientRect();
-            console.log('Dimensões da sidebar:', rect.width, 'x', rect.height);
-            console.log('Posição da sidebar:', rect.left, rect.top);
 
             // Criar conteúdo da sidebar
             sidebarWrapper.innerHTML = `<div class="sidebar-content grid grid-cols-1 gap-6 p-4"></div>`;
@@ -5417,23 +5358,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Estratégia local-first: override de picker e captura
                     try { setupLocalFirstGalleryUpload(sidebarWrapper); } catch (_) {}
                     try { setupEditorCaptureBridgeLocal(sidebarWrapper); } catch (_) {}
-                    console.log('Procurando elementos diretamente na sidebar...');
-                    console.log('Conteúdo atual da sidebar:', sidebarWrapper.innerHTML.substring(0, 500));
 
                     // Buscar elementos diretamente no sidebarWrapper
                     const appShellInSidebar = sidebarWrapper.querySelector('#appShell');
                     const gridCanvasInSidebar = sidebarWrapper.querySelector('#gridCanvas');
 
-                    console.log('Verificando elementos do editor:');
-                    console.log('AppShell encontrado:', !!appShellInSidebar);
-                    console.log('GridCanvas encontrado:', !!gridCanvasInSidebar);
-
                     if (appShellInSidebar && gridCanvasInSidebar) {
-                        console.log('Elementos encontrados, carregando editor...');
                         loadEditorScript(sidebarWrapper);
                     } else {
                         console.error('Elementos não encontrados na sidebar');
-                        console.log('Conteúdo da sidebar (primeiros 1000 chars):', sidebarWrapper.innerHTML.substring(0, 1000));
 
                         // Tentar novamente após mais tempo
                         setTimeout(() => {
@@ -5441,7 +5374,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             const gridCanvasRetry = sidebarWrapper.querySelector('#gridCanvas');
 
                             if (appShellRetry && gridCanvasRetry) {
-                                console.log('Elementos encontrados na segunda tentativa');
                                 loadEditorScript(sidebarWrapper);
                             } else {
                                 console.error('Elementos ainda não encontrados na segunda tentativa');
@@ -5459,7 +5391,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function loadEditorScript(sidebarContent = null) {
-        console.log('loadEditorScript chamado');
 
         if (!sidebarContent) {
             sidebarContent = document.querySelector('.sidebar-content');
@@ -5474,9 +5405,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const requiredElements = ['editorViewport', 'editor', 'gridCanvas'];
         const missingElements = requiredElements.filter(id => !sidebarContent.querySelector(`#${id}`));
 
-        console.log('Elementos necessários:', requiredElements);
-        console.log('Elementos faltando:', missingElements);
-
         if (missingElements.length > 0) {
             console.error('Elementos necessários não encontrados:', missingElements);
             notifyError('Interface do editor não está pronta.');
@@ -5484,6 +5412,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Verificar se o script já foi carregado
+        if (window._editorReady === true) { try { initEditorInSidebar(sidebarContent); } catch(_) {} return; }
+        if (window._editorLoading === true) { setTimeout(() => { if (typeof init === 'function') { try { initEditorInSidebar(sidebarContent); } catch(_) {} } }, 150); return; }
         if (typeof init === 'function') {
             try {
                 initEditorInSidebar(sidebarContent);
@@ -5498,22 +5428,18 @@ document.addEventListener('DOMContentLoaded', () => {
         // Usar fetch para carregar o script diretamente
         const editorUrl = window.location.origin + '/js/editor.js?v=' + Date.now();
         
-        console.log('Tentando carregar editor de:', editorUrl);
-        
+        window._editorLoading = true;
         fetch(editorUrl)
             .then(response => {
-                console.log('Resposta do fetch:', response.status, response.statusText);
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 return response.text();
             })
             .then(content => {
-                console.log('Conteúdo recebido, primeiros 100 caracteres:', content.substring(0, 100));
                 
                 if (content.trim().startsWith('<')) {
                     console.error('editor.js está retornando HTML em vez de JavaScript!');
-                    console.log('Conteúdo HTML recebido:', content.substring(0, 500));
                     createInlineEditor(sidebarContent);
                     return;
                 }
@@ -5523,11 +5449,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     const script = document.createElement('script');
                     script.textContent = content;
                     document.head.appendChild(script);
+                    window._editorReady = true;
+                    window._editorLoading = false;
                     
                     // Aguardar um pouco e tentar inicializar
                     setTimeout(() => {
                         if (typeof init === 'function') {
-                            console.log('Função init encontrada, inicializando editor...');
                             initEditorInSidebar(sidebarContent);
                         } else {
                             console.error('Função init não encontrada após carregar o script');
@@ -5537,12 +5464,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                 } catch (evalError) {
                     console.error('Erro ao executar editor.js:', evalError);
+                    window._editorLoading = false;
                     createInlineEditor(sidebarContent);
                 }
             })
             .catch(err => {
                 console.error('Erro ao fazer fetch do editor.js:', err);
-                console.log('Criando editor básico inline como fallback...');
+                window._editorLoading = false;
                 createInlineEditor(sidebarContent);
             });
     }
@@ -5572,7 +5500,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function createInlineEditor(sidebarContent) {
-        console.log('Criando editor básico inline...');
 
         try {
             const gridCanvas = sidebarContent.querySelector('#gridCanvas');
@@ -5673,14 +5600,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
 
                         editor.appendChild(textBox);
-                        console.log('Caixa de texto criada com editor básico');
                     }
                 };
                 btnAddText.addEventListener('click', inlineHandler);
                 btnAddText._inlineTextHandler = inlineHandler;
             }
-
-            console.log('Editor básico inline criado com sucesso');
             notifySuccess('Editor básico carregado. Funcionalidade limitada disponível.');
 
         } catch (error) {
@@ -5836,7 +5760,6 @@ document.addEventListener('DOMContentLoaded', () => {
         //
 
         if (toggle === true) {
-            console.log('Classes antes do toggle:', sidebarWrapper.className);
 
             // Para o post-editor, garantir que a sidebar fique visível
             if (el && el.dataset.sidebarAction === 'post-editor') {
@@ -5851,8 +5774,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 sidebarWrapper.classList.toggle('w-full');
                 sidebarWrapper.classList.toggle('shadow-2xl');
             }
-
-            console.log('Classes depois do toggle:', sidebarWrapper.className);
         }
 
         if (el) {
@@ -5866,11 +5787,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 SidebarNav.resetRoot(currentUserData); // já chama SidebarNav.render() e configura os eventos do root
 
             } else if (action === 'post-editor') {
-                console.log('toggleSidebar: Processando action post-editor');
                 // Editor de posts
                 // Carregar CSS do editor se ainda não foi carregado
                 if (!document.querySelector('link[href*="editor.css"]')) {
-                    console.log('Carregando CSS do editor...');
                     const editorCSS = document.createElement('link');
                     editorCSS.rel = 'stylesheet';
                     // Use absolute path to ensure correct load on nested routes
@@ -6097,7 +6016,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
 
-                applyCepData(form, result.data);
+                applyCepData(form, result.data || {});
                 zipInput.dataset.lastCepFetched = sanitized;
             }, 400);
         };
@@ -6264,7 +6183,7 @@ document.addEventListener('DOMContentLoaded', () => {
             order: { by: 's1', dir: 'DESC' },
             fetchAll: true
         });
-        userPeople = userPeople.data.map(o => o.s1);
+        userPeople = Array.isArray(userPeople?.data) ? userPeople.data.map(o => o.s1) : [];
 
         // Negócios
         // 1) Vínculos por employees (membros/gestores)
@@ -6322,7 +6241,7 @@ document.addEventListener('DOMContentLoaded', () => {
             order: { by: 'cm', dir: 'DESC' },
             fetchAll: true
         });
-        userTeamsData = userTeams.data;
+        userTeamsData = Array.isArray(userTeams?.data) ? userTeams.data : [];
 
         // 1) Colete os IDs dos teams (cm) e busque todos de uma vez
         const cmIds = userTeamsData.map(t => t.cm).filter(Boolean);
@@ -6386,7 +6305,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 order: { by: 'tt', dir: 'ASC' },
                 fetchAll: true
             });
-            list = list.data;
+            list = Array.isArray(list?.data) ? list.data : [];
             // Filtro global: Equipes só são listadas se o usuário for membro aprovado do negócio dono
             if (listType === 'teams') {
                 const approvedBizSet = new Set((Array.isArray(userBusinessesData) ? userBusinessesData : [])
@@ -6472,12 +6391,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function renderView(entity = currentUserData) {
-        console.log('renderView chamada, viewType:', viewType, 'entity:', entity);
 
         // Limpar widgets existentes no início da renderView
         const widgetWrapper = document.querySelector('#widget-wrapper');
         if (widgetWrapper) {
-            console.log('Limpando widgets existentes...');
             widgetWrapper.innerHTML = '';
         }
 
@@ -6558,7 +6475,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             // Verifica se entidade existe
-            if (entityData.data.length === 0) {
+            if (!Array.isArray(entityData?.data) || entityData.data.length === 0) {
                 hideLoading({ delay: 250 });
                 return;
             }
@@ -6623,9 +6540,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 results[`${key}Count`] = count;
             }
 
-            Object.assign(entityData.data[0], results);
+            const entityRow = Array.isArray(entityData?.data) ? (entityData.data[0] || null) : (entityData?.data || null);
+            if (!entityRow) { hideLoading({ delay: 250 }); return; }
+            Object.assign(entityRow, results);
 
-            viewData = entityData.data[0];
+            viewData = entityRow;
             applyEntityBackgroundImage(viewData);
 
             // Restrição de acesso para páginas de Equipe: somente membros aprovados da equipe
@@ -6669,9 +6588,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 results.followersCount = followersCount.count;
             };
 
-            Object.assign(entityData.data[0], results);
+            Object.assign(viewData, results);
 
-            entityImage = resolveImageSrc(entityData.data[0].im, entityData.data[0].tt, { size: 100 });
+            entityImage = resolveImageSrc(viewData.im, viewData.tt, { size: 100 });
 
             if (viewType === ENTITY.PROFILE && results?.teams) {
                 // 1) Colete os IDs dos teams (cm) e busque todos de uma vez
@@ -6766,14 +6685,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Verificar se clicou no post-editor
                     const postEditor = e.target.closest('#post-editor');
                     if (postEditor) {
-                        console.log('Clique no post-editor detectado!');
                         e.preventDefault();
                         e.stopPropagation(); // Impedir que o event listener global processe
 
                         // Criar um elemento mock com data-sidebar-action para usar com toggleSidebar
                         const mockElement = document.createElement('div');
                         mockElement.dataset.sidebarAction = 'post-editor';
-                        console.log('Chamando toggleSidebar com elemento mock');
                         toggleSidebar(mockElement, true);
                         return;
                     }
@@ -6811,7 +6728,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         },
                         fetchAll: true
                     });
-                    const appIds = userAppsRaw.data.map(o => o.ap);
+                    const appIds = Array.isArray(userAppsRaw?.data) ? userAppsRaw.data.map(o => o.ap) : [];
                     const resolvedApps = await fetchByIds(appIds, 'apps'); // Fetch full app data here
 
                     await renderTemplate(document.querySelector('#app-library'), templates.appLibrary, { appsList: resolvedApps }, () => {
@@ -6826,7 +6743,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderTemplate(
                     document.querySelector('#main-content'),
                     (viewType === ENTITY.TEAM && viewRestricted) ? templates.teamRestricted : templates['entityContent'],
-                    { data: entityData.data[0] }
+                    { data: viewData }
                 )
                 : Promise.resolve(),
 
@@ -6964,7 +6881,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Assuming newWindow is a global function
                     newWindow(appUrl, `app_${app.id}`, app.im, app.tt);
                 } else {
-                    console.warn('App does not have a URL (src or pg) to open.', app);
                 }
             }
         });
@@ -7002,7 +6918,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function loadFeed() {
-        console.log('loadFeed chamada, viewType:', viewType, 'feedLoading:', feedLoading, 'feedFinished:', feedFinished);
         if (!viewType) return;
 
         if (feedLoading || feedFinished) return;
@@ -8026,7 +7941,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyMask(id, options) {
         const el = document.getElementById(id);
         if (!el) {
-            console.warn('[mask] elemento #' + id + ' nao encontrado no DOM no momento da aplicacao');
             return null;
         }
         if (el.dataset.maskInitialized === '1') {

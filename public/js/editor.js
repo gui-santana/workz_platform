@@ -26,7 +26,6 @@ const init = () => {
     // Evitar múltiplas inicializações no mesmo DOM (duplica event listeners)
     if (!editorViewport) return;
     if (editorViewport.dataset && editorViewport.dataset.initialized === '1') {
-      console.debug('[editor] já inicializado neste container, ignorando init()');
       return;
     }
     editorViewport.dataset.initialized = '1';
@@ -108,6 +107,12 @@ const init = () => {
     let currentScale = 1;
 
     let dragState = null, resizeState = null, rotateState = null;
+    let isSaving = false;
+    // Overlay de handles (fora do item)
+    let handlesOverlay = null;
+    let overlayHandles = {};
+    // Loader overlay
+    let editorLoader = null;
 
     // Inicializar estado do botão Enviar
     updateEnviarButton();
@@ -117,18 +122,23 @@ const init = () => {
       const { width } = editorViewport.getBoundingClientRect();
       currentScale = width / BASE_W;
       editor.style.setProperty('--editor-scale', currentScale);
+      editorViewport.style.setProperty('--editor-scale', currentScale);
+      // Reposicionar overlay ao escalar
+      if (selected) positionHandlesFor(selected);
     }
 
     window.addEventListener('resize', scaleEditor);
     scaleEditor();
+    // Garantir que o overlay exista desde o início
+    ensureHandlesOverlay();
+    hideHandlesOverlay();
   
     // ---------- Grid
     drawGrid();
     function drawGrid(){
-      console.log('Desenhando grade');
       gctx.clearRect(0,0,gridCanvas.width, gridCanvas.height);
       gctx.globalAlpha = 0.15; 
-      gctx.strokeStyle = '#94a3b8'; 
+      gctx.strokeStyle = '#999999';
       gctx.lineWidth = 1;
       
       // Desenhar linhas verticais
@@ -246,7 +256,6 @@ const init = () => {
       captureButton.addEventListener('contextmenu', e => e.preventDefault());
       
       // Manter dica para mobile
-      console.log('Dispositivo móvel detectado - usando captura direta');
     } else {
       // Desktop: Upload de arquivo
       captureButton.addEventListener('click', handleDesktopCapture);
@@ -268,8 +277,6 @@ const init = () => {
         captureHint.innerHTML = 'Dica: <strong>Clique</strong> para fazer upload de foto ou vídeo';
       }
       
-      console.log('Desktop detectado - usando upload de arquivo');
-      
       // Mostrar botão de câmera como opção alternativa
       const btnCameraMode = document.getElementById('btnCameraMode');
       if (btnCameraMode) {
@@ -280,6 +287,7 @@ const init = () => {
 
     // Função para alternar para modo câmera no desktop
     async function switchToCameraMode() {
+      if (isSaving) return; isSaving = true;
       try {
         // Tentar inicializar câmera
         await initializeCamera();
@@ -390,7 +398,6 @@ const init = () => {
       
       // Se já está gravando, parar gravação com clique simples
       if (isRecording) {
-        console.log('Clique durante gravação - parando gravação');
         stopVideoRecording();
         return;
       }
@@ -415,7 +422,6 @@ const init = () => {
           navigator.vibrate(50);
         }
         // Iniciar gravação de vídeo
-        console.log('Pressão longa detectada - iniciando gravação');
         startVideoRecording();
       }, LONG_PRESS_DURATION);
     }
@@ -443,7 +449,6 @@ const init = () => {
       
       // Se não foi pressão longa, tirar foto
       if (!isLongPress && pressDuration < LONG_PRESS_DURATION) {
-        console.log('Clique simples - tirando foto');
         takeInstantPhoto();
       }
       
@@ -462,13 +467,11 @@ const init = () => {
     // Iniciar preview da câmera em tempo real no canvas
     function startCameraPreview() {
       if (!currentStream || !hiddenCameraStream.videoWidth) {
-        console.log('Aguardando câmera estar pronta para preview');
         setTimeout(startCameraPreview, 100);
         return;
       }
       
       previewActive = true;
-      console.log('Iniciando preview da câmera no canvas');
       
       // Adicionar classe visual para indicar câmera ativa
       captureButton.classList.remove('camera-inactive');
@@ -503,8 +506,6 @@ const init = () => {
         bgEl = previewVideoElement;
         editor.insertBefore(bgEl, editor.firstChild);
         
-        console.log('Preview de vídeo criado e adicionado ao editor');
-        
         // Redesenhar a grade
         setTimeout(refreshGrid, 100);
       }
@@ -531,8 +532,6 @@ const init = () => {
         previewVideoElement = null;
         bgEl = null;
       }
-      
-      console.log('Preview da câmera parado');
     }
 
     // Desligar câmera completamente (para após tirar foto)
@@ -543,7 +542,6 @@ const init = () => {
       if (currentStream) {
         currentStream.getTracks().forEach(track => {
           track.stop();
-          console.log('Track parada:', track.kind, track.label);
         });
         currentStream = null;
       }
@@ -570,8 +568,6 @@ const init = () => {
         previewVideoElement = null;
         bgEl = null;
       }
-      
-      console.log('Câmera desligada completamente - luz deve apagar');
     }
 
     // Limpar todos os recursos da câmera (para quando sair da página)
@@ -587,8 +583,6 @@ const init = () => {
       if (hiddenCameraStream) {
         hiddenCameraStream.srcObject = null;
       }
-      
-      console.log('Recursos da câmera limpos');
     }
 
     // Inicializar câmera
@@ -613,11 +607,9 @@ const init = () => {
         // Aguardar o vídeo estar pronto
         return new Promise((resolve, reject) => {
           hiddenCameraStream.onloadedmetadata = () => {
-            console.log('Câmera inicializada com sucesso - Dimensões:', hiddenCameraStream.videoWidth, 'x', hiddenCameraStream.videoHeight);
             
             // Garantir que o vídeo está reproduzindo
             hiddenCameraStream.play().then(() => {
-              console.log('Vídeo oculto iniciado com sucesso');
               resolve();
             }).catch((error) => {
               console.error('Erro ao iniciar vídeo oculto:', error);
@@ -648,11 +640,9 @@ const init = () => {
           
           return new Promise((resolve, reject) => {
             hiddenCameraStream.onloadedmetadata = () => {
-              console.log('Câmera inicializada (fallback) - Dimensões:', hiddenCameraStream.videoWidth, 'x', hiddenCameraStream.videoHeight);
               
               // Garantir que o vídeo está reproduzindo
               hiddenCameraStream.play().then(() => {
-                console.log('Vídeo oculto (fallback) iniciado com sucesso');
                 resolve();
               }).catch((error) => {
                 console.error('Erro ao iniciar vídeo oculto (fallback):', error);
@@ -689,9 +679,6 @@ const init = () => {
         return;
       }
       
-      console.log('Capturando foto - Dimensões do vídeo:', video.videoWidth, 'x', video.videoHeight);
-      console.log('ReadyState do vídeo:', video.readyState);
-      
       // Configurar canvas de captura
       const canvas = captureCanvas;
       canvas.width = video.videoWidth;
@@ -711,17 +698,14 @@ const init = () => {
           // Debug: verificar se algo foi desenhado
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const hasContent = imageData.data.some(pixel => pixel !== 0);
-          console.log('Canvas tem conteúdo após drawImage:', hasContent);
           
           // Converter para blob e usar como plano de fundo permanente
           canvas.toBlob((blob) => {
             if (blob && blob.size > 0) {
-              console.log('Foto capturada com sucesso, tamanho:', blob.size, 'bytes');
               
               // Debug: criar uma imagem temporária para verificar o conteúdo
               const testImg = new Image();
               testImg.onload = () => {
-                console.log('Imagem de teste carregada:', testImg.width, 'x', testImg.height);
                 
                 // Se chegou até aqui, a imagem está válida
                 const url = URL.createObjectURL(blob);
@@ -815,7 +799,6 @@ const init = () => {
         };
 
         mediaRecorder.onstop = () => {
-          console.log('MediaRecorder parado, processando vídeo...');
           
           if (recordedChunks.length === 0) {
             console.error('Nenhum dado foi gravado');
@@ -825,14 +808,12 @@ const init = () => {
           
           const mimeType = selectedType || 'video/webm';
           const blob = new Blob(recordedChunks, { type: mimeType });
-          console.log('Vídeo processado, tamanho:', blob.size, 'bytes');
           
           const url = URL.createObjectURL(blob);
           
           // Parar stream de áudio/vídeo da gravação
           stream.getTracks().forEach(track => {
             track.stop();
-            console.log('Track de gravação parada:', track.kind);
           });
           
           // Notificar galeria e aplicar vídeo como fundo
@@ -867,8 +848,6 @@ const init = () => {
         
         // Atualizar UI
         captureButton.classList.add('recording');
-        
-        console.log('Gravação de vídeo iniciada');
       }).catch(error => {
         console.error('Erro ao iniciar gravação:', error);
         showCameraError(error);
@@ -878,7 +857,6 @@ const init = () => {
     // Parar gravação de vídeo
     function stopVideoRecording() {
       if (mediaRecorder && isRecording) {
-        console.log('Parando gravação de vídeo...');
         
         try {
           mediaRecorder.stop();
@@ -892,16 +870,12 @@ const init = () => {
         // Restaurar ícone da câmera
         const icon = captureButton.querySelector('.capture-icon');
         icon.className = 'fas fa-camera capture-icon';
-        
-        console.log('Comando de parada enviado ao MediaRecorder');
       } else {
-        console.log('Nenhuma gravação ativa para parar');
       }
     }
 
     // Definir mídia como plano de fundo
     function setBackgroundMedia(url, type, isPreview = false) {
-      console.log('Definindo mídia como plano de fundo:', type, url, isPreview ? '(preview)' : '(permanente)');
       
       const element = document.createElement(type === 'image' ? 'img' : 'video');
       element.className = 'bg-media';
@@ -914,7 +888,6 @@ const init = () => {
       
       if (type === 'image') {
         element.onload = () => {
-          console.log('Imagem carregada com sucesso:', element.naturalWidth, 'x', element.naturalHeight);
         };
         
         element.onerror = (error) => {
@@ -926,7 +899,6 @@ const init = () => {
         element.muted = true;
         
         element.addEventListener('loadedmetadata', () => {
-          console.log('Vídeo carregado:', element.videoWidth, 'x', element.videoHeight);
           if (element.duration && !isNaN(element.duration)) {
             const limitedDuration = Math.min(60, element.duration);
             vidDur.value = limitedDuration.toFixed(1);
@@ -937,7 +909,6 @@ const init = () => {
       
       // Remover elemento anterior
       if (bgEl) {
-        console.log('Removendo elemento de fundo anterior');
         editor.removeChild(bgEl);
         
         // Se o anterior era um preview, limpar adequadamente
@@ -954,7 +925,6 @@ const init = () => {
       
       bgEl = element;
       editor.insertBefore(bgEl, editor.firstChild);
-      console.log('Elemento de fundo adicionado ao editor');
       
       // Redesenhar a grade para garantir que fique visível
       setTimeout(refreshGrid, 100);
@@ -1017,7 +987,7 @@ const init = () => {
       
       box.innerText = text || 'Digite seu texto';
       applyTextStyle(box); applyTextBg(box);
-      addHandles(box); attachDrag(box);
+      attachDrag(box);
       editor.appendChild(box); selectItem(box); startEditingText(box);
     }
   
@@ -1046,7 +1016,6 @@ const init = () => {
         wrapper.style.width = w + 'px';
         wrapper.style.height = h + 'px';
         
-        addHandles(wrapper);
         attachDrag(wrapper);
         // Forçar seleção após um pequeno delay para garantir que tudo foi renderizado
         setTimeout(() => {
@@ -1065,6 +1034,197 @@ const init = () => {
       el.dataset.rot = String(rot || 0); applyRotation(el);
     }
   
+    // ---------- Overlay de Handles
+    function ensureHandlesOverlay(){
+      if (handlesOverlay) return;
+      handlesOverlay = document.createElement('div');
+      handlesOverlay.id = 'handlesOverlay';
+      handlesOverlay.style.position = 'absolute';
+      handlesOverlay.style.inset = '0';
+      handlesOverlay.style.pointerEvents = 'none';
+      handlesOverlay.style.zIndex = '9999';
+      editorViewport.appendChild(handlesOverlay);
+
+      const dirs = ['nw','n','ne','e','se','s','sw','w'];
+      overlayHandles = {};
+      dirs.forEach(dir => {
+        const h = document.createElement('div');
+        h.className = `handle h-${dir}`;
+        h.dataset.dir = dir;
+        h.style.position = 'absolute';
+        h.style.transform = 'translate(-50%, -50%)';
+        h.style.pointerEvents = 'auto';
+        handlesOverlay.appendChild(h);
+        overlayHandles[dir] = h;
+
+        h.addEventListener('pointerdown', e=>{
+          if (!selected) return;
+          e.stopPropagation(); e.preventDefault();
+          h.setPointerCapture(e.pointerId);
+          const { width, height } = getElementSize(selected);
+          const startLeft = parseFloat(selected.style.left || '0');
+          const startTop = parseFloat(selected.style.top || '0');
+          document.body.classList.add('is-resizing');
+          resizeState = {
+            corner: dir,
+            startWidth: width,
+            startHeight: height,
+            startLeft,
+            startTop,
+            startX: e.clientX,
+            startY: e.clientY,
+            keepRatio: selected.dataset.type === 'image' || e.shiftKey
+          };
+        });
+        h.addEventListener('pointermove', e=>{
+          if (!resizeState) return;
+          const el = selected; if (!el) return;
+          const dx = (e.clientX - resizeState.startX) / currentScale;
+          const dy = (e.clientY - resizeState.startY) / currentScale;
+          let w = resizeState.startWidth;
+          let hVal = resizeState.startHeight;
+          let left = resizeState.startLeft;
+          let top = resizeState.startTop;
+          const corner = resizeState.corner;
+
+          if (corner.includes('e')) { w = resizeState.startWidth + dx; }
+          if (corner.includes('s')) { hVal = resizeState.startHeight + dy; }
+          if (corner.includes('w')) { w = resizeState.startWidth - dx; left = resizeState.startLeft + (resizeState.startWidth - w); }
+          if (corner.includes('n')) { hVal = resizeState.startHeight - dy; top = resizeState.startTop + (resizeState.startHeight - hVal); }
+
+          if (resizeState.keepRatio) {
+            const ratio = resizeState.startWidth / (resizeState.startHeight || 1);
+            if (corner.includes('w') || corner.includes('e')) {
+              hVal = w / ratio;
+              if (corner.includes('n')) top = resizeState.startTop + (resizeState.startHeight - hVal);
+            } else {
+              w = hVal * ratio;
+              if (corner.includes('w')) left = resizeState.startLeft + (resizeState.startWidth - w);
+            }
+          }
+
+          w = Math.max(20, Math.min(w, BASE_W));
+          hVal = Math.max(20, Math.min(hVal, BASE_H));
+          left = Math.max(0, Math.min(left, BASE_W - w));
+          top = Math.max(0, Math.min(top, BASE_H - hVal));
+
+          el.style.left = `${left}px`;
+          el.style.top = `${top}px`;
+          el.style.width = `${w}px`;
+          el.style.height = `${hVal}px`;
+
+          // Seguir o elemento
+          positionHandlesFor(el);
+        });
+        h.addEventListener('pointerup', ()=>{ resizeState = null; document.body.classList.remove('is-resizing'); });
+      });
+
+      // Handle de rotação
+      const rot = document.createElement('div');
+      rot.className = 'handle h-rot';
+      rot.dataset.dir = 'rot';
+      rot.style.position = 'absolute';
+      rot.style.transform = 'translate(-50%, -50%)';
+      rot.style.pointerEvents = 'auto';
+      rot.setAttribute('aria-label', 'Rotacionar');
+      handlesOverlay.appendChild(rot);
+      overlayHandles['rot'] = rot;
+
+      rot.addEventListener('pointerdown', e=>{
+        if (!selected) return;
+        e.stopPropagation(); e.preventDefault();
+        rot.setPointerCapture(e.pointerId);
+        document.body.classList.add('is-rotating');
+        const viewportRect = editorViewport.getBoundingClientRect();
+        const rect = selected.getBoundingClientRect();
+        rotateState = {
+          cx: rect.left - viewportRect.left + rect.width/2,
+          cy: rect.top - viewportRect.top + rect.height/2
+        };
+      });
+      rot.addEventListener('pointermove', e=>{
+        if(!rotateState) return;
+        const el = selected; if (!el) return;
+        const viewportRect = editorViewport.getBoundingClientRect();
+        const mx = e.clientX - viewportRect.left;
+        const my = e.clientY - viewportRect.top;
+        const deg = Math.atan2(my-rotateState.cy, mx-rotateState.cx) * 180/Math.PI + 90;
+
+        const snapAngle = 15;
+        const snappedDeg = Math.round(deg / snapAngle) * snapAngle;
+        const finalDeg = ((snappedDeg % 360) + 360) % 360;
+
+        el.dataset.rot = String(finalDeg);
+        applyRotation(el);
+        selected = el;
+        positionHandlesFor(el);
+      });
+      rot.addEventListener('pointerup', ()=>{ rotateState=null; document.body.classList.remove('is-rotating'); });
+    }
+
+    function positionHandlesFor(el){
+      if (!handlesOverlay || !el) return;
+      const viewportRect = editorViewport.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
+      const left = rect.left - viewportRect.left;
+      const top = rect.top - viewportRect.top;
+      const w = rect.width;
+      const h = rect.height;
+      const midX = left + w/2;
+      const midY = top + h/2;
+
+      const pos = {
+        nw: [left, top],
+        n: [midX, top],
+        ne: [left + w, top],
+        e: [left + w, midY],
+        se: [left + w, top + h],
+        s: [midX, top + h],
+        sw: [left, top + h],
+        w: [left, midY],
+        rot: [midX, top - (28 * currentScale)]
+      };
+      Object.entries(pos).forEach(([dir, [x,y]]) => {
+        const h = overlayHandles[dir]; if (!h) return;
+        h.style.left = `${x}px`;
+        h.style.top = `${y}px`;
+      });
+      handlesOverlay.style.display = '';
+    }
+
+    function hideHandlesOverlay(){ if (handlesOverlay) handlesOverlay.style.display = 'none'; }
+
+    // ---------- Loader Overlay
+    function ensureEditorLoader(){
+      if (editorLoader) return;
+      editorLoader = document.createElement('div');
+      editorLoader.className = 'editor-loader';
+      const panel = document.createElement('div');
+      panel.className = 'panel';
+      const sp = document.createElement('div'); sp.className = 'spinner';
+      const tx = document.createElement('div'); tx.className = 'text'; tx.textContent = 'Processando...';
+      panel.appendChild(sp); panel.appendChild(tx);
+      editorLoader.appendChild(panel);
+      editorViewport.appendChild(editorLoader);
+    }
+    function showEditorLoader(msg){
+      ensureEditorLoader();
+      const tx = editorLoader.querySelector('.text');
+      if (tx) tx.textContent = msg || 'Processando...';
+      editorLoader.style.display = 'flex';
+      try { editorViewport.setAttribute('aria-busy', 'true'); } catch(_) {}
+    }
+    function updateEditorLoader(msg){
+      if (!editorLoader) return;
+      const tx = editorLoader.querySelector('.text');
+      if (tx && msg) tx.textContent = msg;
+    }
+    function hideEditorLoader(){
+      if (!editorLoader) return;
+      editorLoader.style.display = 'none';
+      try { editorViewport.removeAttribute('aria-busy'); } catch(_) {}
+    }
+
     // ---------- Seleção
     editor.addEventListener('pointerdown', e=>{
       const it = e.target.closest('.item');
@@ -1080,22 +1240,13 @@ const init = () => {
       if (selected) {
         selected.classList.remove('selected');
         // Esconder handles do item anterior
-        selected.querySelectorAll('.handle').forEach(handle => {
-          handle.style.setProperty('display', 'none', 'important');
-        });
+        hideHandlesOverlay();
       }
       selected = el;
       if (selected){
         selected.classList.add('selected');
-        // Forçar exibição dos handles via JavaScript com !important
-        selected.querySelectorAll('.handle').forEach(handle => {
-          handle.style.setProperty('display', 'block', 'important');
-          handle.style.setProperty('background', 'red', 'important');
-          handle.style.setProperty('width', '40px', 'important');
-          handle.style.setProperty('height', '40px', 'important');
-          handle.style.setProperty('z-index', '9999', 'important');
-          console.log('Handle:', handle, 'Computed style:', getComputedStyle(handle));
-        });
+        ensureHandlesOverlay();
+        positionHandlesFor(selected);
         itemBar.style.display='';
         const isText = selected.dataset.type==='text';
         textControls.style.display = isText ? 'flex' : 'none';
@@ -1127,6 +1278,7 @@ const init = () => {
         textControls.style.display = 'none';
         btnEditText.style.display = 'none';
         btnEditText.textContent = 'Editar';
+        hideHandlesOverlay();
       }
     }
 
@@ -1262,118 +1414,7 @@ const init = () => {
     animDur.addEventListener('change', ()=>{ if(!selected) return; selected.dataset.dur=animDur.value; });
   
     // ---------- Handles (resize + rotate)
-    function addHandles(el){
-      // Remover handles existentes primeiro
-      el.querySelectorAll('.handle').forEach(h => h.remove());
-      
-      ['nw','ne','sw','se'].forEach(c=>{
-        const h = document.createElement('div');
-        h.className = `handle h-${c}`;
-        el.appendChild(h);
-        h.addEventListener('pointerdown', e=>{
-          e.stopPropagation(); e.preventDefault(); h.setPointerCapture(e.pointerId);
-          const { width, height } = getElementSize(el);
-          const startLeft = parseFloat(el.style.left || '0');
-          const startTop = parseFloat(el.style.top || '0');
-          document.body.classList.add('is-resizing');
-          resizeState = {
-            corner: c,
-            startWidth: width,
-            startHeight: height,
-            startLeft,
-            startTop,
-            startX: e.clientX,
-            startY: e.clientY,
-            keepRatio: el.dataset.type === 'image' || e.shiftKey
-          };
-        });
-        h.addEventListener('pointermove', e=>{
-          if (!resizeState) return;
-          const dx = (e.clientX - resizeState.startX) / currentScale;
-          const dy = (e.clientY - resizeState.startY) / currentScale;
-          let w = resizeState.startWidth;
-          let hVal = resizeState.startHeight;
-          let left = resizeState.startLeft;
-          let top = resizeState.startTop;
-          const corner = resizeState.corner;
-
-          if (corner.includes('e')) {
-            w = resizeState.startWidth + dx;
-          }
-          if (corner.includes('s')) {
-            hVal = resizeState.startHeight + dy;
-          }
-          if (corner.includes('w')) {
-            w = resizeState.startWidth - dx;
-            left = resizeState.startLeft + (resizeState.startWidth - w);
-          }
-          if (corner.includes('n')) {
-            hVal = resizeState.startHeight - dy;
-            top = resizeState.startTop + (resizeState.startHeight - hVal);
-          }
-
-          if (resizeState.keepRatio) {
-            const ratio = resizeState.startWidth / (resizeState.startHeight || 1);
-            if (corner.includes('w') || corner.includes('e')) {
-              hVal = w / ratio;
-              if (corner.includes('n')) {
-                top = resizeState.startTop + (resizeState.startHeight - hVal);
-              }
-            } else {
-              w = hVal * ratio;
-              if (corner.includes('w')) {
-                left = resizeState.startLeft + (resizeState.startWidth - w);
-              }
-            }
-          }
-
-          // Limites para manter elementos dentro do canvas
-          w = Math.max(20, Math.min(w, BASE_W));
-          hVal = Math.max(20, Math.min(hVal, BASE_H));
-          
-          // Ajustar posição se o elemento sair dos limites após redimensionamento
-          left = Math.max(0, Math.min(left, BASE_W - w));
-          top = Math.max(0, Math.min(top, BASE_H - hVal));
-
-          el.style.left = `${left}px`;
-          el.style.top = `${top}px`;
-          el.style.width = `${w}px`;
-          el.style.height = `${hVal}px`;
-        });
-        h.addEventListener('pointerup', ()=>{ resizeState = null; document.body.classList.remove('is-resizing'); });
-      });
-
-      const rot = document.createElement('div');
-      rot.className = 'handle h-rot';
-      el.appendChild(rot);
-      rot.addEventListener('pointerdown', e=>{
-        e.stopPropagation(); e.preventDefault(); rot.setPointerCapture(e.pointerId);
-        document.body.classList.add('is-rotating');
-        const viewportRect = editorViewport.getBoundingClientRect();
-        const rect = el.getBoundingClientRect();
-        rotateState = {
-          cx: rect.left - viewportRect.left + rect.width/2,
-          cy: rect.top - viewportRect.top + rect.height/2
-        };
-      });
-      rot.addEventListener('pointermove', e=>{
-        if(!rotateState) return;
-        const viewportRect = editorViewport.getBoundingClientRect();
-        const mx = e.clientX - viewportRect.left;
-        const my = e.clientY - viewportRect.top;
-        const deg = Math.atan2(my-rotateState.cy, mx-rotateState.cx) * 180/Math.PI + 90;
-        
-        // Snap para ângulos padrão (a cada 15 graus)
-        const snapAngle = 15;
-        const snappedDeg = Math.round(deg / snapAngle) * snapAngle;
-        const finalDeg = ((snappedDeg % 360) + 360) % 360;
-        
-        el.dataset.rot = String(finalDeg);
-        applyRotation(el);
-        selected = el;
-      });
-      rot.addEventListener('pointerup', ()=>{ rotateState=null; document.body.classList.remove('is-rotating'); });
-    }
+    function addHandles(el){ /* migrou para overlay */ }
     function applyRotation(el){ 
       el.style.transform = `rotate(${el.dataset.rot || 0}deg)`;
       el.style.transformOrigin = 'center center';
@@ -1429,18 +1470,16 @@ const init = () => {
 
         el.style.left = `${nx}px`;
         el.style.top = `${ny}px`;
+        if (selected === el) positionHandlesFor(el);
       });
       el.addEventListener('pointerup', ()=>{ dragState=null; showGuides(false); });
     }
-    function showGuides(x=false,y=false){ 
-      console.log('Mostrando guias:', { x, y });
+    function showGuides(x=false,y=false){
       if (guideX) {
         guideX.style.display = x ? 'block' : 'none';
-        if (x) console.log('Guia X ativado');
       }
       if (guideY) {
         guideY.style.display = y ? 'block' : 'none';
-        if (y) console.log('Guia Y ativado');
       }
     }
   
@@ -1578,6 +1617,8 @@ const init = () => {
         btnEnviar.querySelector('.enviar-icon').className = 'fas fa-spinner fa-spin enviar-icon';
         btnEnviar.querySelector('.enviar-text').textContent = 'Salvando...';
 
+        // Loader: geração local
+        showEditorLoader('Gerando imagem...');
         // Renderizar frame
         await renderFrame();
         
@@ -1588,11 +1629,8 @@ const init = () => {
 
         // Se o arquivo ainda for muito grande, redimensionar
         if (blob.size > 2 * 1024 * 1024) { // Se maior que 2MB
-          console.log(`Imagem muito grande (${(blob.size / 1024 / 1024).toFixed(2)}MB), redimensionando...`);
           blob = await compressImage(outCanvas, 0.7, 1024); // Reduzir para max 1024px
         }
-
-        console.log(`Tamanho final da imagem: ${(blob.size / 1024 / 1024).toFixed(2)}MB`);
 
         // Obter dados do usuário atual do contexto global
         const userData = window.currentUserData || { id: 1, tt: 'Usuário Teste' };
@@ -1611,6 +1649,7 @@ const init = () => {
         formData.append('business', businessId);
 
         // Enviar para servidor
+        updateEditorLoader('Enviando imagem...');
         const response = await fetch('/app/save_post.php', {
           method: 'POST',
           body: formData
@@ -1623,7 +1662,6 @@ const init = () => {
         }
 
         const responseText = await response.text();
-        console.log('Resposta do servidor (imagem):', responseText);
         
         let result;
         try {
@@ -1639,7 +1677,6 @@ const init = () => {
           } else {
             alert('Imagem salva com sucesso!');
           }
-          console.log('Post criado com ID:', result.postId);
         } else {
           throw new Error(result.error || 'Erro desconhecido');
         }
@@ -1658,11 +1695,15 @@ const init = () => {
         btnEnviar.classList.remove('exporting');
         btnEnviar.querySelector('.enviar-icon').className = 'fas fa-paper-plane enviar-icon';
         btnEnviar.querySelector('.enviar-text').textContent = 'Enviar';
+        hideEditorLoader();
+        isSaving = false;
       }
     }
 
     async function exportAndSaveVideo() {
+      if (isSaving) return; isSaving = true;
       try {
+        showEditorLoader('Processando vídeo...');
         // Desabilitar botão e mostrar progresso
         btnEnviar.disabled = true;
         btnEnviar.classList.add('exporting');
@@ -1695,6 +1736,7 @@ const init = () => {
         btnEnviar.querySelector('.enviar-text').textContent = 'Salvando vídeo...';
 
         // Enviar para servidor
+        updateEditorLoader('Enviando vídeo...');
         const response = await fetch('/app/save_post.php', {
           method: 'POST',
           body: formData
@@ -1707,7 +1749,6 @@ const init = () => {
         }
 
         const responseText = await response.text();
-        console.log('Resposta do servidor (vídeo):', responseText);
         
         let result;
         try {
@@ -1723,7 +1764,6 @@ const init = () => {
           } else {
             alert('Vídeo salvo com sucesso!');
           }
-          console.log('Post criado com ID:', result.postId);
         } else {
           throw new Error(result.error || 'Erro desconhecido');
         }
@@ -1742,6 +1782,8 @@ const init = () => {
         btnEnviar.classList.remove('exporting');
         btnEnviar.querySelector('.enviar-icon').className = 'fas fa-paper-plane enviar-icon';
         btnEnviar.querySelector('.enviar-text').textContent = 'Enviar';
+        hideEditorLoader();
+        isSaving = false;
       }
     }
 
@@ -1759,8 +1801,6 @@ const init = () => {
           }
           const dur = Math.max(1, Math.min(60, targetDur));
           const totalFrames = Math.round(fps*dur);
-          
-          console.log(`Exportando vídeo como blob: ${dur}s × ${fps}fps = ${totalFrames} frames`);
       
           // Para vídeos de fundo, configurar reprodução
           let wasOriginallyMuted = null;
@@ -1806,7 +1846,6 @@ const init = () => {
               
               finalStream = new MediaStream([videoTrack, audioTrack]);
             } catch (error) {
-              console.warn('Erro ao capturar áudio, usando apenas vídeo:', error);
               finalStream = canvasStream;
             }
           }
@@ -1846,7 +1885,6 @@ const init = () => {
           
           rec.onstop = () => {
             const blob = new Blob(chunks, {type:'video/webm'});
-            console.log(`Blob de vídeo criado: ${blob.size} bytes`);
             
             // Restaurar estado do vídeo
             if (bgEl && bgEl.tagName === 'VIDEO') {
@@ -1873,7 +1911,6 @@ const init = () => {
             const progress = Math.round((i / totalFrames) * 100);
             
             if (i % 30 === 0) {
-              console.log(`Frame ${i}/${totalFrames} (${currentTime.toFixed(2)}s) - ${progress}%`);
             }
             
             // Renderiza no canvas principal
@@ -1935,10 +1972,8 @@ const init = () => {
         // SEMPRE usar a duração definida na interface para vídeos gravados
         // Isso garante que vídeos com duração "Infinity" sejam exportados corretamente
         const dur = Math.max(1, Number(vidDur.value)||6);
-        console.log(`Usando duração da interface: ${dur}s (vidDur.value = ${vidDur.value})`);
         
         const totalFrames = Math.round(fps*dur);
-        console.log(`Calculando exportação: ${dur}s × ${fps}fps = ${totalFrames} frames`);
     
         // Para vídeos de fundo, configurar reprodução
         if (bgEl && bgEl.tagName === 'VIDEO') {
@@ -1950,13 +1985,11 @@ const init = () => {
           bgEl.muted = false;
           
           bgEl.play();
-          console.log('Vídeo configurado: velocidade normal (1.0x), áudio habilitado para exportação');
           
           // Restaurar estado original após exportação
           setTimeout(() => {
             if (wasOriginallyMuted) {
               bgEl.muted = true;
-              console.log('Áudio do vídeo restaurado para mutado');
             }
           }, (dur + 2) * 1000); // Aguardar exportação terminar + margem
         }
@@ -1966,8 +1999,6 @@ const init = () => {
         btnEnviar.classList.add('exporting');
         btnEnviar.querySelector('.enviar-icon').className = 'fas fa-spinner enviar-icon';
         btnEnviar.querySelector('.enviar-text').textContent = 'Exportando...';
-
-        console.log(`Iniciando exportação: ${totalFrames} frames a ${fps}fps = ${dur}s`);
         
         // Capturar stream do canvas (vídeo)
         const canvasStream = outCanvas.captureStream();
@@ -1989,13 +2020,10 @@ const init = () => {
             const audioTrack = destination.stream.getAudioTracks()[0];
             
             finalStream = new MediaStream([videoTrack, audioTrack]);
-            console.log('Stream combinado criado: vídeo + áudio');
           } catch (error) {
-            console.warn('Erro ao capturar áudio, usando apenas vídeo:', error);
             finalStream = canvasStream;
           }
         } else {
-          console.log('Sem áudio para capturar (vídeo mutado ou não é vídeo)');
         }
         
         // Tentar formatos mais compatíveis para metadados corretos
@@ -2012,7 +2040,6 @@ const init = () => {
         for (const format of formats) {
           if (MediaRecorder.isTypeSupported(format)) {
             selectedFormat = format;
-            console.log('Usando formato de exportação:', format);
             break;
           }
         }
@@ -2028,12 +2055,10 @@ const init = () => {
         rec.ondataavailable = e=>{
           if(e.data.size) {
             chunks.push(e.data);
-            console.log(`Chunk recebido: ${e.data.size} bytes`);
           }
         };
         
         rec.start(100); // Capturar dados a cada 100ms
-        console.log('MediaRecorder iniciado com controle manual de timing');
     
         const frameInterval = 1000 / fps; // Intervalo entre frames em ms
         
@@ -2043,7 +2068,6 @@ const init = () => {
           
           // Log a cada 30 frames (1 segundo a 30fps)
           if (i % 30 === 0) {
-            console.log(`Frame ${i}/${totalFrames} (${currentTime.toFixed(2)}s) - ${progress}%`);
           }
           
           // Atualizar progresso no botão
@@ -2064,32 +2088,22 @@ const init = () => {
         }
         
         const actualExportTime = (Date.now() - recordingStartTime) / 1000;
-        console.log(`Exportação concluída em ${actualExportTime.toFixed(2)}s reais`);
         
         rec.stop();
         rec.onstop = ()=>{
-          console.log(`MediaRecorder parado. Total de chunks: ${chunks.length}`);
           const totalSize = chunks.reduce((sum, chunk) => sum + chunk.size, 0);
-          console.log(`Tamanho total do vídeo: ${totalSize} bytes`);
           
           const blob = new Blob(chunks, {type:'video/webm'});
-          console.log(`Blob final criado: ${blob.size} bytes`);
           
           // Criar um vídeo temporário para verificar a duração
           const tempVideo = document.createElement('video');
           tempVideo.src = URL.createObjectURL(blob);
           tempVideo.addEventListener('loadedmetadata', () => {
             const videoDuration = tempVideo.duration;
-            console.log(`Duração do vídeo exportado: ${videoDuration}s`);
-            console.log(`Duração esperada: ${dur}s`);
             
             if (!isFinite(videoDuration) || isNaN(videoDuration)) {
-              console.warn(`AVISO: Duração inválida (${videoDuration}). Isso pode ser um problema do formato WebM.`);
-              console.log('Sugestão: O vídeo pode reproduzir corretamente mesmo com metadados inválidos.');
             } else if (Math.abs(videoDuration - dur) > 0.5) {
-              console.warn(`AVISO: Duração incorreta! Esperado: ${dur}s, Obtido: ${videoDuration}s`);
             } else {
-              console.log('✅ Duração do vídeo exportado está correta!');
             }
           });
           
@@ -2327,7 +2341,7 @@ const init = () => {
           box.dataset.anim=it.anim||'none'; box.dataset.delay=String(it.delay||0); box.dataset.dur=String(it.dur||0.8);
           box.addEventListener('blur', handleTextBlur);
           placeDefaults(box, it.left, it.top, it.width, it.height, it.rot||0); box.style.zIndex = String(it.z||0);
-          box.innerText = it.text||''; addHandles(box); attachDrag(box); editor.appendChild(box);
+          box.innerText = it.text||''; attachDrag(box); editor.appendChild(box);
           applyTextStyle(box); applyTextBg(box);
         } else if (it.type==='image'){
           const wrapper = document.createElement('div');
@@ -2343,7 +2357,6 @@ const init = () => {
           img.onload = ()=>{
             placeDefaults(wrapper, it.left, it.top, it.width, it.height, it.rot||0);
             wrapper.style.zIndex=String(it.z||0);
-            addHandles(wrapper);
             attachDrag(wrapper);
           };
           img.src = it.src;
@@ -2380,7 +2393,10 @@ const init = () => {
         serialize: () => { try { return serializeLayout(); } catch(_) { return { items: [] }; } },
         load: (data) => { try { return loadLayout(data||{ items: [] }); } catch(_){} },
         renderFrame: async () => { try { await renderFrame(); } catch(_){} },
-        exportVideoBlob: async () => { try { return await exportVideoToBlob(); } catch(_) { return null; } }
+        exportVideoBlob: async () => { try { return await exportVideoToBlob(); } catch(_) { return null; } },
+        showLoader: (msg) => { try { showEditorLoader(msg || 'Processando...'); } catch(_){} },
+        updateLoader: (msg) => { try { updateEditorLoader(msg); } catch(_){} },
+        hideLoader: () => { try { hideEditorLoader(); } catch(_){} }
       };
     } catch(_) {}
 };
@@ -2390,6 +2406,3 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-
-
-
