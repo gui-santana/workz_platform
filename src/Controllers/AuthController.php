@@ -84,15 +84,36 @@ class AuthController
             if ($user && ($user['provider'] === '' || $user['provider'] === null)) {
                 $user['provider'] = 'microsoft';
                 $this->generalModel->update('workz_data', 'hus', ['provider' => $user['provider']], ['id' => $user['id']]);
+                // If the user has no profile image yet, try to fetch it from Microsoft Graph
+                if (empty($user['im'])) {
+                    $photo = $this->fetchMicrosoftProfilePhoto($token->getToken());
+                    if ($photo !== null) {
+                        [$bytes, $ctype] = $photo;
+                        $saved = $this->saveProfileImageBytes($bytes, $ctype);
+                        if ($saved) {
+                            $this->generalModel->update('workz_data', 'hus', ['im' => $saved], ['id' => $user['id']]);
+                            $user['im'] = $saved;
+                        }
+                    }
+                }
             }
 
             if (!$user) {
+                // New user: try to download profile photo
+                $savedIm = null;
+                $photo = $this->fetchMicrosoftProfilePhoto($token->getToken());
+                if ($photo !== null) {
+                    [$bytes, $ctype] = $photo;
+                    $savedIm = $this->saveProfileImageBytes($bytes, $ctype);
+                }
+
                 $newUserId = $this->generalModel->insert('workz_data','hus', [                    
                     'tt' => $name,
                     'ml' => $email,                    
                     'dt' => date('Y-m-d H:i:s'),                    
                     'pd' => $microsoftUser->getId(),
-                    'provider' => 'microsoft'
+                    'provider' => 'microsoft',
+                    'im' => $savedIm
                 ]);
                 $user = $this->generalModel->search('workz_data', 'hus', ['*'], ['id' => $newUserId], false);
             }
@@ -141,14 +162,37 @@ class AuthController
             $user = $this->generalModel->search('workz_data', 'hus', ['*'], ['ml' => $googleUser->getEmail()], false);
 
             if (!$user) {
+                // Get Google profile picture
+                $gArr = is_object($googleUser) ? $googleUser->toArray() : [];
+                $avatarUrl = null;
+                if (is_object($googleUser) && method_exists($googleUser, 'getAvatar')) { $avatarUrl = $googleUser->getAvatar(); }
+                if (!$avatarUrl && is_array($gArr)) { $avatarUrl = $gArr['picture'] ?? null; }
+                $savedIm = $avatarUrl ? $this->saveProfileImageFromUrl($avatarUrl) : null;
+
                 $newUserId = $this->generalModel->insert('workz_data','hus', [                    
                     'tt' => $googleUser->getName(),
                     'ml' => $googleUser->getEmail(),                    
                     'dt' => date('Y-m-d H:i:s'),                    
                     'pd' => $googleUser->getId(),
-                    'provider' => 'google'
+                    'provider' => 'google',
+                    'im' => $savedIm
                 ]);
                 $user = $this->generalModel->search('workz_data', 'hus', ['*'], ['id' => $newUserId], false);
+            } else {
+                // Update missing profile picture
+                if (empty($user['im'])) {
+                    $gArr = is_object($googleUser) ? $googleUser->toArray() : [];
+                    $avatarUrl = null;
+                    if (is_object($googleUser) && method_exists($googleUser, 'getAvatar')) { $avatarUrl = $googleUser->getAvatar(); }
+                    if (!$avatarUrl && is_array($gArr)) { $avatarUrl = $gArr['picture'] ?? null; }
+                    if ($avatarUrl) {
+                        $saved = $this->saveProfileImageFromUrl($avatarUrl);
+                        if ($saved) {
+                            $this->generalModel->update('workz_data','hus', ['im' => $saved], ['id' => $user['id']]);
+                            $user['im'] = $saved;
+                        }
+                    }
+                }
             }
             
             // O método generateAndSendToken redireciona para o frontend.
@@ -315,6 +359,104 @@ class AuthController
     public function isValidPassword($password) {
         $regex = '/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&.#])[A-Za-z\d@$!%*?&.#]{8,}$/';
         return preg_match($regex, $password);
+    }
+
+    // ===============================
+    // Social avatar helpers
+    // ===============================
+    private function imagesUsersDir(): string
+    {
+        $rootDir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . 'images' . DIRECTORY_SEPARATOR . 'users';
+        if (!is_dir($rootDir)) { @mkdir($rootDir, 0755, true); }
+        return $rootDir;
+    }
+
+    private function extFromContentType(string $ctype): string
+    {
+        $map = [
+            'image/jpeg' => 'jpg',
+            'image/jpg'  => 'jpg',
+            'image/png'  => 'png',
+            'image/webp' => 'webp'
+        ];
+        $lc = strtolower(trim($ctype));
+        return $map[$lc] ?? 'jpg';
+    }
+
+    private function saveProfileImageBytes(string $bytes, string $contentType = 'image/jpeg'): ?string
+    {
+        if ($bytes === '') return null;
+        $dir = $this->imagesUsersDir();
+        $ext = $this->extFromContentType($contentType);
+        $name = 'people_' . uniqid('', true) . '.' . $ext;
+        $path = $dir . DIRECTORY_SEPARATOR . $name;
+        if (@file_put_contents($path, $bytes) === false) { return null; }
+        return '/images/users/' . $name;
+    }
+
+    private function saveProfileImageFromUrl(string $url): ?string
+    {
+        if (!$url) return null;
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HEADER => true,
+            ]);
+            $resp = curl_exec($ch);
+            if ($resp === false) { curl_close($ch); return null; }
+            $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+            $ctype = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: 'image/jpeg';
+            $body = substr($resp, (int)$headerSize);
+            curl_close($ch);
+            return $this->saveProfileImageBytes($body, $ctype);
+        }
+        // Fallback
+        $context = stream_context_create(['http' => ['timeout' => 15]]);
+        $body = @file_get_contents($url, false, $context);
+        if ($body === false) return null;
+        // Content-type unknown in fallback, default jpg
+        return $this->saveProfileImageBytes($body, 'image/jpeg');
+    }
+
+    private function fetchMicrosoftProfilePhoto(string $accessToken): ?array
+    {
+        if (!$accessToken) return null;
+        $url = 'https://graph.microsoft.com/v1.0/me/photo/$value';
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HTTPHEADER => [ 'Authorization: Bearer ' . $accessToken ]
+            ]);
+            $body = curl_exec($ch);
+            if ($body === false) { curl_close($ch); return null; }
+            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $ctype = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: 'image/jpeg';
+            curl_close($ch);
+            if ($code >= 200 && $code < 300 && !empty($body)) {
+                return [$body, $ctype];
+            }
+            return null;
+        }
+        // Fallback
+        $opts = [
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 15,
+                'header' => 'Authorization: Bearer ' . $accessToken
+            ]
+        ];
+        $context = stream_context_create($opts);
+        $body = @file_get_contents($url, false, $context);
+        if ($body === false) return null;
+        return [$body, 'image/jpeg'];
     }
 
 }

@@ -1,7 +1,4 @@
-# docker-compose.yml
-
 services:
-  # Serviço do Servidor Web Nginx
   nginx:
     image: nginx:alpine
     container_name: workz_platform_nginx
@@ -11,64 +8,68 @@ services:
       - ./:/var/www/html
       - ./.docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
       - ./.docker/nginx/fastcgi_params:/etc/nginx/fastcgi_params
-    depends_on: # <-- Simplificado
+    depends_on:
       - php-fpm
       - mysql
     networks:
       - workz-network
 
-  # Serviço do PHP-FPM
   php-fpm:
     build:
       context: ./.docker/php
     container_name: workz_platform_php
-    depends_on: # <-- Simplificado
+    depends_on:
       - mysql
     volumes:
       - ./:/var/www/html
     networks:
       - workz-network
 
-  # Serviço do Banco de Dados MySQL
   mysql:
     image: mysql:8.0
     container_name: workz_platform_mysql
     platform: linux/amd64
     restart: unless-stopped
-    tty: true
-    ports:
-      - "3400:3306"
+    command: --default-authentication-plugin=mysql_native_password
     environment:
-      #MYSQL_DATABASE: workz_platform_db
-      #MYSQL_USER: user
-      #MYSQL_PASSWORD: password
       MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: workz_platform_db
+      MYSQL_USER: workz
+      MYSQL_PASSWORD: workzpass
+      TZ: America/Sao_Paulo
+    ports:
+      - "3400:3306"    # opcional
     volumes:
       - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -proot_password || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
     networks:
       - workz-network
-    # A seção 'healthcheck' foi completamente removida para evitar o erro.
 
   phpmyadmin:
-    image: phpmyadmin:latest
+    image: phpmyadmin/phpmyadmin:latest
     container_name: workz_platform_phpmyadmin
     restart: unless-stopped
     ports:
-      - "8081:80"  # Você poderá acessar via http://localhost:8081
+      - "8081:80"
     environment:
       PMA_HOST: mysql
       PMA_USER: root
       PMA_PASSWORD: root_password
-      UPLOAD_LIMIT: 264M  # <-- aumenta o limite de upload
+      UPLOAD_LIMIT: 256M
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     networks:
       - workz-network
 
-# Define a rede customizada que será compartilhada entre os serviços
 networks:
   workz-network:
     driver: bridge
 
 volumes:
-  db_data:
+  db_data: {}
