@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tasks App (Embed)</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
+    <style>
+      body { padding: .5rem; }
+      pre { background:#f7f7f7; padding: .5rem; border-radius: .5rem; }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <h3>Tasks (Embed)</h3>
+      <p>Recebe token via query (?token=...) ou via handshake do host.</p>
+      <article>
+        <button id="btn-me">Chamar /api/me</button>
+        <pre id="out">Carregando...</pre>
+      </article>
+
+      <article>
+        <header><strong>Suas tarefas</strong></header>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="task-title" type="text" placeholder="Nova tarefa..." />
+          <button id="btn-add">Adicionar</button>
+        </div>
+        <ul id="tasks" style="margin-top:.75rem;"></ul>
+      </article>
+    </main>
+
+    <script src="/js/core/workz-sdk.js"></script>
+    <script src="./app.js"></script>
+    <script>
+      (async function(){
+        // Primeiro tenta standalone (query token). Se não houver, usa embed handshake.
+        const okStandalone = await WorkzSDK.init({ mode: 'standalone' });
+        if (!okStandalone || !WorkzSDK.getToken()) {
+          await WorkzSDK.init({ mode: 'embed' });
+        }
+        window.TasksApp && window.TasksApp.bootstrap();
+      })();
+    </script>
+  </body>
+  </html>

@@ -22,6 +22,7 @@ use Workz\Platform\Controllers\GeneralController;
 use Workz\Platform\Controllers\TeamsController;
 use Workz\Platform\Controllers\PostsController;
 use Workz\Platform\Controllers\CompaniesController;
+use Workz\Platform\Controllers\AppsController;
 
 use Workz\Platform\Middleware\AuthMiddleware;
 
@@ -94,6 +95,11 @@ $router->add('POST', '/api/posts', [PostsController::class, 'create'], [AuthMidd
 $router->add('POST', '/api/posts/feed', [PostsController::class, 'feed'], [AuthMiddleware::class, 'handle']);
 // Upload de mídias para posts (imagens/vídeos, múltiplos arquivos)
 $router->add('POST', '/api/posts/media', [PostsController::class, 'uploadMedia'], [AuthMiddleware::class, 'handle']);
+
+// Apps (catálogo, entitlements e SSO)
+$router->add('GET',  '/api/apps/catalog', [AppsController::class, 'catalog']);
+$router->add('GET',  '/api/apps/entitlements', [AppsController::class, 'entitlements'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/apps/sso', [AppsController::class, 'sso'], [AuthMiddleware::class, 'handle']);
 
 // ==================================================
 // DESPACHO DA REQUISIÇÃO

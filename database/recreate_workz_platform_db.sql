@@ -121,31 +121,7 @@ CREATE TABLE IF NOT EXISTS `testimonials` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Depoimentos';
 
 -- 2.7) Tabela: work_history (historico profissional)
-CREATE TABLE IF NOT EXISTS `work_history` (
-  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `us` INT UNSIGNED NOT NULL,
-  `em` INT UNSIGNED NULL DEFAULT NULL,
-  `tt` VARCHAR(150) NOT NULL,
-  `cf` TEXT NULL,
-  `type` VARCHAR(30) NULL,
-  `location` VARCHAR(150) NULL,
-  `start_date` DATE NULL,
-  `end_date` DATE NULL,
-  `visibility` TINYINT(1) NOT NULL DEFAULT 1,
-  `verified` TINYINT(1) NOT NULL DEFAULT 0,
-  `verified_by` INT UNSIGNED NULL DEFAULT NULL,
-  `verified_at` DATETIME NULL DEFAULT NULL,
-  `st` TINYINT(1) NOT NULL DEFAULT 1,
-  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_wh_user` (`us`),
-  KEY `idx_wh_company` (`em`),
-  KEY `idx_wh_status` (`st`),
-  KEY `idx_wh_verified` (`verified`),
-  CONSTRAINT `fk_work_history_us` FOREIGN KEY (`us`) REFERENCES `workz_data`.`hus`(`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_work_history_em` FOREIGN KEY (`em`) REFERENCES `workz_companies`.`companies`(`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- OBS: adiada para após criação de workz_companies.companies (para FK existir)
 
 -- =====================================================
 -- 3) Schema: workz_companies
@@ -254,6 +230,20 @@ CREATE TABLE IF NOT EXISTS `apps` (
   KEY `idx_apps_st` (`st`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Catalogo de aplicativos';
 
+-- Extensões de metadados para apps (idempotentes)
+ALTER TABLE `apps`
+  ADD COLUMN `slug` VARCHAR(60) NULL,
+  ADD COLUMN `src` VARCHAR(255) NULL,
+  ADD COLUMN `embed_url` VARCHAR(255) NULL,
+  ADD COLUMN `color` VARCHAR(16) NULL,
+  ADD COLUMN `ds` TEXT NULL,
+  ADD COLUMN `publisher` VARCHAR(120) NULL,
+  ADD COLUMN `version` VARCHAR(20) NULL,
+  ADD COLUMN `scopes` JSON NULL;
+
+-- Índice único para slug
+CREATE UNIQUE INDEX `uniq_apps_slug` ON `apps` (`slug`);
+
 -- 4.2) Tabela: gapp (instalacoes/assinaturas)
 CREATE TABLE IF NOT EXISTS `gapp` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -274,3 +264,31 @@ CREATE TABLE IF NOT EXISTS `gapp` (
   CONSTRAINT `fk_gapp_us` FOREIGN KEY (`us`) REFERENCES `workz_data`.`hus`(`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_gapp_em` FOREIGN KEY (`em`) REFERENCES `workz_companies`.`companies`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Instalacoes/assinaturas de apps';
+
+-- 2.7) Tabela: work_history (historico profissional) – criada após companies
+USE `workz_data`;
+CREATE TABLE IF NOT EXISTS `work_history` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `us` INT UNSIGNED NOT NULL,
+  `em` INT UNSIGNED NULL DEFAULT NULL,
+  `tt` VARCHAR(150) NOT NULL,
+  `cf` TEXT NULL,
+  `type` VARCHAR(30) NULL,
+  `location` VARCHAR(150) NULL,
+  `start_date` DATE NULL,
+  `end_date` DATE NULL,
+  `visibility` TINYINT(1) NOT NULL DEFAULT 1,
+  `verified` TINYINT(1) NOT NULL DEFAULT 0,
+  `verified_by` INT UNSIGNED NULL DEFAULT NULL,
+  `verified_at` DATETIME NULL DEFAULT NULL,
+  `st` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_wh_user` (`us`),
+  KEY `idx_wh_company` (`em`),
+  KEY `idx_wh_status` (`st`),
+  KEY `idx_wh_verified` (`verified`),
+  CONSTRAINT `fk_work_history_us` FOREIGN KEY (`us`) REFERENCES `workz_data`.`hus`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_work_history_em` FOREIGN KEY (`em`) REFERENCES `workz_companies`.`companies`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

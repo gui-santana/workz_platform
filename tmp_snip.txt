@@ -1,0 +1,42 @@
+        'follow-user': async ({ state, button }) => {
+            const follower = state.user?.id;
+            const followed = state.view?.id;
+            if (!follower || !followed) return;
+            setButtonLoading(button, true, 'Seguindo…');
+            try {
+                const res = await apiClient.post('/insert', { db: 'workz_data', table: 'usg', data: { s0: follower, s1: followed } });
+                if (res && res.status === 'success') {
+                    // Atualiza estado local
+                    const fid = String(followed);
+                    if (Array.isArray(userPeople)) {
+                        if (!userPeople.map(String).includes(fid)) userPeople.push(followed);
+                    } else {
+                        userPeople = [followed];
+                    }
+                    // Troca o botão
+                    const container = document.querySelector('#action-container');
+                    if (container) container.innerHTML = UI.actionButton({ action: 'unfollow-user', label: 'Deixar de Seguir', color: 'red' });
+                    // Ajusta contagem de seguidores da página (se existir)
+                    const cntEl = document.querySelector('#followers-count');
+                    if (cntEl) {
+                        const n = parseInt(cntEl.textContent || '0', 10) || 0;
+                        cntEl.textContent = String(n + 1);
+                    }
+                    notifySuccess('Agora você está seguindo.');
+                }
+            } finally { setButtonLoading(button, false); }
+        },
+        'unfollow-user': async ({ state, button }) => {
+            const follower = state.user?.id;
+            const followed = state.view?.id;
+            if (!follower || !followed) return;
+            setButtonLoading(button, true, 'Removendo…');
+            try {
+                const res = await apiClient.post('/delete', { db: 'workz_data', table: 'usg', conditions: { s0: follower, s1: followed } });
+                if (res && res.status === 'success') {
+                    // Atualiza estado local
+                    const fid = String(followed);
+                    if (Array.isArray(userPeople)) {
+                        userPeople = userPeople.filter(id => String(id) !== fid);
+                    } else {
+                        userPeople = [];

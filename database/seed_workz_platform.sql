@@ -109,11 +109,23 @@ VALUES
   (302,'Workz Analytics','/images/apps/analytics.png',9.90,1,NOW())
 ON DUPLICATE KEY UPDATE `id`=`id`;
 
+-- App de exemplo: Tasks (com novas colunas)
+INSERT INTO `apps` (`id`,`tt`,`im`,`vl`,`st`,`dt`,`slug`,`src`,`embed_url`,`color`,`ds`,`publisher`,`version`)
+VALUES
+  (303,'Tasks','/images/app-default.png',0.00,1,NOW(),'tasks','/apps/tasks/index.html','/apps/tasks/embed.html','#4F46E5','Gerenciador de tarefas simples de exemplo','Workz','0.1.0')
+ON DUPLICATE KEY UPDATE `tt`=VALUES(`tt`), `im`=VALUES(`im`), `slug`=VALUES(`slug`), `src`=VALUES(`src`), `embed_url`=VALUES(`embed_url`), `color`=VALUES(`color`), `ds`=VALUES(`ds`), `publisher`=VALUES(`publisher`), `version`=VALUES(`version`);
+
+-- Loja de Aplicativos (Store) – visível para todos, sem necessidade de instalação
+INSERT INTO `apps` (`id`,`tt`,`im`,`vl`,`st`,`dt`,`slug`,`src`,`embed_url`,`color`,`ds`,`publisher`,`version`)
+VALUES
+  (300,'Loja de Aplicativos','/images/app-default.png',0.00,1,NOW(),'store','/apps/store/index.html','/apps/store/embed.html','#0EA5E9','Loja oficial de aplicativos Workz','Workz','0.1.0')
+ON DUPLICATE KEY UPDATE `tt`=VALUES(`tt`), `im`=VALUES(`im`), `slug`=VALUES(`slug`), `src`=VALUES(`src`), `embed_url`=VALUES(`embed_url`), `color`=VALUES(`color`), `ds`=VALUES(`ds`), `publisher`=VALUES(`publisher`), `version`=VALUES(`version`);
+
 -- Instalações/Assinaturas (gapp)
 INSERT INTO `gapp` (`id`,`us`,`em`,`ap`,`subscription`,`start_date`,`end_date`)
 VALUES
   (321,1,NULL,301,0,NULL,NULL),
   (322,2,NULL,302,1,CURDATE(),NULL),
-  (323,NULL,101,302,1,CURDATE(),NULL)
+  (323,NULL,101,302,1,CURDATE(),NULL),
+  (324,1,NULL,303,0,CURDATE(),NULL)
 ON DUPLICATE KEY UPDATE `id`=`id`;
-

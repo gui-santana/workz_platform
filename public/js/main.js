@@ -53,6 +53,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let feedOffset = 0;
     let feedLoading = false;
     let feedFinished = false;
+    // Observers globais para evitar acúmulo entre navegações
+    let feedObserver = null;
+    let listObserver = null;
 
     const feedUserCache = new Map();
     let feedInteractionsAttached = false;
@@ -62,6 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Evita que cliques internos da sidebar acionem o handler global de fechar
     function installSidebarClickShield() {
         if (!sidebarWrapper) return;
+        if (sidebarWrapper._clickShieldInstalled) return;
         const stopper = (e) => {
             const target = e.target;
             // Permitir apenas cliques em botões/links com data-sidebar-action subirem
@@ -74,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         // Apenas em 'click' e no bubble phase (capture = false),
         // para não bloquear os handlers internos da sidebar
-        try { sidebarWrapper.addEventListener('click', stopper, false); } catch (_) {}
+        try { sidebarWrapper.addEventListener('click', stopper, false); sidebarWrapper._clickShieldInstalled = true; } catch (_) {}
     }
 
 
@@ -121,6 +125,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Delegação para abrir itens de listas (negócios/equipes)
                 if (this.mount._listHandler) this.mount.removeEventListener('click', this.mount._listHandler);
                 const listHandler = async (e) => {
+                    if (this.mount.dataset.currentView === 'apps') {
+                        const storeEl = e.target.closest('#open-app-store');
+                        if (storeEl && this.mount.contains(storeEl)) {
+                            // Abre a loja usando função unificada (sem SSO)
+                            try { await launchAppBySlug('store', { sso: false }); } catch (_) {}
+                            return;
+                        }
+                    }
                     // Pessoas/Negócios/Equipes (data-id) e Aplicativos (data-app-id)
                     const appRow = e.target.closest('[data-app-id]');
                     if (appRow && this.mount.contains(appRow) && this.mount.dataset.currentView === 'apps') {
@@ -150,6 +162,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 this.mount.addEventListener('click', listHandler);
                 this.mount._listHandler = listHandler;
+
+                // Sidebar-scoped actions handler (e.g., create-business/create-team)
+                if (this.mount._actionsHandler) this.mount.removeEventListener('click', this.mount._actionsHandler);
+                const actionsHandler = (e) => {
+                    const btn = e.target.closest('[data-action]');
+                    if (!btn || !this.mount.contains(btn)) return;
+                    const action = btn.dataset.action;
+                    const handler = ACTIONS[action];
+                    if (!handler) return;
+                    e.preventDefault();
+                    try { handler({ event: e, button: btn, state: getState() }); } catch (_) {}
+                };
+                this.mount.addEventListener('click', actionsHandler);
+                this.mount._actionsHandler = actionsHandler;
 
                 // Filtro de busca em Pessoas (live filter)
                 if (this.mount.dataset.currentView === 'people') {
@@ -2330,7 +2356,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dashboard: ` 
             <div id="topbar" class="fixed w-full z-3 content-center">
-                <div class="max-w-screen-xl mx-auto p-7 px-3 xl:px-0 flex items-center justify-between">
+                <div class="max-w-screen-xl mx-auto p-6 xl:px-0 flex items-center justify-between">
                     <a href="/">
                         <!--img class="logo-menu" style="width: 145px; height: 76px;" title="Workz!" src="/images/logos/workz/145x76.png"-->
                     </a>
@@ -2468,22 +2494,65 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `,
 
-        listView: (listItems) => {
-            if (!Array.isArray(listItems) || listItems.length === 0) {
-                return `<div class="col-span-12"><div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Nenhum item encontrado.</div></div>`;
+        listView: (payload = {}) => {
+            // Backward compatibility: previous callers passed an array of items
+            let type = 'people';
+            let items = [];
+            if (Array.isArray(payload)) { items = payload; }
+            else { ({ type = 'people', items = [] } = payload || {}); }
+
+            // Infer type from path when not provided
+            try {
+                if (!payload || Array.isArray(payload) || !payload.type) {
+                    const p = (window.location && window.location.pathname) || '';
+                    if (/^\/people$/.test(p)) type = 'people';
+                    else if (/^\/businesses$/.test(p)) type = 'businesses';
+                    else if (/^\/teams$/.test(p)) type = 'teams';
+                }
+            } catch (_) {}
+
+            const title = type === 'people' ? 'Pessoas' : type === 'teams' ? 'Equipes' : 'Negócios';
+            const icon  = type === 'people' ? 'fas fa-user-friends' : type === 'teams' ? 'fas fa-users' : 'fas fa-briefcase';
+            const searchId = `${type}-search`;
+
+            let html = '';
+            html += '<div class="col-span-12 clearfix grid grid-cols-12 gap-6 mx-6 mt-28">'
+            // Header + search
+            html += `
+            <div class="col-span-12 mb-2">
+                <div class="bg-white p-3 rounded-3xl shadow-lg flex items-center gap-3">
+                    <span class="fa-stack text-gray-200"><i class="fas fa-circle fa-stack-2x"></i><i class="${icon} fa-stack-1x text-gray-700"></i></span>
+                    <h1 class="text-lg font-bold text-gray-800 flex-none">${title}</h1>
+                    <div class="flex-1"></div>
+                    <div class="w-full max-w-md">
+                        <input id="${searchId}" type="search" class="w-full rounded-3xl bg-gray-100 focus:bg-white focus:outline-none px-4 py-2"
+                               placeholder="Pesquisar ${title.toLowerCase()}..." />
+                    </div>
+                    <span id="list-count" class="ml-3 text-sm text-gray-500 whitespace-nowrap"></span>
+                </div>
+            </div>`;
+
+            // Grid list            
+
+            html += '<div id="list-grid" class="col-span-12 flex flex-col grid grid-cols-12 gap-6" style="list-style: none;">';
+
+            if (!Array.isArray(items) || items.length === 0) {
+                html += `<div class="col-span-12"><div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Nenhum item encontrado.</div></div>`;
+            } else {
+                items.forEach(item => {
+                    const name = (item.tt || '');
+                    html += `
+                    <div class="list-item sm:col-span-12 md:col-span-6 lg:col-span-4 flex flex-col bg-white p-3 rounded-3xl shadow-lg bg-gray hover:bg-gray-100 cursor-pointer" style="list-style: none;" data-item-id="${item.id}" data-name="${name.toLowerCase()}">
+                        <div class="flex items-center gap-3">
+                            <img class="w-10 h-10 rounded-full object-cover" src="${resolveImageSrc(item?.im, name, { size: 80 })}" alt="${name}">
+                            <span class="font-semibold truncate">${name}</span>
+                        </div>
+                    </div>`;
+                });
             }
-            let html = '<div class="col-span-12 flex flex-col grid grid-cols-12 gap-6">';
-            listItems.forEach(item => {
-                const name = (item.tt || '');
-                html += `
-                <div class="list-item sm:col-span-12 md:col-span-6 lg:col-span-4 flex flex-col bg-white p-3 rounded-3xl shadow-lg bg-gray hover:bg-gray-100 cursor-pointer" data-item-id="${item.id}" data-name="${name.toLowerCase()}">
-                    <div class="flex items-center gap-3">
-                        <img class="w-10 h-10 rounded-full object-cover" src="${resolveImageSrc(item?.im, name, { size: 80 })}" alt="${name}">
-                        <span class="font-semibold truncate">${name}</span>
-                    </div>                    
-                </div> 
-                `;
-            });
+
+            html += '</div>';
+            html += '<div id="list-sentinel" class="h-10"></div>';
             html += '</div>';
             return html;
         }
@@ -2570,6 +2639,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     templates.appLibrary = async ({ appsList }) => {
         const resolved = Array.isArray(appsList) ? appsList : (appsList ? [appsList] : []);
+        // Store tile (always visible)
+        const storeItem = `
+            <button data-store="1" data-app-name="loja" class="app-item-button group">
+                <div class="app-icon-container">
+                    <img src="/images/app-default.png" alt="Loja de Aplicativos" class="app-icon-image">
+                </div>
+                <span class="app-name">Loja de Aplicativos</span>
+            </button>`;
 
         const appItems = resolved.map(app => `
             <button data-app-id="${app.id}" data-app-name="${(app.tt || 'App').toLowerCase()}" class="app-item-button group">
@@ -2586,7 +2663,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <input type="text" id="app-search-input" placeholder="Buscar aplicativos..." class="app-search-input">
                 </div>
                 <div id="app-grid" class="app-grid">
-                    ${appItems}
+                    ${storeItem}${appItems}
                 </div>
             </div>
         `;
@@ -3385,25 +3462,28 @@ document.addEventListener('DOMContentLoaded', () => {
             const appIds = Array.isArray(userApps?.data) ? userApps.data.map(o => o.ap) : [];
             const apps = await fetchByIds(appIds, 'apps');
             const list = Array.isArray(apps) ? apps : (apps ? [apps] : []);
-            if (!list.length) {
-                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Nenhum aplicativo instalado.</div>`;
-            } else {
-                const searchCardApps = UI.sectionCard(
-                    UI.row('apps-search', 'Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="apps-search" placeholder="Digite para filtrar">`, { top: true, bottom: true })
-                );
-                const rows = list.map(app => {
-                    const img = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 120 });
-                    const name = (app?.tt || 'App');
-                    return `
-                    <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-app-id="${app.id}" data-name="${name.toLowerCase()}">
-                        <div class="col-span-1 p-3 flex justify-center">
-                            <img src="${img}" alt="${name}" class="w-7 h-7 rounded-md" />
-                        </div>
-                        <div class="col-span-5 p-3 truncate">${name}</div>
-                    </div>`;
-                }).join('');
-                html += searchCardApps + UI.sectionCard(`<div id="apps-list">${rows}</div>`);
-            }
+            const searchCardApps = UI.sectionCard(
+                UI.row('apps-search', 'Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="apps-search" placeholder="Digite para filtrar">`, { top: true, bottom: true })
+            );
+            const storeRow = `
+                <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" id="open-app-store" data-name="loja">
+                    <div class="col-span-1 p-3 flex justify-center">
+                        <img src="/images/app-default.png" alt="Loja" class="w-7 h-7 rounded-md" />
+                    </div>
+                    <div class="col-span-5 p-3 truncate">Loja de Aplicativos</div>
+                </div>`;
+            const rows = list.map(app => {
+                const img = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 120 });
+                const name = (app?.tt || 'App');
+                return `
+                <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" data-app-id="${app.id}" data-name="${name.toLowerCase()}">
+                    <div class="col-span-1 p-3 flex justify-center">
+                        <img src="${img}" alt="${name}" class="w-7 h-7 rounded-md" />
+                    </div>
+                    <div class="col-span-5 p-3 truncate">${name}</div>
+                </div>`;
+            }).join('');
+            html += searchCardApps + UI.sectionCard(`<div id="apps-list">${storeRow}${rows}</div>`);
         } else if (view === 'app-settings') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const app = data || {};
@@ -4642,6 +4722,12 @@ document.addEventListener('DOMContentLoaded', () => {
         loadPage();
     }
 
+    // Habilita navegação pelo botão Voltar/Avançar do navegador
+    window.addEventListener('popstate', () => {
+        try { showLoading(); } catch(_) {}
+        try { loadPage(); } catch(_) {}
+    });
+
     // Snapshot simples do estado (facilita roteadores e handlers)
     function getState() {
         return {
@@ -4962,8 +5048,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         },
         // Ações sociais: seguir/desseguir pessoa (tabela workz_data.usg)
-        'follow-user': async ({ state, button }) => {
-            const follower = state.user?.id;
+        'follow-user': async ({ state, button }) => { if (button && button.disabled) return; const follower = state.user?.id;
             const followed = state.view?.id;
             if (!follower || !followed) return;
             setButtonLoading(button, true, 'Seguindo…');
@@ -4990,8 +5075,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } finally { setButtonLoading(button, false); }
         },
-        'unfollow-user': async ({ state, button }) => {
-            const follower = state.user?.id;
+        'unfollow-user': async ({ state, button }) => { if (button && button.disabled) return; const follower = state.user?.id;
             const followed = state.view?.id;
             if (!follower || !followed) return;
             setButtonLoading(button, true, 'Removendo…');
@@ -6282,6 +6366,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function loadPage() {
+        // Ao carregar uma nova página, desconecte qualquer observer de lista restante
+        try { if (listObserver) { listObserver.disconnect(); listObserver = null; } } catch (_) {}
         // Verifica se a URL deve redirecionar a uma página específica
         const path = window.location.pathname;
         const profileMatch = path.match(/^\/profile\/(\d+)$/);
@@ -6339,6 +6425,132 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         };
 
+        // Nova implementação com busca no servidor, paginação e contagem
+        const renderListV2 = async (listType = 'people') => {
+            const entityMap = {
+                people: { db: 'workz_data', table: 'hus', columns: ['id', 'tt', 'im'], url: 'profile/' },
+                teams: { db: 'workz_companies', table: 'teams', columns: ['id', 'tt', 'im', 'em'], url: 'team/' },
+                businesses: { db: 'workz_companies', table: 'companies', columns: ['id', 'tt', 'im'], url: 'business/' }
+            };
+
+            const PAGE_SIZE = 24;
+            const state = { q: '', offset: 0, loading: false, finished: false, total: 0 };
+
+            const approvedBizIds = (Array.isArray(userBusinessesData) ? userBusinessesData : [])
+                .filter(r => Number(r?.st ?? 0) === 1)
+                .map(r => r.em);
+
+            const buildConditions = (q) => {
+                const base = { st: 1 };
+                if (q) base.tt = { op: 'LIKE', value: `%${q}%` };
+                if (listType === 'teams') {
+                    if (approvedBizIds.length) base.em = { op: 'IN', value: approvedBizIds };
+                    else base.em = { op: 'IN', value: [-1] };
+                }
+                return base;
+            };
+
+            async function fetchCount() {
+                const res = await apiClient.post('/count', {
+                    db: entityMap[listType].db,
+                    table: entityMap[listType].table,
+                    conditions: buildConditions(state.q),
+                    distinctCol: 'id'
+                });
+                state.total = Number(res?.count ?? 0) || 0;
+            }
+
+            async function fetchPage() {
+                if (state.loading || state.finished) return [];
+                state.loading = true;
+                const res = await apiClient.post('/search', {
+                    db: entityMap[listType].db,
+                    table: entityMap[listType].table,
+                    columns: entityMap[listType].columns,
+                    conditions: buildConditions(state.q),
+                    order: { by: 'tt', dir: 'ASC' },
+                    fetchAll: true,
+                    limit: PAGE_SIZE,
+                    offset: state.offset
+                });
+                const items = Array.isArray(res?.data) ? res.data : [];
+                if (!items.length) { state.finished = true; }
+                else { state.offset += items.length; }
+                state.loading = false;
+                return items;
+            }
+
+            const itemCardHTML = (item) => {
+                const name = (item.tt || '');
+                const img = resolveImageSrc(item?.im, name, { size: 80 });
+                return `
+                    <div class="list-item sm:col-span-12 md:col-span-6 lg:col-span-4 flex flex-col bg-white p-3 rounded-3xl shadow-lg bg-gray hover:bg-gray-100 cursor-pointer" style="list-style: none;" data-item-id="${item.id}" data-name="${name.toLowerCase()}">
+                        <div class="flex items-center gap-3">
+                            <img class="w-10 h-10 rounded-full object-cover" src="${img}" alt="${name}">
+                            <span class="font-semibold truncate">${name}</span>
+                        </div>
+                    </div>`;
+            };
+
+            await fetchCount();
+            const firstItems = await fetchPage();
+
+            renderTemplate(workzContent, templates.listView, { type: listType, items: firstItems }, async () => {
+                const countEl = document.getElementById('list-count');
+                const searchInput = document.getElementById(`${listType}-search`);
+                const gridEl = document.getElementById('list-grid');
+                const sentinel = document.getElementById('list-sentinel');
+
+                const updateCount = (shown = null) => {
+                    const n = Number(state.total || 0);
+                    const val = n > 0 ? n : (shown != null ? shown : state.offset);
+                    if (countEl) countEl.textContent = `${val} resultados`;
+                };
+                updateCount(firstItems?.length || 0);
+
+                // Navegar ao clicar (delegado no grid)
+                const handler = (e) => {
+                    const item = e.target.closest('.list-item');
+                    if (!item || !gridEl || !gridEl.contains(item)) return;
+                    navigateTo(`/${entityMap[listType].url + item.dataset.itemId}`);
+                };
+                if (gridEl) gridEl.addEventListener('click', handler);
+
+                const reload = async () => {
+                    state.offset = 0; state.finished = false;
+                    await fetchCount();
+                    if (gridEl) gridEl.innerHTML = '';
+                    const fresh = await fetchPage();
+                    if (gridEl && fresh.length) gridEl.insertAdjacentHTML('beforeend', fresh.map(itemCardHTML).join(''));
+                    updateCount(fresh?.length || 0);
+                };
+
+                if (searchInput) {
+                    const onInput = debounce(async () => {
+                        const q = (searchInput.value || '').trim();
+                        if (q === state.q) return;
+                        state.q = q;
+                        await reload();
+                    }, 300);
+                    searchInput.addEventListener('input', onInput);
+                }
+
+                if (sentinel) {
+                    try { if (listObserver) { listObserver.disconnect(); listObserver = null; } } catch(_) {}
+                    listObserver = new IntersectionObserver(async (entries) => {
+                        const [entry] = entries;
+                        if (!entry.isIntersecting) return;
+                        if (state.loading || state.finished) return;
+                        const more = await fetchPage();
+                        if (gridEl && more.length) gridEl.insertAdjacentHTML('beforeend', more.map(itemCardHTML).join(''));
+                    }, { rootMargin: '200px' });
+                    try { listObserver.observe(sentinel); } catch(_) {}
+                }
+
+                hideLoading();
+            });
+        };
+
         memberLevel = null;
         memberStatus = null;
         viewId = null;
@@ -6346,13 +6558,13 @@ document.addEventListener('DOMContentLoaded', () => {
         viewType = null;
 
         if (peopleListMatch) {
-            renderList();
+            renderListV2();
             return;
         } else if (businessListMatch) {
-            renderList('businesses');
+            renderListV2('businesses');
             return;
         } else if (teamsListMatch) {
-            renderList('teams');
+            renderListV2('teams');
             return;
         } else {
             if (profileMatch) {
@@ -6608,11 +6820,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 2) Mapa id->em para consulta rápida
                 const idToEm = new Map((teamRes?.data || []).map(r => [r.id, r.em]));
 
-                // 3) Conjunto de businesses do usuário (compatível com string/number)
+                // 3) Conjunto de businesses aprovados do USUÁRIO LOGADO
+                // Em todo o projeto, só exibimos equipes de negócios dos quais o usuário logado participa
                 const userBusinessSet = new Set(
-                    (results?.businesses || []).map(b =>
-                        String(typeof b === 'object' ? (b.em ?? b.id ?? b) : b)
-                    )
+                    (Array.isArray(userBusinessesData) ? userBusinessesData : [])
+                        .filter(r => Number(r?.st ?? 0) === 1)
+                        .map(r => String(r.em))
                 );
 
                 // 4) Filtre os teams que pertencem a businesses do usuário
@@ -6681,7 +6894,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             editorTriggerEl.hidden = false;
             await renderTemplate(editorTriggerEl, templates['editorTrigger'], currentUserData, () => {
-                document.addEventListener('click', (e) => {
+                try { if (window._mainActionHandler) { document.removeEventListener('click', window._mainActionHandler); } } catch(_) {}
+                const _handler = (e) => {
                     // Verificar se clicou no post-editor
                     const postEditor = e.target.closest('#post-editor');
                     if (postEditor) {
@@ -6702,7 +6916,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!handler) return;
                     e.preventDefault();
                     handler({ event: e, button: btn, state: getState() });
-                });
+                };
+                document.addEventListener('click', _handler);
+                window._mainActionHandler = _handler;
             });
         })();
 
@@ -6862,34 +7078,102 @@ document.addEventListener('DOMContentLoaded', () => {
         // Se o input original era único, devolve único
         return ids.length === 1 ? results[0] : results;
     }
+    // Unificado: abrir app por ID/slug com SSO opcional
+    async function launchAppById(appId, opts = {}) {
+        try {
+            const res = await apiClient.post('/search', { db: 'workz_apps', table: 'apps', columns: ['*'], conditions: { id: appId } });
+            const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
+            if (!app) return;
+            await launchApp(app, opts);
+        } catch (_) {}
+    }
+    async function launchAppBySlug(slug, opts = {}) {
+        try {
+            const res = await apiClient.post('/search', { db: 'workz_apps', table: 'apps', columns: ['*'], conditions: { slug } });
+            const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
+            if (!app) return;
+            await launchApp(app, opts);
+        } catch (_) {}
+    }
+    async function launchApp(app, opts = {}) {
+        let baseUrl = app?.embed_url || app?.src || app?.page_privacy || null;
+        if (!app || !baseUrl) { return; }
+        // Deriva contexto atual
+        let ctx = null;
+        if (viewType === ENTITY.BUSINESS && viewId) ctx = { type: 'business', id: viewId };
+        else if (viewType === ENTITY.TEAM && viewId) ctx = { type: 'team', id: viewId };
+        else if (currentUserData?.id) ctx = { type: 'user', id: currentUserData.id };
 
+        let finalUrl = baseUrl;
+        const wantSSO = opts.sso !== false;
+        if (wantSSO) {
+            try {
+                const sso = await apiClient.post('/apps/sso', { app_id: app.id, ctx });
+                const token = sso?.token || null;
+                if (token) {
+                    const sep = (finalUrl.indexOf('?') >= 0) ? '&' : '?';
+                    finalUrl = `${finalUrl}${sep}token=${encodeURIComponent(token)}`;
+                }
+            } catch (_) {}
+        }
+        newWindow(finalUrl, `app_${app.id}`, app.im, app.tt);
+    }
+
+
+    // Handshake fallback: respond with auth to embedded apps requesting it
+    try {
+        window.addEventListener('message', (ev) => {
+            const data = ev?.data || {};
+            if (!data || typeof data !== 'object') return;
+            if (data.type === 'workz-sdk:init') {
+                const jwt = localStorage.getItem('jwt_token') || null;
+                // Deriva contexto atual
+                let ctx = null;
+                if (viewType === ENTITY.BUSINESS && viewId) ctx = { type: 'business', id: viewId };
+                else if (viewType === ENTITY.TEAM && viewId) ctx = { type: 'team', id: viewId };
+                else if (currentUserData?.id) ctx = { type: 'user', id: currentUserData.id };
+                try {
+                    ev.source?.postMessage({ type: 'workz-sdk:auth', jwt, user: currentUserData || null, context: ctx }, '*');
+                } catch (_) {}
+            }
+        }, false);
+    } catch (_) {}
 
     function initAppLibrary(root = '#app-library') {
         const el = typeof root === 'string' ? document.querySelector(root) : root;
         if (!el) return;
 
+        // Evita handlers duplicados ao reinicializar a biblioteca de apps
+        if (el._appClickHandler) {
+            try { el.removeEventListener('click', el._appClickHandler); } catch (_) {}
+        }
+
         // Combined click listener for opening apps
-        el.addEventListener('click', async (event) => {
+        const clickHandler = async (event) => {
+            const storeBtn = event.target.closest('[data-store]');
+            if (storeBtn) {
+                // Abre a loja (sem SSO - usa handshake embed para obter JWT)
+                try { await launchAppBySlug('store', { sso: false }); } catch (_) {}
+                return;
+            }
             const appButton = event.target.closest('[data-app-id]');
             if (appButton) {
-                const appId = appButton.dataset.appId;
-                const res = await apiClient.post('/search', { db: 'workz_apps', table: 'apps', columns: ['*'], conditions: { id: appId } });
-                const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
-
-                const appUrl = app?.src || app?.page_privacy;
-                if (app && appUrl) {
-                    // Assuming newWindow is a global function
-                    newWindow(appUrl, `app_${app.id}`, app.im, app.tt);
-                } else {
-                }
+                const appId = Number(appButton.dataset.appId);
+                if (!appId) return;
+                try { await launchAppById(appId); } catch (_) {}
             }
-        });
+        };
+        el.addEventListener('click', clickHandler);
+        el._appClickHandler = clickHandler;
 
         // Search filter logic
         const searchInput = el.querySelector('#app-search-input');
         const appGrid = el.querySelector('#app-grid');
         if (searchInput && appGrid) {
-            searchInput.addEventListener('input', (e) => {
+            if (searchInput._appSearchHandler) {
+                try { searchInput.removeEventListener('input', searchInput._appSearchHandler); } catch (_) {}
+            }
+            const inputHandler = (e) => {
                 const searchTerm = e.target.value.toLowerCase().trim();
                 const appItems = appGrid.querySelectorAll('.app-item-button');
                 appItems.forEach(item => {
@@ -6900,11 +7184,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         item.style.display = 'none';
                     }
                 });
-            });
+            };
+            searchInput.addEventListener('input', inputHandler);
+            searchInput._appSearchHandler = inputHandler;
         }
     }
 
     function resetFeed() {
+        // Desconectar observer antigo do feed, se houver
+        try { if (feedObserver) { feedObserver.disconnect(); feedObserver = null; } } catch (_) {}
         feedOffset = 0;
         feedLoading = false;
         feedFinished = false;
@@ -7003,14 +7291,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const sentinel = document.querySelector('#feed-sentinel');
         if (!sentinel) return;
 
-        const io = new IntersectionObserver((entries) => {
+        // Evita acumular múltiplos observers
+        try { if (feedObserver) { feedObserver.disconnect(); feedObserver = null; } } catch (_) {}
+        feedObserver = new IntersectionObserver((entries) => {
             const [entry] = entries;
             if (entry.isIntersecting) {
                 loadFeed();
             }
         }, { rootMargin: '200px' }); // começa a carregar antes de encostar
 
-        io.observe(sentinel);
+        try { feedObserver.observe(sentinel); } catch (_) {}
     }
 
     async function initializeCurrentUserData() {
@@ -7867,6 +8157,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (actionType === 'sidebar-back') {
             // Deixa o handler de histórico cuidar; não limpar/trocar o sidebar aqui
             event.preventDefault();
+            try { window.history.back(); } catch(_) {}
             return;
         }
         if (actionType === 'stack-back') {
@@ -8093,3 +8384,5 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
+
+

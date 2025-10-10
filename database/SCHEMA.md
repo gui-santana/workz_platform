@@ -7,7 +7,7 @@ Observação sobre nomes de bases: o backend abre conexão por nome (parâmetro 
 - `workz_companies` — empresas, equipes e vínculos (empregados e membros de equipe).
 - `workz_apps` — catálogo de aplicativos e instalações/assinaturas.
 
-Há também o script `database/recreate_workz_platform_db.sql:1`, que cria o schema `workz_platform_db` contendo tabelas de posts/comentários e `work_history`. Se o seu ambiente usa `workz_data` como base padrão (ver `public/app/config_db.php:1`), alinhe os nomes (ou ajuste as conexões) antes de executar os scripts.
+Há também o script `database/recreate_workz_platform_db.sql`, que recria idempotentemente os três schemas usados pela aplicação: `workz_data`, `workz_companies` e `workz_apps` (incluindo tabelas e chaves). Se o seu ambiente tiver variáveis apontando para outro schema por padrão, alinhe antes de executar os scripts.
 
 
 ## Convenções de nomes (glossário de colunas)
@@ -63,7 +63,7 @@ Observações
 - Recomenda-se índice único em `ml` e (opcional) em `un`.
 
 ### Tabela: `hpl` (Posts do editor)
-Definida em `database/recreate_workz_platform_db.sql:1` e usada no backend em `src/Controllers/PostsController.php:1`.
+Definida em `database/recreate_workz_platform_db.sql` e usada no backend em `src/Controllers/PostsController.php:1`.
 Campos usados no código:
 - `id` (PK)
 - `us` (autor, usuário)
@@ -107,7 +107,7 @@ Campos usados no código (frontend):
 - `status` (0=pending, 1=aceito, 2=revertido)
 
 ### Tabela: `work_history` (Histórico profissional)
-Definição base em `database/migrations/2025_02_XX_create_work_history.sql:1` e replicada em `database/recreate_workz_platform_db.sql:1`.
+Definição base em `database/migrations/2025_02_XX_create_work_history.sql` e replicada em `database/recreate_workz_platform_db.sql`.
 Campos:
 - `id` (PK)
 - `us` (usuário)
@@ -206,8 +206,15 @@ A atualização de imagens (avatar/capa) usa `GeneralController::uploadImage` e 
 
 
 ## Notas de implantação
-- Docker compose define `MYSQL_DATABASE: workz_platform_db` (ver `docker-compose.yml:1`). O código, porém, faz queries com `db: 'workz_data'`, `workz_companies` e `workz_apps`. Garanta que esses schemas existam no MySQL e que `.env`/variáveis de ambiente apontem corretamente.
-- O script `public/app/setup_database.php:1` cria `hpl` e `hpl_comments` no `dbname` configurado (por padrão `workz_data`). O SQL de recriação (`database/recreate_workz_platform_db.sql:1`) usa o schema `workz_platform_db`. Ajuste conforme o padrão adotado.
+- Docker compose agora define `MYSQL_DATABASE: workz_data` (ver `docker-compose.yml`), apenas como schema inicial em ambientes novos. O backend acessa explicitamente `workz_data`, `workz_companies` e `workz_apps` conforme cada operação.
+- `.env` deve alinhar `DB_NAME`/`DB_DATABASE` para `workz_data` para compatibilidade com scripts PHP legados em `public/app/`.
+- O script `public/app/setup_database.php` cria `hpl` e `hpl_comments` no `dbname` configurado (padrão `workz_data`). Já o `database/recreate_workz_platform_db.sql` cria/garante os três schemas (`workz_data`, `workz_companies`, `workz_apps`).
+
+Procedimento de restauração (Docker)
+- Subir MySQL e aguardar health: `docker compose up -d mysql` e `docker compose ps mysql`.
+- Importar schemas: `docker cp database/recreate_workz_platform_db.sql workz_platform_mysql:/tmp/recreate.sql` e `docker exec -i workz_platform_mysql mysql -uroot -proot_password < /tmp/recreate.sql`.
+- Opcional seed: `docker cp database/seed_workz_platform.sql workz_platform_mysql:/tmp/seed.sql` e `docker exec -i workz_platform_mysql mysql -uroot -proot_password < /tmp/seed.sql`.
+- Validar em `http://localhost:8081` (phpMyAdmin) e `http://localhost:9090/app/test_db.php`.
 - Para `hus.ml` (email) e `hus.un` (apelido), e para pares únicos de vínculo (`employees`, `teams_users`, `usg`, `lke`), recomenda‑se criar índices únicos para coerência e integridade referencial.
 
 

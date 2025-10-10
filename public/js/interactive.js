@@ -38,53 +38,60 @@ function enableSelection() {
 function newWindow(target, id, icon, title) {
   let iconSrc = resolveIconSrc(icon);
 
-  var created = document.getElementsByClassName('window');
-  var n = created.length;
-  // Check if window is already opened
+  // Primeiro, se houver um item minimizado correspondente, restaura-o
   var minimizedItem = document.getElementsByClassName('minimizedItem');
-  var exists = 0;
   for (var i = 0; i < minimizedItem.length; i++) {
     if (minimizedItem[i].name == id) {
-      exists = exists + 1;
       minimizedItem[i].click();
+      return; // Evita abrir outra janela
     }
   }
-  if (exists == 0) {
-    var windowEl = document.createElement("div");
-    windowEl.setAttribute("name", id);
-    windowEl.id = "window_" + (n + 1);
-    windowEl.classList.add("window", "bg-white");
-    document.getElementById("desktop").appendChild(windowEl);
-    interactive(windowEl.id, {
-      resize: true,
-      drag: true,
-      close: true,
-      minMax: true,
-      title: title,
-      iconSrc: iconSrc
-    });
 
+  // Depois, se uma janela com esse "name" já existir, apenas traga para frente
+  var existingWin = document.querySelector('.window[name="' + id + '"]');
+  if (existingWin) {
+    try { existingWin.style.display = existingWin.classList.contains('resizable') ? 'grid' : 'block'; } catch (_) {}
+    try { existingWin.onmousedown && existingWin.onmousedown.call(existingWin); } catch (_) {}
     desktop();
-    if (target !== null) {
-      var root = document.createElement("div");
-      root.classList.add(
-        "w-full",
-        "rounded-lg"
-      );
-      root.style.height = "calc(100% - 30px)"; // Adjust height for new header
-      windowEl.appendChild(root);
+    return;
+  }
 
-      var iframe = document.createElement("iframe");
-      iframe.src = target;
-      iframe.classList.add(
-        "rounded-lg",
-        "border-none",
-        "w-full",
-        "h-full"
-      );
-      root.appendChild(iframe);
+  // Caso contrário, cria uma nova janela
+  var created = document.getElementsByClassName('window');
+  var n = created.length;
+  var windowEl = document.createElement("div");
+  windowEl.setAttribute("name", id);
+  windowEl.id = "window_" + (n + 1);
+  windowEl.classList.add("window", "bg-white");
+  document.getElementById("desktop").appendChild(windowEl);
+  interactive(windowEl.id, {
+    resize: true,
+    drag: true,
+    close: true,
+    minMax: true,
+    title: title,
+    iconSrc: iconSrc
+  });
 
-    }
+  desktop();
+  if (target !== null) {
+    var root = document.createElement("div");
+    root.classList.add(
+      "w-full",
+      "rounded-lg"
+    );
+    root.style.height = "calc(100% - 30px)"; // Adjust height for new header
+    windowEl.appendChild(root);
+
+    var iframe = document.createElement("iframe");
+    iframe.src = target;
+    iframe.classList.add(
+      "rounded-lg",
+      "border-none",
+      "w-full",
+      "h-full"
+    );
+    root.appendChild(iframe);
   }
 }
 

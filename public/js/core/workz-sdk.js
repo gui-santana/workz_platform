@@ -1,0 +1,137 @@
+// public/js/core/workz-sdk.js
+
+(function(global){
+  const DEFAULT_BASE = 'http://localhost:9090/api';
+
+  function parseQueryToken(){
+    try {
+      const url = new URL(window.location.href);
+      const fromQuery = url.searchParams.get('token');
+      if (fromQuery) {
+        url.searchParams.delete('token');
+        history.replaceState({}, document.title, url.toString());
+        return fromQuery;
+      }
+      if (window.location.hash) {
+        const h = new URLSearchParams(window.location.hash.slice(1));
+        const t = h.get('token');
+        if (t) {
+          h.delete('token');
+          const base = window.location.href.split('#')[0];
+          const nh = h.toString();
+          history.replaceState({}, document.title, nh ? base + '#' + nh : base);
+          return t;
+        }
+      }
+    } catch(_) {}
+    return null;
+  }
+
+  const WorkzSDK = {
+    _cfg: { mode: 'standalone', baseUrl: DEFAULT_BASE },
+    _token: null,
+    _user: null,
+    _context: null,
+    _ready: false,
+    _listeners: {},
+
+    async init(cfg={}){
+      this._cfg = Object.assign({ mode: 'standalone', baseUrl: DEFAULT_BASE }, cfg||{});
+
+      if (this._cfg.mode === 'standalone') {
+        // Try to load token from URL or localStorage
+        this._token = parseQueryToken() || localStorage.getItem('jwt_token') || null;
+        if (this._token) { localStorage.setItem('jwt_token', this._token); }
+        // If we have a token but no user, try to fetch /me
+        if (this._token && !this._user) {
+          try { this._user = await this._fetchMe(); } catch(_) {}
+        }
+        this._ready = true;
+        return true;
+      }
+
+      if (this._cfg.mode === 'embed') {
+        return new Promise(resolve => {
+          const onMsg = (ev) => {
+            const data = ev?.data || {};
+            if (!data || typeof data !== 'object') return;
+            if (data.type === 'workz-sdk:auth') {
+              this._token = data.jwt || null;
+              this._user = data.user || null;
+              this._context = data.context || null;
+              if (this._token) localStorage.setItem('jwt_token', this._token);
+              const finish = async () => {
+                if (!this._user && this._token) {
+                  try { this._user = await this._fetchMe(); } catch(_) {}
+                }
+                this._ready = true;
+                resolve(true);
+              };
+              finish();
+            }
+            if (data.type && this._listeners[data.type]) {
+              try { this._listeners[data.type].forEach(fn => fn(data)); } catch(_) {}
+            }
+          };
+          window.addEventListener('message', onMsg, false);
+          // Initiate handshake
+          try { window.parent.postMessage({ type: 'workz-sdk:init' }, '*'); } catch(_) {}
+          // Fallback timeout
+          setTimeout(() => { if (!this._ready) resolve(false); }, 3000);
+        });
+      }
+
+      return false;
+    },
+
+    on(type, fn){
+      if (!this._listeners[type]) this._listeners[type] = [];
+      this._listeners[type].push(fn);
+    },
+
+    emit(type, payload){
+      try { window.parent.postMessage(Object.assign({ type }, payload||{}), '*'); } catch(_) {}
+    },
+
+    getToken(){ return this._token; },
+    getUser(){ return this._user; },
+    getContext(){ return this._context; },
+
+    async apiGet(path){
+      const url = this._url(path);
+      const resp = await fetch(url, { method: 'GET', headers: this._headers() });
+      return resp.json();
+    },
+    async apiPost(path, body){
+      const url = this._url(path);
+      const resp = await fetch(url, { method: 'POST', headers: this._headers(true), body: JSON.stringify(body||{}) });
+      return resp.json();
+    },
+    // Alias de compatibilidade com contrato sugerido (WorkzSDK.api.get/post)
+    api: {
+      get: async function(path){ return await WorkzSDK.apiGet(path); },
+      post: async function(path, body){ return await WorkzSDK.apiPost(path, body); }
+    },
+
+    async _fetchMe(){
+      const res = await fetch(this._url('/me'), { method: 'GET', headers: this._headers() });
+      const data = await res.json();
+      return data?.data || data || null;
+    },
+
+    _url(path){
+      let p = String(path||'');
+      if (!p.startsWith('/')) p = '/' + p;
+      return (this._cfg.baseUrl || DEFAULT_BASE) + p;
+    },
+    _headers(withJson){
+      const h = {};
+      if (withJson) h['Content-Type'] = 'application/json';
+      if (this._token) h['Authorization'] = 'Bearer ' + this._token;
+      return h;
+    }
+  };
+
+  // UMD-ish: attach to window
+  global.WorkzSDK = WorkzSDK;
+})(typeof window !== 'undefined' ? window : globalThis);
