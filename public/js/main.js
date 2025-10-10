@@ -58,6 +58,18 @@ document.addEventListener('DOMContentLoaded', () => {
     let listObserver = null;
 
     const feedUserCache = new Map();
+    function pruneFeedUserCache(max = 800) {
+        try {
+            if (!feedUserCache || typeof feedUserCache.size !== 'number') return;
+            if (feedUserCache.size <= max) return;
+            const removeCount = feedUserCache.size - max;
+            let i = 0;
+            for (const key of feedUserCache.keys()) {
+                feedUserCache.delete(key);
+                if (++i >= removeCount) break;
+            }
+        } catch (_) {}
+    }
     let feedInteractionsAttached = false;
 
     
@@ -603,7 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!picker || !tray || !publishBtn) return;
 
         if (!POST_MEDIA_STATE.initialized) {
-            POST_MEDIA_STATE.items = [];
+            cleanupPostMediaState();
             POST_MEDIA_STATE.initialized = true;
         }
 
@@ -835,7 +847,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             notifySuccess('Post publicado!');
-            POST_MEDIA_STATE.items = [];
+            cleanupPostMediaState();
             if (captionInput) captionInput.value = '';
             renderTray();
             resetFeed();
@@ -1208,6 +1220,22 @@ document.addEventListener('DOMContentLoaded', () => {
         activeIndex: null
     };
 
+    function cleanupPostMediaState() {
+        try {
+            const items = Array.isArray(POST_MEDIA_STATE.items) ? POST_MEDIA_STATE.items : [];
+            items.forEach((m) => {
+                try {
+                    const url = m && m.url;
+                    if (url && typeof url === 'string' && url.startsWith('blob:')) {
+                        URL.revokeObjectURL(url);
+                    }
+                } catch (_) {}
+            });
+        } catch (_) {}
+        POST_MEDIA_STATE.items = [];
+        POST_MEDIA_STATE.activeIndex = null;
+    }
+
     function getImageUploadInput() {
         if (IMAGE_UPLOAD_STATE.input) return IMAGE_UPLOAD_STATE.input;
         const input = document.createElement('input');
@@ -1402,7 +1430,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!picker || !tray || !publishBtn) return;
 
         if (!POST_MEDIA_STATE.initialized) {
-            POST_MEDIA_STATE.items = [];
+            cleanupPostMediaState();
             POST_MEDIA_STATE.initialized = true;
         }
 
@@ -1634,7 +1662,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             notifySuccess('Post publicado!');
-            POST_MEDIA_STATE.items = [];
+            cleanupPostMediaState();
             if (captionInput) captionInput.value = '';
             renderTray();
             resetFeed();
@@ -2356,7 +2384,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dashboard: ` 
             <div id="topbar" class="fixed w-full z-3 content-center">
-                <div class="max-w-screen-xl mx-auto p-6 xl:px-0 flex items-center justify-between">
+                <div class="max-w-screen-xl mx-auto p-6 flex items-center justify-between">
                     <a href="/">
                         <!--img class="logo-menu" style="width: 145px; height: 76px;" title="Workz!" src="/images/logos/workz/145x76.png"-->
                     </a>
@@ -4070,7 +4098,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const rows = Array.isArray(res?.data) ? res.data : [];
             rows.forEach((row) => {
                 if (row?.id == null) return;
-                feedUserCache.set(String(row.id), row);
+                feedUserCache.set(String(row.id), row); pruneFeedUserCache();
             });
         } catch (error) {
             console.error('Failed to load feed users', error);
@@ -4635,7 +4663,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const payload = { pl: numericPostId, us: currentUserData.id, ds: message, dt: dtStr };
         try {
             const result = await apiClient.post('/insert', { db: 'workz_data', table: 'hpl_comments', data: payload });
-            feedUserCache.set(String(currentUserData.id), { id: currentUserData.id, tt: currentUserData.tt, im: currentUserData.im });
+            feedUserCache.set(String(currentUserData.id), { id: currentUserData.id, tt: currentUserData.tt, im: currentUserData.im }); pruneFeedUserCache();
             const commentData = {
                 id: result?.id ?? result?.insertId ?? Date.now(),
                 us: currentUserData.id,
@@ -7017,7 +7045,9 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             // Adicionar os event listeners e armazenar as referências
+            try { if (widgetWrapper._clickHandler) widgetWrapper.removeEventListener('click', widgetWrapper._clickHandler); } catch(_) {}
             widgetWrapper.addEventListener('click', clickHandler);
+            try { if (widgetWrapper._keydownHandler) widgetWrapper.removeEventListener('keydown', widgetWrapper._keydownHandler); } catch(_) {}
             widgetWrapper.addEventListener('keydown', keydownHandler);
             widgetWrapper._clickHandler = clickHandler;
             widgetWrapper._keydownHandler = keydownHandler;
@@ -8384,5 +8414,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
+
+
+
 
 
