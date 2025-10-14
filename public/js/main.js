@@ -2210,6 +2210,31 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>            
         `,
 
+        // Nova versão do gatilho do editor com botão principal e atalhos
+        editorTriggerV2: (currentUserData) => `
+            <div class="w-full p-4 flex items-center gap-3 bg-gradient-to-r from-indigo-50 to-white border-b border-gray-100 rounded-t-3xl">
+                <img class="page-thumb w-12 h-12 rounded-full pointer shadow-sm ring-2 ring-white" src="/images/no-image.jpg" alt="Avatar" />
+                <button id="post-editor" class="flex-1 h-12 rounded-2xl pointer bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 flex items-center justify-center gap-2 shadow-md transition-colors" aria-label="Abrir editor">
+                    <i class="fas fa-pen"></i>
+                    <span>Abrir Editor</span>
+                </button>
+            </div>
+            <div class="w-full p-3 grid grid-cols-3 gap-2">
+                <button class="h-11 pointer rounded-2xl flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-text" aria-label="Abrir editor com texto">
+                    <i class="fas fa-font"></i>
+                    <span class="text-sm font-medium">Texto</span>
+                </button>
+                <button class="h-11 pointer rounded-2xl flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-media" aria-label="Abrir editor e adicionar mídia">
+                    <i class="fas fa-image"></i>
+                    <span class="text-sm font-medium">Mídia</span>
+                </button>
+                <button class="h-11 pointer rounded-2xl flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-bg" aria-label="Abrir editor e definir plano de fundo">
+                    <i class="fas fa-fill-drip"></i>
+                    <span class="text-sm font-medium">Fundo</span>
+                </button>
+            </div>
+        `,
+
         register: `
             <div id="message" class="w-full"></div>
             <form id="register-form">                
@@ -4856,6 +4881,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Roteador de ações centralizado
+    // Helper: abre o post-editor e aguarda o Editor ficar pronto
+    async function openPostEditorAnd(waitForFn = null) {
+        const mockElement = document.createElement('div');
+        mockElement.dataset.sidebarAction = 'post-editor';
+        try {
+            await toggleSidebar(mockElement, true);
+        } catch (_) {
+            try { toggleSidebar(mockElement, true); } catch (_) {}
+        }
+        return new Promise((resolve) => {
+            const started = Date.now();
+            const check = () => {
+                const sc = document.querySelector('.sidebar-content');
+                const bridgeReady = !!window.EditorBridge;
+                const viewport = sc && sc.querySelector('#editorViewport');
+                const inited = !!(viewport && viewport.dataset && viewport.dataset.initialized === '1');
+                const ok = typeof waitForFn === 'function' ? !!waitForFn(sc) : !!viewport;
+                if ((bridgeReady && ok && inited) || (Date.now() - started > 8000)) {
+                    resolve(sc || document);
+                } else {
+                    setTimeout(check, 100);
+                }
+            };
+            check();
+        });
+    }
+
     const ACTIONS = {
         'dashboard': ({ state }) => navigateTo('/'),
         'my-profile': ({ state }) => navigateTo(`/profile/${state.user?.id}`),
@@ -4864,6 +4916,60 @@ document.addEventListener('DOMContentLoaded', () => {
         'list-businesses': () => navigateTo('/businesses'),
         'list-teams': () => navigateTo('/teams'),
         'logout': () => handleLogout(),
+        // Editor: atalhos rápidos
+        'editor-quick-text': async () => {
+            try {
+                const sc = await openPostEditorAnd(sc => sc && sc.querySelector('#btnAddText'));
+                const btn = (sc || document).querySelector('#btnAddText');
+                if (btn) setTimeout(() => { try { btn.click(); } catch (_) {} }, 60);
+            } catch (_) {}
+        },
+        'editor-quick-media': async () => {
+            try {
+                const sc = await openPostEditorAnd(sc => sc && (sc.querySelector('#postMediaPicker') || sc.querySelector('#btnAddImg')));
+                const picker = (sc || document).querySelector('#postMediaPicker');
+                if (picker) {
+                    picker.click();
+                    return;
+                }
+                // Fallback: abre o seletor de imagem como item sobreposto (não entra na galeria)
+                const btn = (sc || document).querySelector('#btnAddImg');
+                if (btn) btn.click();
+            } catch (_) {}
+        },
+        'editor-quick-bg': async () => {
+            try {
+                const sc = await openPostEditorAnd(sc => sc && (sc.querySelector('#postMediaPicker') || sc.querySelector('#bgUpload')));
+                const picker = (sc || document).querySelector('#postMediaPicker');
+                if (picker) {
+                    picker.click();
+                    return;
+                }
+                // Fallback: usa o input do editor e adiciona à galeria manualmente para exibir thumbnail
+                const input = (sc || document).querySelector('#bgUpload');
+                if (!input) return;
+                const onChange = (ev) => {
+                    try { input.removeEventListener('change', onChange); } catch (_) {}
+                    const file = ev?.target?.files?.[0];
+                    if (!file) return;
+                    const isVid = (file.type||'').toLowerCase().startsWith('video');
+                    const objUrl = URL.createObjectURL(file);
+                    POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
+                    POST_MEDIA_STATE.items.push({
+                        url: objUrl,
+                        path: null,
+                        mimeType: file.type || (isVid ? 'video/*' : 'image/*'),
+                        type: isVid ? 'video' : 'image',
+                        file,
+                        fileName: file.name || (isVid ? `post_${Date.now()}.webm` : `post_${Date.now()}.jpg`)
+                    });
+                    POST_MEDIA_STATE.activeIndex = POST_MEDIA_STATE.items.length - 1;
+                    try { initPostEditorGallery(sc || document); } catch (_) {}
+                };
+                try { input.addEventListener('change', onChange, { once: true }); } catch (_) { input.addEventListener('change', onChange); }
+                input.click();
+            } catch (_) {}
+        },
         // Apps: notificações e desinstalar
         'app-toggle-notifications': ({ button }) => {
             const appId = button?.dataset?.appId;
@@ -6928,7 +7034,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             editorTriggerEl.hidden = false;
-            await renderTemplate(editorTriggerEl, templates['editorTrigger'], currentUserData, () => {
+            await renderTemplate(editorTriggerEl, templates['editorTriggerV2'], currentUserData, () => {
                 try { if (window._mainActionHandler) { document.removeEventListener('click', window._mainActionHandler); } } catch(_) {}
                 const _handler = (e) => {
                     // Verificar se clicou no post-editor
