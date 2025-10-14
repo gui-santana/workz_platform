@@ -2697,7 +2697,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             </div>
             <div class="bg-black/20 rounded-full p-3 backdrop-blur-md">                
-                <div class="grid grid-cols-4 lg:grid-cols-6 gap-3 h-auto overflow-y-auto scroll-snap-y-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                <div class="grid grid-cols-6 lg:grid-cols-8 gap-3 h-auto overflow-y-auto scroll-snap-y-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                     ${storeItem}
                 </div>
             </div>
@@ -3046,11 +3046,11 @@ document.addEventListener('DOMContentLoaded', () => {
             ]);
             html += `
                 <div data-sidebar-type="current-user" data-sidebar-action="page-settings" class="pointer w-full bg-white shadow-md rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
-                    <div data-sidebar-action="page-settings" class="grid grid-cols-4 items-center gap-3">
+                    <div data-sidebar-action="page-settings" class="grid grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 items-center gap-3">
                         <div class="flex col-span-1 justify-center">
                             <img id="sidebar-profile-image" data-role="entity-image" class="w-full rounded-full object-cover" src="${resolveImageSrc(data?.im ?? currentUserData?.im, data?.tt ?? currentUserData?.tt, { size: 100 })}" alt="Foto do Utilizador">
                         </div>
-                        <div class="flex col-span-3 flex-col gap-1">
+                        <div class="flex col-span-3 lg:col-span-4 xl:col-span-5 flex-col gap-1">
                             <p class="truncate font-bold">${data.tt}</p>
                             <p class="truncate">${data.ml}</p>
                             <small class="text-gray-500 truncate" >Perfil Workz!, E-mail, Foto, Endereço</small>
