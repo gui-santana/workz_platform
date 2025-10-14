@@ -2397,10 +2397,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         workzContent: `
             <div class="col-span-12 rounded-b-3xl h-48 bg-gray-200 bg-cover bg-center"></div>
-            <div class="col-span-12 clearfix grid grid-cols-12 gap-6 mx-6">
+            <div class="col-span-12 clearfix grid grid-cols-12 gap-6 mx-4 sm:mx-6">
                 <div class="col-span-12 sm:col-span-8 lg:col-span-9 flex flex-col grid grid-cols-12 gap-x-6 -mt-24">
                     <!-- Coluna da Esquerda (Menu de Navegação) -->
-                    <aside class="w-full flex col-span-4 lg:col-span-3 flex flex-col gap-y-6">                                        
+                    <aside class="hidden sm:flex w-full flex col-span-4 lg:col-span-3 flex-col gap-y-6">                                        
                         <div class="aspect-square w-full rounded-full shadow-lg border-4 border-white overflow-hidden">                        
                             <img id="profile-image" class="w-full h-full object-cover" src="${resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 240 })}" alt="${currentUserData?.tt}">                        
                         </div>
@@ -2420,7 +2420,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     </aside>
                     <!-- Coluna do Meio (Conteúdo Principal) -->
-                    <main class="col-span-8 lg:col-span-9 flex-col relative space-y-6">                        
+                    <main class="col-span-12 sm:col-span-8 lg:col-span-9 flex-col relative space-y-6">                        
                         <div id="main-content" class="w-full"></div>
                         <div id="editor-trigger" class="shadow-lg w-full bg-white rounded-3xl text-center"></div>
                     </main>
@@ -2428,18 +2428,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div id="timeline" class="col-span-12 flex flex-col grid grid-cols-12 gap-6 pt-6"></div>
                     <div id="feed-sentinel" class="h-10"></div>
                 </div>
-                <aside id="widget-wrapper" class="col-span-12 sm:col-span-4 lg:col-span-3 flex flex-col gap-y-6 -mt-24">
+                <aside id="widget-wrapper" class="hidden sm:flex col-span-12 sm:col-span-4 lg:col-span-3 flex-col gap-y-6 -mt-24">
                 </aside>
             </div>
         `,
 
         mainContent: `
-            <div class="w-full grid grid-cols-12 gap-6 rounded-3xl p-6" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
+            <div class="w-full grid grid-cols-12 gap-6 rounded-3xl p-4 bg-white" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
                 <div class="col-span-12 grid grid-cols-12 gap-4">
                     <div class="col-span-12 text-white font-bold content-center text-shadow-lg flex items-center justify-between">
                         <div id="wClock" class="text-md">00:00</div>
                     </div>
-                    <div id="app-library" class="col-span-12"></div> 
+                    <div id="app-library" class="col-span-12 lg:col-span-9 flex-col space-y-4"></div>
+                    <div id="app-widget-container" class="hidden lg:block lg:col-span-3 flex-col bg-black/20 rounded-[2rem] p-3 backdrop-blur-md"></div>
                 </div>
             </div>
         `,
@@ -2669,29 +2670,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const resolved = Array.isArray(appsList) ? appsList : (appsList ? [appsList] : []);
         // Store tile (always visible)
         const storeItem = `
-            <button data-store="1" data-app-name="loja" class="app-item-button group">
-                <div class="app-icon-container">
-                    <img src="/images/app-default.png" alt="Loja de Aplicativos" class="app-icon-image">
-                </div>
-                <span class="app-name">Loja de Aplicativos</span>
+            <button data-store="1" data-app-name="loja" title="Workz! Store" class="">
+                <div class="w-full aspect-square cursor-pointer rounded-full shadow-md">
+                    <img src="/images/apps/store.jpg" alt="Workz! Store"class="app-icon-image rounded-full">
+                </div>                
             </button>`;
 
         const appItems = resolved.map(app => `
-            <button data-app-id="${app.id}" data-app-name="${(app.tt || 'App').toLowerCase()}" class="app-item-button group">
-                <div class="app-icon-container">
-                    <img src="${resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 160 })}" alt="${app.tt || 'App'}" class="app-icon-image">
+            <button data-app-id="${app.id}" data-app-name="${(app.tt || 'App').toLowerCase()}" class="app-item-button">
+                <div class="w-full aspect-square cursor-pointer rounded-full shadow-md">
+                    <img src="${resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 160 })}" alt="${app.tt || 'App'}" class="app-icon-image rounded-full">
                 </div>
-                <span class="app-name">${app.tt || 'App'}</span>
+                <div class="w-full p-1 text-xs text-white text-shadow-lg truncate text-center">
+                    ${app.tt || 'App'}
+                </div>                
             </button>
         `).join('');
 
         return `
-            <div id="app-grid-container" class="app-launcher">
-                <div class="app-search-container">
-                    <input type="text" id="app-search-input" placeholder="Buscar aplicativos..." class="app-search-input">
+            <div id="app-grid-container" class="bg-black/20 rounded-[2rem] p-3 backdrop-blur-md">
+                <div class="mb-6">
+                    <input type="text" id="app-search-input" placeholder="Buscar aplicativos..." class="w-full px-4 py-2 rounded-full border-0 bg-white/15 text-white text-base outline-none transition-all duration-200 ease-in-out placeholder:text-white/70 focus:bg-white/25 focus:shadow-[0_0_0_2px_rgba(251,146,60,0.5)]">
                 </div>
-                <div id="app-grid" class="app-grid">
-                    ${storeItem}${appItems}
+                <div id="app-grid" class="grid grid-cols-4 lg:grid-cols-6 gap-3 h-auto overflow-y-auto scroll-snap-y-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                    ${appItems}
+                </div>
+            </div>
+            <div class="bg-black/20 rounded-full p-3 backdrop-blur-md">                
+                <div class="grid grid-cols-4 lg:grid-cols-6 gap-3 h-auto overflow-y-auto scroll-snap-y-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                    ${storeItem}
                 </div>
             </div>
         `;
@@ -8414,8 +8421,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
-
-
-
-
-
