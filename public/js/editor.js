@@ -1451,8 +1451,8 @@ const init = () => {
         if (Math.abs(snappedY - ny) <= SNAP_TOL) ny = snappedY;
 
         // Calcular centro do elemento para as guias centrais
-        const elementWidth = parseFloat(dragState.element.style.width) || 200;
-        const elementHeight = parseFloat(dragState.element.style.height) || 200;
+        // Usar computedStyle para obter tamanho real, evitando fallback incorreto
+        const { width: elementWidth, height: elementHeight } = getElementSize(dragState.element);
         
         const cx = nx + elementWidth / 2;
         const cy = ny + elementHeight / 2;

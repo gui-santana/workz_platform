@@ -2463,6 +2463,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="col-span-12 grid grid-cols-12 gap-4">
                     <div class="col-span-12 text-white font-bold content-center text-shadow-lg flex items-center justify-between">
                         <div id="wClock" class="text-md">00:00</div>
+                        <button id="apps-menu-trigger" class="shrink-0 rounded-full bg-white/20 hover:bg-white/30 text-white p-2 transition" title="Abrir biblioteca de aplicativos" aria-label="Abrir biblioteca de aplicativos">
+                            <i class="fas fa-th"></i>
+                        </button>
                     </div>
                     <div id="app-library" class="col-span-12 lg:col-span-9 flex-col space-y-4"></div>
                     <div id="app-widget-container" class="hidden lg:block lg:col-span-3 flex-col bg-black/20 rounded-[2rem] p-3 backdrop-blur-md"></div>
@@ -2708,7 +2711,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="w-full p-1 text-xs text-white text-shadow-lg truncate text-center">
                     ${app.tt || 'App'}
-                </div>                
+                </div>
             </button>
         `).join('');
 
@@ -2721,9 +2724,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     ${appItems}
                 </div>
             </div>
-            <div class="bg-black/20 rounded-full p-3 backdrop-blur-md">                
-                <div class="grid grid-cols-6 lg:grid-cols-8 gap-3 h-auto overflow-y-auto scroll-snap-y-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                    ${storeItem}
+            <div id="app-quickbar" class="bg-black/20 rounded-full p-3 backdrop-blur-md">
+                <div id="quickbar-track" class="flex items-center gap-3 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Acesso rápido a apps">
+                    <!-- itens do acesso rápido são injetados pelo JS em initAppLibrary() -->
                 </div>
             </div>
         `;
@@ -2925,10 +2928,10 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
             const feedOpts = `
             <option value="" ${feed_privacy == null ? 'selected' : ''} disabled>Selecione</option>
-            <option value="0" ${feed_privacy === 0 ? 'selected' : ''}>Moderadores</option>
-            <option value="1" ${feed_privacy === 1 ? 'selected' : ''}>Usuários membros</option>
+            <option value="0" ${feed_privacy === 0 ? 'selected' : ''}>Somente eu</option>
+            <option value="1" ${feed_privacy === 1 ? 'selected' : ''}>Seguidores</option>
             <option value="2" ${feed_privacy === 2 ? 'selected' : ''}>Usuários logados</option>
-            <option value="3" ${feed_privacy === 3 ? 'selected' : ''}>Toda a internet</option>
+            <option value="3" ${feed_privacy === 3 && page_privacy > 0 ? 'selected' : ''} ${page_privacy < 1 ? 'disabled' : ''}>Toda a internet</option>
             `;
             return UI.sectionCard(
                 UI.rowSelect('page_privacy', 'Página', pageOpts, { top: true }) +
@@ -3114,8 +3117,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 `) +
                 UI.rowSelect('feed_privacy', 'Conteúdo', `
                 <option value="" ${currentUserData.feed_privacy == null ? 'selected' : ''} disabled>Selecione</option>
-                <option value="0" ${currentUserData.feed_privacy === 0 ? 'selected' : ''}>Moderadores</option>
-                <option value="1" ${currentUserData.feed_privacy === 1 ? 'selected' : ''}>Usuários membros</option>
+                <option value="0" ${currentUserData.feed_privacy === 0 ? 'selected' : ''}>Somente eu</option>
+                <option value="1" ${currentUserData.feed_privacy === 1 ? 'selected' : ''}>Seguidores</option>
                 <option value="2" ${currentUserData.feed_privacy === 2 ? 'selected' : ''}>Usuários logados</option>
                 <option value="3" ${currentUserData.feed_privacy === 3 && currentUserData.page_privacy > 0 ? 'selected' : ''} ${currentUserData.page_privacy < 1 ? 'disabled' : ''}>Toda a internet</option>
                 `, { bottom: true })
@@ -3551,6 +3554,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const img = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 120 });
             const notifyKey = `app_notify_${appId}`;
             const enabled = (localStorage.getItem(notifyKey) === '1');
+            // Verifica se está nos favoritos (acesso rápido)
+            let inQuick = false;
+            try {
+                const quickRes = await apiClient.post('/search', {
+                    db: 'workz_apps', table: 'quickapps', columns: ['ap'],
+                    conditions: { us: currentUserData.id, ap: appId }, fetchAll: true
+                });
+                inQuick = Array.isArray(quickRes?.data) && quickRes.data.length > 0;
+            } catch (_) {}
             const header = `
             <div class="w-full bg-white rounded-2xl shadow-md p-4 flex items-center gap-3">
                 <img src="${img}" alt="${app?.tt || 'App'}" class="w-9 h-9 rounded-md" />
@@ -3559,6 +3571,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const actions = `
             <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
                 <div class="grid grid-cols-1 border-t border-gray-200 bg-white">
+                    <button data-action="app-toggle-quick" data-app-id="${appId}" class="p-3 bg-amber-100 hover:bg-amber-200 text-amber-800">
+                        <i class="fas fa-star"></i> ${inQuick ? 'Remover do Acesso Rápido' : 'Adicionar ao Acesso Rápido'}
+                    </button>
                     <button data-action="app-toggle-notifications" data-app-id="${appId}" class="p-3 bg-blue-100 hover:bg-blue-200 text-blue-800">
                         <i class="fas fa-bell"></i> ${enabled ? 'Desativar Notificações' : 'Ativar Notificações'}
                     </button>
@@ -4862,9 +4877,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function getPostConditions(type, id) {
         const base = { st: 1 };
         if (type === ENTITY.PROFILE) {
+            // Se conteúdo está restrito pela privacidade, não retorna posts
+            if (viewRestricted) return { us: -1, em: 0, cm: 0 };
             return { ...base, us: id, em: 0, cm: 0 };
         }
         if (type === ENTITY.BUSINESS) {
+            // Se conteúdo está restrito pela privacidade, não retorna posts
+            if (viewRestricted) return { em: -1 };
             return { ...base, em: id };
         }
         if (type === ENTITY.TEAM) {
@@ -4997,6 +5016,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             notifySuccess('Aplicativo desinstalado.');
+        },
+        'app-toggle-quick': async ({ button }) => {
+            const appId = Number(button?.dataset?.appId);
+            if (!Number.isFinite(appId)) return;
+            const el = document.querySelector('#app-library');
+            try {
+                // Verificar estado atual no servidor
+                const res = await apiClient.post('/search', {
+                    db: 'workz_apps', table: 'quickapps', columns: ['ap'],
+                    conditions: { us: currentUserData.id, ap: appId }, fetchAll: true
+                });
+                const exists = Array.isArray(res?.data) && res.data.length > 0;
+                if (exists) {
+                    await apiClient.post('/delete', { db: 'workz_apps', table: 'quickapps', conditions: { us: currentUserData.id, ap: appId } });
+                    if (button) button.innerHTML = '<i class="fas fa-star"></i> Adicionar ao Acesso Rápido';
+                    notifySuccess('Removido do acesso rápido.');
+                } else {
+                    await apiClient.post('/insert', { db: 'workz_apps', table: 'quickapps', data: { us: currentUserData.id, ap: appId } });
+                    if (button) button.innerHTML = '<i class="fas fa-star"></i> Remover do Acesso Rápido';
+                    notifySuccess('Adicionado ao acesso rápido.');
+                }
+            } catch (e) {
+                notifyError('Não foi possível atualizar o acesso rápido.');
+            }
+            try { initAppLibrary(el, window.__appListCache || []); } catch (_) {}
         },
         'delete-business': async ({ button }) => {
             const id = button?.dataset?.id;
@@ -6900,12 +6944,56 @@ document.addEventListener('DOMContentLoaded', () => {
             viewData = entityRow;
             applyEntityBackgroundImage(viewData);
 
-            // Restrição de acesso para páginas de Equipe: somente membros aprovados da equipe
+            // Restrição de acesso por privacidade de conteúdo
+            // Equipes: somente membros aprovados da equipe
             if (viewType === ENTITY.TEAM) {
                 const isTeamMemberApproved = Array.isArray(userTeamsData)
                     ? userTeamsData.some(t => String(t.cm) === String(viewData.id) && Number(t.st) === 1)
                     : false;
                 viewRestricted = !isTeamMemberApproved;
+            } else if (viewType === ENTITY.PROFILE) {
+                // Pessoas: feed_privacy
+                const fp = Number(viewData?.feed_privacy ?? 0);
+                const isOwner = String(currentUserData?.id ?? '') === String(viewData?.id ?? '');
+                const isFollower = Array.isArray(userPeople)
+                    ? userPeople.map(String).includes(String(viewData?.id))
+                    : false;
+                let restricted = false;
+                if (!isOwner) {
+                    if (fp === 0) {
+                        // Somente eu
+                        restricted = true;
+                    } else if (fp === 1) {
+                        // Seguidores
+                        restricted = !isFollower;
+                    } else {
+                        // 2: Usuários logados; 3: Toda a internet (OK para logados)
+                        restricted = false;
+                    }
+                }
+                viewRestricted = restricted;
+            } else if (viewType === ENTITY.BUSINESS) {
+                // Negócios: feed_privacy
+                const fp = Number(viewData?.feed_privacy ?? 0);
+                const parseIdArray = (val) => { try { const arr = JSON.parse(val); return Array.isArray(arr) ? arr : []; } catch (_) { return []; } };
+                const mods = viewData?.usmn ? parseIdArray(viewData.usmn) : [];
+                const isModerator = Array.isArray(mods) && mods.map(String).includes(String(currentUserData?.id));
+                const isManager = isBusinessManager(viewData?.id);
+                const isMemberApproved = Array.isArray(userBusinessesData)
+                    ? userBusinessesData.some(r => String(r.em) === String(viewData?.id) && Number(r.st) === 1)
+                    : false;
+                let restricted = false;
+                if (fp === 0) {
+                    // Moderadores
+                    restricted = !(isManager || isModerator);
+                } else if (fp === 1) {
+                    // Usuários membros
+                    restricted = !isMemberApproved;
+                } else {
+                    // 2: Usuários logados; 3: Toda a internet (OK para logados)
+                    restricted = false;
+                }
+                viewRestricted = restricted;
             } else {
                 viewRestricted = false;
             }
@@ -7074,6 +7162,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Conteúdo principal (Dashboard)
                 renderTemplate(document.querySelector('#main-content'), 'mainContent', null, async () => {
                     startClock();
+                    // Gatilho no topo (próximo ao relógio) para abrir o menu lateral de apps
+                    try {
+                        const btnApps = document.getElementById('apps-menu-trigger');
+                        if (btnApps) {
+                            if (btnApps._bound) btnApps.removeEventListener('click', btnApps._bound);
+                            const handler = async (ev) => { ev.preventDefault(); await openAppsSidebar(); };
+                            btnApps.addEventListener('click', handler);
+                            btnApps._bound = handler;
+                        }
+                        // Fallback: delegação global em caso de re-render
+                        if (!document._appsMenuDelegate) {
+                            const delegate = async (ev) => {
+                                const trg = ev.target && ev.target.closest && ev.target.closest('#apps-menu-trigger');
+                                if (!trg) return;
+                                ev.preventDefault();
+                                await openAppsSidebar();
+                            };
+                            document.addEventListener('click', delegate);
+                            document._appsMenuDelegate = delegate;
+                        }
+                    } catch (_) {}
                     // Aplicativos
                     let userAppsRaw = await apiClient.post('/search', {
                         db: 'workz_apps',
@@ -7087,9 +7196,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     const appIds = Array.isArray(userAppsRaw?.data) ? userAppsRaw.data.map(o => o.ap) : [];
                     const resolvedApps = await fetchByIds(appIds, 'apps'); // Fetch full app data here
+                    try { window.__appListCache = Array.isArray(resolvedApps) ? resolvedApps : (resolvedApps ? [resolvedApps] : []); } catch (_) {}
 
                     await renderTemplate(document.querySelector('#app-library'), templates.appLibrary, { appsList: resolvedApps }, () => {
-                        initAppLibrary('#app-library', resolvedApps); // Pass resolvedApps to initAppLibrary
+                        initAppLibrary('#app-library', window.__appListCache); // Pass resolvedApps to initAppLibrary
                     });
                 })
                 : Promise.resolve(),
@@ -7282,9 +7392,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }, false);
     } catch (_) {}
 
-    function initAppLibrary(root = '#app-library') {
+    function initAppLibrary(root = '#app-library', appsData = []) {
         const el = typeof root === 'string' ? document.querySelector(root) : root;
         if (!el) return;
+        // Mapa rápido id->dados
+        const appsById = new Map();
+        try {
+            (Array.isArray(appsData) ? appsData : []).forEach(a => { if (a && a.id != null) appsById.set(Number(a.id), a); });
+        } catch (_) {}
 
         // Evita handlers duplicados ao reinicializar a biblioteca de apps
         if (el._appClickHandler) {
@@ -7299,11 +7414,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 try { await launchAppBySlug('store', { sso: false }); } catch (_) {}
                 return;
             }
+            // Primeiro, checa clique no botão de favorito para não abrir o app
+            // sem gatilhos de favoritos na grade
             const appButton = event.target.closest('[data-app-id]');
             if (appButton) {
                 const appId = Number(appButton.dataset.appId);
                 if (!appId) return;
                 try { await launchAppById(appId); } catch (_) {}
+                return;
             }
         };
         el.addEventListener('click', clickHandler);
@@ -7321,16 +7439,126 @@ document.addEventListener('DOMContentLoaded', () => {
                 const appItems = appGrid.querySelectorAll('.app-item-button');
                 appItems.forEach(item => {
                     const appName = item.dataset.appName || '';
-                    if (appName.includes(searchTerm)) {
-                        item.style.display = 'flex';
-                    } else {
-                        item.style.display = 'none';
-                    }
+                    item.style.display = appName.includes(searchTerm) ? '' : 'none';
                 });
             };
             searchInput.addEventListener('input', inputHandler);
             searchInput._appSearchHandler = inputHandler;
         }
+
+        // ===== Quick access (Favoritos) – sincronizado com backend =====
+        const track = el.querySelector('#quickbar-track');
+        let quickCache = [];
+        let quickFetchCooldownUntil = 0;
+        async function fetchQuickFromServer() {
+            try {
+                if (Date.now() < quickFetchCooldownUntil) return quickCache || [];
+                const res = await apiClient.post('/search', {
+                    db: 'workz_apps',
+                    table: 'quickapps',
+                    columns: ['ap'],
+                    conditions: { us: currentUserData.id },
+                    order: { by: 'sort', dir: 'ASC' },
+                    fetchAll: true
+                });
+                const ids = Array.isArray(res?.data) ? res.data.map(r => Number(r.ap)).filter(n => Number.isFinite(n)) : [];
+                quickCache = ids;
+            } catch (_) {
+                quickCache = quickCache || [];
+                // backoff de 30s para evitar flood de erros 500
+                quickFetchCooldownUntil = Date.now() + 30000;
+            }
+            return quickCache;
+        }
+        async function addQuickOnServer(id) {
+            try { await apiClient.post('/insert', { db: 'workz_apps', table: 'quickapps', data: { us: currentUserData.id, ap: id } }); } catch (_) {}
+        }
+        async function removeQuickOnServer(id) {
+            try { await apiClient.post('/delete', { db: 'workz_apps', table: 'quickapps', conditions: { us: currentUserData.id, ap: id } }); } catch (_) {}
+        }
+        // Fallback localStorage para cenários offline/erro 500
+        function getLocalQuick(){ try { return JSON.parse(localStorage.getItem('workz.quickApps')||'[]'); } catch(_){ return []; } }
+        function setLocalQuick(arr){ try { localStorage.setItem('workz.quickApps', JSON.stringify(arr||[])); } catch(_){ } }
+
+        async function toggleQuickApp(id) {
+            const ids = new Set(await fetchQuickFromServer());
+            if (ids.has(id)) {
+                ids.delete(id);
+                try { await removeQuickOnServer(id); }
+                catch (_) { setLocalQuick([...ids]); }
+            } else {
+                ids.add(id);
+                try { await addQuickOnServer(id); }
+                catch (_) { setLocalQuick([...ids]); }
+            }
+            quickCache = [...ids];
+            return quickCache;
+        }
+        async function renderQuickBar() {
+            if (!track) return;
+            const ids = await fetchQuickFromServer();
+            let html = '';
+            // Loja (sempre presente)
+            html += `
+                <button data-store="1" class="shrink-0 snap-start" title="Loja de aplicativos">
+                    <div class="w-14 h-14 rounded-full overflow-hidden shadow-md">
+                        <img src="/images/apps/store.jpg" alt="Loja" class="app-icon-image rounded-full" />
+                    </div>
+                </button>`;
+            ids.forEach(id => {
+                const app = appsById.get(Number(id));
+                if (!app) return;
+                const img = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 120 });
+                const name = app?.tt || 'App';
+                html += `
+                    <div class="relative shrink-0 snap-start" data-quick-id="${app.id}">
+                        <button data-app-id="${app.id}" title="${name}">
+                            <div class="w-14 h-14 rounded-full overflow-hidden shadow-md">
+                                <img src="${img}" alt="${name}" class="app-icon-image rounded-full" />
+                            </div>
+                        </button>
+                    </div>`;
+            });
+            track.innerHTML = html;
+        }
+
+        async function refreshQuickStars() {
+            // Atualiza o estado visual das estrelas nos cards
+            const ids = new Set(await fetchQuickFromServer());
+            el.querySelectorAll('[data-quick-toggle]').forEach(span => {
+                const id = Number(span.getAttribute('data-quick-toggle'));
+                const icon = span.querySelector('i');
+                if (ids.has(id)) {
+                    span.style.opacity = '1';
+                    span.title = 'Remover do acesso rápido';
+                    if (icon) icon.className = 'fa-solid fa-star text-[12px]';
+                } else {
+                    span.style.opacity = '';
+                    span.title = 'Adicionar aos favoritos';
+                    if (icon) icon.className = 'fa-regular fa-star text-[12px]';
+                }
+            });
+        }
+
+        // Sem remoção pela quickbar: manter apenas abertura de apps
+
+        // Inicializa barra e estado das estrelas
+        fetchQuickFromServer().then(() => { renderQuickBar(); refreshQuickStars(); });
+    }
+
+    // Abre a sidebar diretamente na view "Aplicativos"
+    async function openAppsSidebar() {
+        const mock = document.createElement('div');
+        mock.dataset.sidebarAction = 'settings';
+        await toggleSidebar(mock, true);
+        try {
+            const mount = document.querySelector('.sidebar-content');
+            SidebarNav.setMount(mount);
+            SidebarNav.resetRoot(currentUserData);
+            setTimeout(() => {
+                try { SidebarNav.push({ view: 'apps', title: 'Aplicativos', payload: { data: currentUserData } }); } catch (_) {}
+            }, 60);
+        } catch (_) {}
     }
 
     function resetFeed() {

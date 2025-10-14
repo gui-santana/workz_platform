@@ -265,6 +265,22 @@ CREATE TABLE IF NOT EXISTS `gapp` (
   CONSTRAINT `fk_gapp_em` FOREIGN KEY (`em`) REFERENCES `workz_companies`.`companies`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Instalacoes/assinaturas de apps';
 
+-- 4.3) Tabela: quickapps (acesso rápido/favoritos de apps por usuário)
+CREATE TABLE IF NOT EXISTS `quickapps` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `us` INT UNSIGNED NOT NULL,
+  `ap` INT UNSIGNED NOT NULL,
+  `sort` INT UNSIGNED NULL DEFAULT 0,
+  `dt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_quick_us_ap` (`us`, `ap`),
+  KEY `idx_quick_us` (`us`),
+  KEY `idx_quick_ap` (`ap`),
+  KEY `idx_quick_sort` (`sort`),
+  CONSTRAINT `fk_quickapps_us` FOREIGN KEY (`us`) REFERENCES `workz_data`.`hus`(`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_quickapps_ap` FOREIGN KEY (`ap`) REFERENCES `workz_apps`.`apps`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Favoritos (acesso rápido) de apps por usuário';
+
 -- 2.7) Tabela: work_history (historico profissional) – criada após companies
 USE `workz_data`;
 CREATE TABLE IF NOT EXISTS `work_history` (

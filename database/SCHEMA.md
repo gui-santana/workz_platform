@@ -195,6 +195,17 @@ Campos usados no código:
 - `start_date`, `end_date` (assinaturas ativas têm `end_date = NULL`)
 Observações: o frontend usa `EXISTS` para cruzar `gapp.ap` com `apps.id` ao listar/mostrar assinaturas.
 
+### Tabela: `quickapps` (Favoritos/Acesso Rápido)
+Campos:
+- `id` (PK)
+- `us` (usuário)
+- `ap` (app id)
+- `sort` (posição opcional)
+- `dt` (criado em)
+Regras:
+- Único por `(us, ap)`; cascata ao excluir usuário/app.
+Uso no frontend: define os apps mostrados na barra de acesso rápido do dashboard e permite adicionar/remover pelos botões de estrela na biblioteca ou pelas configurações do app no menu lateral.
+
 
 ## Tabelas auxiliares de mídia (uploads)
 O upload de mídias dos posts salva arquivos em `public/uploads/posts/...` (ver `src/Controllers/PostsController.php:1`). As URLs relativas são gravadas dentro do JSON `ct` dos posts `hpl`.
