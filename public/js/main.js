@@ -185,7 +185,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     const handler = ACTIONS[action];
                     if (!handler) return;
                     e.preventDefault();
-                    try { handler({ event: e, button: btn, state: getState() }); } catch (_) {}
+                    try {
+                        Promise.resolve(handler({ event: e, button: btn, state: getState() }))
+                            .finally(() => {
+                                if (action === 'follow-user' || action === 'unfollow-user') {
+                                    try {
+                                        if (viewType === ENTITY.PROFILE && String(viewId) === String(getState()?.view?.id)) {
+                                            const fp = Number(viewData?.feed_privacy ?? 0);
+                                            const isOwner = String(currentUserData?.id ?? '') === String(viewId ?? '');
+                                            if (fp === 1) {
+                                                if (action === 'follow-user') viewRestricted = false;
+                                                else if (action === 'unfollow-user' && !isOwner) viewRestricted = true;
+                                            }
+                                            resetFeed();
+                                            loadFeed();
+                                        }
+                                    } catch (_) {}
+                                }
+                            });
+                    } catch (_) {}
                 };
                 this.mount.addEventListener('click', actionsHandler);
                 this.mount._actionsHandler = actionsHandler;
@@ -4155,7 +4173,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await apiClient.post('/search', {
                 db: 'workz_data',
                 table: 'hus',
-                columns: ['id', 'tt', 'im'],
+                columns: ['id', 'tt', 'im', 'feed_privacy', 'page_privacy'],
                 conditions: { id: { op: 'IN', value: missing } },
                 fetchAll: true,
             });
@@ -4234,6 +4252,117 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Failed to fetch feed comments', error);
         }
         return commentsMap;
+    }
+
+    // ===== Privacy helpers for dashboard feed =====
+    function isBusinessMemberApproved(businessId) {
+        try { return (userBusinessesData || []).some(r => String(r.em) === String(businessId) && Number(r.st) === 1); } catch(_) { return false; }
+    }
+    function isBusinessManagerLocal(businessId) {
+        try { return (userBusinessesData || []).some(r => String(r.em) === String(businessId) && Number(r.st) === 1 && Number(r.nv) >= 3); } catch(_) { return false; }
+    }
+    function isTeamMemberApproved(teamId) {
+        try { return (userTeamsData || []).some(r => String(r.cm) === String(teamId) && Number(r.st) === 1); } catch(_) { return false; }
+    }
+    function isTeamModeratorLocal(teamId) {
+        try { return (userTeamsData || []).some(r => String(r.cm) === String(teamId) && Number(r.st) === 1 && Number(r.nv) >= 3); } catch(_) { return false; }
+    }
+
+    async function fetchCompaniesPrivacy(ids = []) {
+        const list = Array.from(new Set((ids || []).map(normalizeNumericId).filter((id) => id !== null)));
+        const map = new Map();
+        if (!list.length) return map;
+        try {
+            const res = await apiClient.post('/search', {
+                db: 'workz_companies',
+                table: 'companies',
+                columns: ['id', 'feed_privacy'],
+                conditions: { id: { op: 'IN', value: list } },
+                fetchAll: true,
+                limit: list.length
+            });
+            const rows = Array.isArray(res?.data) ? res.data : [];
+            rows.forEach(r => { if (r?.id != null) map.set(String(r.id), r); });
+        } catch (_) {}
+        return map;
+    }
+
+    async function fetchTeamsPrivacy(ids = []) {
+        const list = Array.from(new Set((ids || []).map(normalizeNumericId).filter((id) => id !== null)));
+        const map = new Map();
+        if (!list.length) return map;
+        try {
+            const res = await apiClient.post('/search', {
+                db: 'workz_companies',
+                table: 'teams',
+                columns: ['id', 'em', 'feed_privacy'],
+                conditions: { id: { op: 'IN', value: list } },
+                fetchAll: true,
+                limit: list.length
+            });
+            const rows = Array.isArray(res?.data) ? res.data : [];
+            rows.forEach(r => { if (r?.id != null) map.set(String(r.id), r); });
+        } catch (_) {}
+        return map;
+    }
+
+    async function filterDashboardItems(items = []) {
+        if (!Array.isArray(items) || !items.length) return [];
+        const currentIdStr = String(currentUserData?.id ?? '');
+        // Collect ids
+        const userIds = new Set();
+        const companyIds = new Set();
+        const teamIds = new Set();
+        items.forEach(it => {
+            const us = normalizeNumericId(it?.us); const em = normalizeNumericId(it?.em); const cm = normalizeNumericId(it?.cm);
+            if (em && em > 0) companyIds.add(em);
+            else if (cm && cm > 0) teamIds.add(cm);
+            else if (us && us > 0) userIds.add(us);
+        });
+        // Load privacy metadata
+        try { await ensureFeedUsersLoaded(Array.from(userIds)); } catch(_) {}
+        const companiesMap = await fetchCompaniesPrivacy(Array.from(companyIds));
+        const teamsMap = await fetchTeamsPrivacy(Array.from(teamIds));
+
+        const allowed = items.filter((it) => {
+            const us = normalizeNumericId(it?.us); const em = normalizeNumericId(it?.em); const cm = normalizeNumericId(it?.cm);
+            // Personal post
+            if ((!em || em === 0) && (!cm || cm === 0)) {
+                if (String(us) === currentIdStr) return true; // owner always sees
+                const info = feedUserCache.get(String(us));
+                const fp = Number(info?.feed_privacy ?? 2);
+                if (fp === 0) return false; // Somente eu
+                if (fp === 1) {
+                    // Seguidores: garantir que segue
+                    return Array.isArray(userPeople) && userPeople.map(String).includes(String(us));
+                }
+                return true; // 2 ou 3
+            }
+            // Business post
+            if (em && em > 0) {
+                const row = companiesMap.get(String(em));
+                const fp = Number(row?.feed_privacy ?? 1);
+                if (fp === 0) return isBusinessManagerLocal(em);
+                if (fp === 1) return isBusinessMemberApproved(em);
+                // 2 or 3
+                return true;
+            }
+            // Team post
+            if (cm && cm > 0) {
+                const row = teamsMap.get(String(cm));
+                const fp = Number(row?.feed_privacy ?? 1);
+                if (fp === 0) return isTeamModeratorLocal(cm);
+                if (fp === 1) return isTeamMemberApproved(cm);
+                if (fp === 2) {
+                    // Todos do negócio: membro de negócio do time
+                    const biz = row?.em != null ? row.em : null;
+                    return biz != null ? isBusinessMemberApproved(biz) : false;
+                }
+                return false;
+            }
+            return false;
+        });
+        return allowed;
     }
 
     async function hydrateFeedItems(items = []) {
@@ -4914,6 +5043,110 @@ document.addEventListener('DOMContentLoaded', () => {
     function getFollowersConditions(type, id) {
         if (type === ENTITY.PROFILE) return { s1: id };
         return null;
+    }
+
+    // Determines if the current viewer can see the entity content
+    function canViewEntityContent() {
+        try {
+            const vt = viewType;
+            const data = viewData || {};
+            const logged = !!localStorage.getItem('jwt_token');
+            if (!vt || !data) return true;
+
+            if (vt === ENTITY.PROFILE) {
+                const owner = String(currentUserData?.id ?? '') === String(data?.id ?? '');
+                if (owner) return true;
+                const fp = Number(data?.feed_privacy ?? 2);
+                if (fp === 0) return false; // only me
+                if (fp === 1) {
+                    const idStr = String(data?.id ?? '');
+                    return Array.isArray(userPeople) && userPeople.map(String).includes(idStr);
+                }
+                if (fp === 2) return logged; // logged users
+                return true; // 3: internet
+            }
+
+            if (vt === ENTITY.BUSINESS) {
+                const fp = Number(data?.feed_privacy ?? 1);
+                if (fp === 0) {
+                    const isManager = isBusinessManager(data?.id);
+                    let isModerator = false;
+                    try { const mods = data?.usmn ? JSON.parse(data.usmn) : []; isModerator = Array.isArray(mods) && mods.map(String).includes(String(currentUserData?.id)); } catch(_) {}
+                    return isManager || isModerator;
+                }
+                if (fp === 1) {
+                    return Array.isArray(userBusinessesData) && userBusinessesData.some(r => String(r.em) === String(data?.id) && Number(r.st) === 1);
+                }
+                if (fp === 2) return logged;
+                return true;
+            }
+
+            if (vt === ENTITY.TEAM) {
+                const fp = Number(data?.feed_privacy ?? 1);
+                const teamId = data?.id;
+                if (fp === 0) { try { return isTeamOwner(data) || isTeamModerator(data); } catch(_) { return false; } }
+                if (fp === 1) { return Array.isArray(userTeamsData) && userTeamsData.some(r => String(r.cm) === String(teamId) && Number(r.st) === 1); }
+                if (fp === 2) { const bizId = data?.em; return Array.isArray(userBusinessesData) && userBusinessesData.some(r => String(r.em) === String(bizId) && Number(r.st) === 1); }
+                return false;
+            }
+            return true;
+        } catch(_) { return true; }
+    }
+
+    // Exibe um aviso sobre a restrição de privacidade do CONTEÚDO
+    function getContentPrivacyText(vt, fp) {
+        const p = Number(fp);
+        if (!Number.isFinite(p)) return null;
+        if (vt === ENTITY.PROFILE) {
+            if (p === 0) return 'Somente você';
+            if (p === 1) return 'Seguidores';
+            if (p === 2) return 'Usuários logados';
+            return null; // 3 = Toda a internet (sem aviso)
+        }
+        if (vt === ENTITY.BUSINESS) {
+            if (p === 0) return 'Moderadores';
+            if (p === 1) return 'Usuários membros';
+            if (p === 2) return 'Usuários logados';
+            return null;
+        }
+        if (vt === ENTITY.TEAM) {
+            if (p === 0) return 'Moderadores da equipe';
+            if (p === 1) return 'Membros da equipe';
+            if (p === 2) return 'Todos do negócio';
+            return null;
+        }
+        return null;
+    }
+
+    function insertContentPrivacyNotice() {
+        try {
+            const vt = viewType;
+            const fp = viewData?.feed_privacy;
+            const text = getContentPrivacyText(vt, fp);
+            // Só mostra quando há restrição (quando text != null)
+            if (!text) return;
+            if (canViewEntityContent()) return;
+            const anchor = document.querySelector('#main-content > div > div');
+            if (!anchor || !anchor.parentElement) return;
+            const existing = document.getElementById('content-privacy-notice');
+            if (existing) try { existing.remove(); } catch (_) {}
+            const html = `
+                <div id="content-privacy-notice" class="w-full mt-3">
+                    <div class="rounded-3xl w-full p-3 bg-yellow-50 border border-yellow-200 text-yellow-800 shadow-md">
+                        <i class="fas fa-lock mr-2"></i>
+                        <span>Conteúdo visível apenas para <strong>${text}</strong>.</span>
+                    </div>
+                </div>`;
+            anchor.insertAdjacentHTML('afterend', html);
+            try {
+                const isOwner = String(currentUserData?.id ?? '') === String(viewData?.id ?? '');
+                const isOnlyMe = (vt === ENTITY.PROFILE) && Number(fp) === 0;
+                if (!isOwner && isOnlyMe) {
+                    const span = document.querySelector('#content-privacy-notice span');
+                    if (span) span.textContent = 'Conteudo indisponivel.';
+                }
+            } catch (_) {}
+        } catch (_) { }
     }
 
     // Roteador de ações centralizado
@@ -7213,7 +7446,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     const handler = ACTIONS[action];
                     if (!handler) return;
                     e.preventDefault();
-                    handler({ event: e, button: btn, state: getState() });
+                    Promise.resolve(handler({ event: e, button: btn, state: getState() }))
+                        .finally(() => {
+                            if (action === 'follow-user' || action === 'unfollow-user') {
+                                try {
+                                    if (viewType === ENTITY.PROFILE && String(viewId) === String(getState()?.view?.id)) {
+                                        const fp = Number(viewData?.feed_privacy ?? 0);
+                                        const isOwner = String(currentUserData?.id ?? '') === String(viewId ?? '');
+                                        if (fp === 1) {
+                                            if (action === 'follow-user') viewRestricted = false;
+                                            else if (action === 'unfollow-user' && !isOwner) viewRestricted = true;
+                                        }
+                                        resetFeed();
+                                        loadFeed();
+                                    }
+                                } catch (_) {}
+                            }
+                        });
                 };
                 document.addEventListener('click', _handler);
                 window._mainActionHandler = _handler;
@@ -7286,6 +7535,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Imagem da página
             document.querySelector('#profile-image').src = entityImage
         ]).then(() => {
+            try { insertContentPrivacyNotice(); } catch (_) {}
 
             const widgetWrapper = document.querySelector('#widget-wrapper');
 
@@ -7718,7 +7968,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const res = await apiClient.post('/search', feedPayload);
 
-        const items = res?.data || [];
+        let items = res?.data || [];
 
         // se não veio nada, acabou
         if (!items.length) {
@@ -7727,7 +7977,19 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // renderizar (append)        
+        // Ajusta itens conforme privacidade no dashboard
+        if (viewType === 'dashboard') {
+            try { items = await filterDashboardItems(items); } catch (_) {}
+        }
+
+        // se após filtro não restou nada
+        if (!items.length) {
+            feedFinished = true;
+            feedLoading = false;
+            return;
+        }
+
+        // renderizar (append)
         let feedItems = items;
         try {
             feedItems = await hydrateFeedItems(items);
