@@ -218,3 +218,34 @@ border: 0px solid #ffffff;
     opacity: 1;
   }
 }
+/* iOS-like switch (Desktop settings) */
+.ios-switch {
+  width: 44px;
+  height: 26px;
+  border-radius: 9999px;
+  background: #e5e7eb; /* gray-200 */
+  border: 1px solid rgba(0,0,0,0.08);
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background-color .2s ease, border-color .2s ease;
+}
+.ios-switch .ios-switch-handle {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  transition: transform .2s ease;
+}
+.ios-switch[aria-checked="true"] {
+  background: #fb923c; /* orange-400 */
+  border-color: #fb923c;
+}
+.ios-switch[aria-checked="true"] .ios-switch-handle {
+  transform: translateX(18px);
+}

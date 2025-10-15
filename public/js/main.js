@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const it = e.target.closest('#people,#businesses,#teams,#desktop,#apps,#logout');
                         if (!it || !this.mount.contains(it)) return;
                         const id = it.id;
-                        if (id === 'desktop') { navigateTo('/'); return; }
+                        if (id === 'desktop') { this.push({ view: 'desktop', title: 'Área de Trabalho', payload: { data: currentUserData } }); return; }
                         if (id === 'logout') { handleLogout(); return; }
                         const titleMap = { people: 'Pessoas', businesses: 'Negócios', teams: 'Equipes', apps: 'Aplicativos' };
                         this.push({ view: id, title: titleMap[id] || 'Ajustes', payload: { data: currentUserData } });
@@ -2756,7 +2756,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             </div>
             <div id="app-quickbar" class="bg-black/20 rounded-full p-3 backdrop-blur-md">
-                <div id="quickbar-track" class="flex items-center gap-3 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Acesso rápido a apps">
+                <div id="quickbar-track" class="flex items-center justify-center gap-3 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Acesso rápido a apps">
                     <!-- itens do acesso rápido são injetados pelo JS em initAppLibrary() -->
                 </div>
             </div>
@@ -3194,6 +3194,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${financeShortcuts}
                 ${userChoices}                
             `;
+        } else if (view === 'desktop') {
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: (navTitle || 'Área de Trabalho') });
+
+            const hideFav = (function(){ try { return localStorage.getItem('workz.apps.hideFavorites') === '1'; } catch (_) { return false; } })();
+            const bgUrl = (function(){ try { return localStorage.getItem('workz.desktop.background') || DEFAULT_BING_BG; } catch (_) { return DEFAULT_BING_BG; } })();
+
+            const hideFavCard = UI.sectionCard(
+                UI.row('desktop-hide-favorites', 'Ocultar favoritos da biblioteca', `
+                    <button id="desktop-hide-favorites" data-action="desktop-toggle-hide-favorites" class="ios-switch" role="switch" aria-checked="${hideFav ? 'true' : 'false'}" aria-label="Ocultar favoritos da biblioteca" tabindex="0">
+                        <span class="ios-switch-handle"></span>
+                    </button>
+                `, { top: true, bottom: true })
+            );
+
+            const bgCard = `
+                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
+                    <div class="p-3 font-semibold">Plano de Fundo</div>
+                    <div class="p-3 grid grid-cols-1 gap-3">
+                        <div id="desktop-bg-preview" class="w-full h-36 rounded-xl bg-center bg-cover border" style="background-image: url(${bgUrl});"></div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button data-action="desktop-bg-open-picker" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm"><i class="fas fa-image"></i> Escolher imagem</button>
+                            <button data-action="desktop-bg-remove" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm" ${bgUrl && bgUrl !== DEFAULT_BING_BG ? '' : 'disabled'}><i class="fas fa-trash-alt"></i> Remover</button>
+                        </div>
+                        <input type="file" id="desktop-bg-file" accept="image/*" class="hidden" />
+                        <div class="text-xs text-gray-500">Quando não personalizado, será exibido o plano de fundo do Bing por padrão.</div>
+                    </div>
+                </div>
+            `;
+
+            html += hideFavCard + bgCard;
+
         } else if (view === 'password') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const userId = data?.id ?? currentUserData?.id ?? '';
@@ -5177,6 +5208,45 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ===== Desktop background helpers =====
+    const DESKTOP_BG_KEY = 'workz.desktop.background';
+    const DEFAULT_BING_BG = 'https://bing.biturl.top/?resolution=1366&format=image&index=0&mkt=en-US';
+    function getDesktopBg() {
+        try { return localStorage.getItem(DESKTOP_BG_KEY) || ''; } catch (_) { return ''; }
+    }
+    function setDesktopBg(val) {
+        try {
+            if (val) localStorage.setItem(DESKTOP_BG_KEY, val);
+            else localStorage.removeItem(DESKTOP_BG_KEY);
+        } catch (_) {}
+        return applyDesktopBackgroundFromSettings();
+    }
+    function applyDesktopBackgroundFromSettings() {
+        const stored = getDesktopBg();
+        const url = stored || DEFAULT_BING_BG;
+        try {
+            const target = document.querySelector('#main-content > div');
+            if (target) {
+                target.style.backgroundImage = `url(${url})`;
+                target.style.backgroundPosition = 'center';
+                target.style.backgroundRepeat = 'no-repeat';
+                target.style.backgroundSize = 'cover';
+            }
+        } catch (_) {}
+        return url;
+    }
+    function refreshDesktopBgPreview(scope = null) {
+        const url = getDesktopBg() || DEFAULT_BING_BG;
+        const mount = scope || document.querySelector('.sidebar-content');
+        try {
+            const prev = mount && mount.querySelector('#desktop-bg-preview');
+            if (prev) prev.style.backgroundImage = `url(${url})`;
+            const rmBtn = mount && mount.querySelector('[data-action="desktop-bg-remove"]');
+            if (rmBtn) rmBtn.disabled = !getDesktopBg();
+        } catch (_) {}
+    }
+
+    // ===== Sidebar actions =====
     const ACTIONS = {
         'dashboard': ({ state }) => navigateTo('/'),
         'my-profile': ({ state }) => navigateTo(`/profile/${state.user?.id}`),
@@ -5185,6 +5255,44 @@ document.addEventListener('DOMContentLoaded', () => {
         'list-businesses': () => navigateTo('/businesses'),
         'list-teams': () => navigateTo('/teams'),
         'logout': () => handleLogout(),
+
+        // Desktop settings actions
+        'desktop-toggle-hide-favorites': ({ event, button }) => {
+            try {
+                const isOn = String(button.getAttribute('aria-checked')) === 'true';
+                const newState = !isOn;
+                button.setAttribute('aria-checked', newState ? 'true' : 'false');
+                localStorage.setItem('workz.apps.hideFavorites', newState ? '1' : '0');
+            } catch (_) {}
+            try {
+                const lib = document.querySelector('#app-library');
+                if (lib && typeof lib._applyAppGridFilters === 'function') {
+                    lib._applyAppGridFilters();
+                }
+            } catch (_) {}
+        },
+        'desktop-bg-open-picker': ({ button }) => {
+            const mount = button.closest('.sidebar-content') || document;
+            const input = mount.querySelector('#desktop-bg-file');
+            if (!input) return;
+            try { if (input._bound) input.removeEventListener('change', input._bound); } catch (_) {}
+            const onChange = (ev) => {
+                try { input.removeEventListener('change', onChange); } catch (_) {}
+                const file = ev?.target?.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => { try { setDesktopBg(reader.result); refreshDesktopBgPreview(mount); } catch (_) {} };
+                try { reader.readAsDataURL(file); } catch (_) {}
+                try { ev.target.value = ''; } catch (_) {}
+            };
+            input.addEventListener('change', onChange);
+            input._bound = onChange;
+            try { input.click(); } catch (_) {}
+        },
+        'desktop-bg-remove': ({ button }) => {
+            try { setDesktopBg(''); } catch (_) {}
+            try { refreshDesktopBgPreview(button.closest('.sidebar-content') || document); } catch (_) {}
+        },
         // Editor: atalhos rápidos
         'editor-quick-text': async () => {
             try {
@@ -7479,6 +7587,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 ?
                 // Conteúdo principal (Dashboard)
                 renderTemplate(document.querySelector('#main-content'), 'mainContent', null, async () => {
+                    // Aplicar plano de fundo personalizado da área de trabalho (ou Bing por padrão)
+                    try { applyDesktopBackgroundFromSettings(); } catch (_) {}
                     startClock();
                     // Gatilho no topo (próximo ao relógio) para abrir o menu lateral de apps
                     try {
@@ -7746,24 +7856,42 @@ document.addEventListener('DOMContentLoaded', () => {
         el.addEventListener('click', clickHandler);
         el._appClickHandler = clickHandler;
 
-        // Search filter logic
+        // Search + Hide favorites filter
         const searchInput = el.querySelector('#app-search-input');
         const appGrid = el.querySelector('#app-grid');
+
+        const HIDE_FAV_KEY = 'workz.apps.hideFavorites';
+        const getHideFav = () => { try { return localStorage.getItem(HIDE_FAV_KEY) === '1'; } catch (_) { return false; } };
+
+        async function applyAppGridFilters() {
+            if (!appGrid) return;
+            const searchTerm = (searchInput?.value || '').toLowerCase().trim();
+            const hideFav = getHideFav();
+            let favIds = [];
+            try { favIds = await fetchQuickFromServer(); } catch (_) { favIds = quickCache || []; }
+            const favSet = new Set((favIds || []).map(n => Number(n)));
+            const appItems = appGrid.querySelectorAll('.app-item-button');
+            appItems.forEach(item => {
+                const appName = (item.dataset.appName || '').toLowerCase();
+                const id = Number(item.dataset.appId);
+                const matchesSearch = appName.includes(searchTerm);
+                const isFav = favSet.has(id);
+                const shouldHide = !matchesSearch || (hideFav && isFav);
+                item.style.display = shouldHide ? 'none' : '';
+            });
+        }
+
         if (searchInput && appGrid) {
             if (searchInput._appSearchHandler) {
                 try { searchInput.removeEventListener('input', searchInput._appSearchHandler); } catch (_) {}
             }
-            const inputHandler = (e) => {
-                const searchTerm = e.target.value.toLowerCase().trim();
-                const appItems = appGrid.querySelectorAll('.app-item-button');
-                appItems.forEach(item => {
-                    const appName = item.dataset.appName || '';
-                    item.style.display = appName.includes(searchTerm) ? '' : 'none';
-                });
-            };
+            const inputHandler = () => { applyAppGridFilters(); };
             searchInput.addEventListener('input', inputHandler);
             searchInput._appSearchHandler = inputHandler;
         }
+
+        // Expor para que outras views possam reaplicar o filtro
+        try { el._applyAppGridFilters = applyAppGridFilters; } catch (_) {}
 
         // ===== Quick access (Favoritos) – sincronizado com backend =====
         const track = el.querySelector('#quickbar-track');
@@ -7811,12 +7939,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 catch (_) { setLocalQuick([...ids]); }
             }
             quickCache = [...ids];
+            // Atualiza UI dependente (quickbar, estrelas e filtro da grade)
+            try { await renderQuickBar(); } catch (_) {}
+            try { await refreshQuickStars(); } catch (_) {}
+            try { applyAppGridFilters && applyAppGridFilters(); } catch (_) {}
             return quickCache;
         }
         async function renderQuickBar() {
             if (!track) return;
             const ids = await fetchQuickFromServer();
-            let html = '';
+            // Envolve os itens em um contêiner centrado e com largura do conteúdo
+            let html = '<div class="flex items-center gap-3 w-max mx-auto">';
             // Loja (sempre presente)
             html += `
                 <button data-store="1" class="shrink-0 snap-start" title="Loja de aplicativos">
@@ -7838,6 +7971,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         </button>
                     </div>`;
             });
+            html += '</div>';
             track.innerHTML = html;
         }
 
@@ -7862,7 +7996,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Sem remoção pela quickbar: manter apenas abertura de apps
 
         // Inicializa barra e estado das estrelas
-        fetchQuickFromServer().then(() => { renderQuickBar(); refreshQuickStars(); });
+        fetchQuickFromServer().then(() => { renderQuickBar(); refreshQuickStars(); try { applyAppGridFilters && applyAppGridFilters(); } catch (_) {} });
     }
 
     // Abre a sidebar diretamente na view "Aplicativos"
