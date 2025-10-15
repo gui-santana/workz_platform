@@ -44,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let memberStatus = null;
     let memberLevel = null;
     let viewRestricted = false;
+    let pageRestricted = false;
 
     let viewType = null;
     let viewId = null;
@@ -2694,6 +2695,18 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
     `;
 
+    // Mensagem para paginas publicas que exigem login (page_privacy != 1)
+    templates.pageRestricted = () => `
+        <div class="rounded-3xl w-full p-4 bg-white shadow-lg">
+            <div class="p-3 text-sm text-gray-700">
+                Esta pagina esta disponivel apenas para usuarios logados.
+            </div>
+            <div class="p-3">
+                <button data-action="dashboard" class="w-full h-11 rounded-3xl bg-orange-600 text-white font-semibold hover:bg-orange-700 transition-colors">Fazer login</button>
+            </div>
+        </div>
+    `;
+
     templates.appLibrary = async ({ appsList }) => {
         const resolved = Array.isArray(appsList) ? appsList : (appsList ? [appsList] : []);
         // Store tile (always visible)
@@ -4006,6 +4019,10 @@ document.addEventListener('DOMContentLoaded', () => {
             actionContainer.innerHTML = '';
         }
 
+        // Visitante (sem login) não exibe ações interativas
+        const authed = !!localStorage.getItem('jwt_token') && !!(currentUserData && currentUserData.id != null);
+        if (!authed || !actionContainer) return;
+
         const isManager = memberLevel >= 3;
         if (viewType === ENTITY.PROFILE) {
             const isFollowing = Array.isArray(userPeople)
@@ -4019,7 +4036,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (viewType === ENTITY.BUSINESS) {
             const parseIdArray = (val) => { try { const arr = JSON.parse(val); return Array.isArray(arr) ? arr : []; } catch (_) { return []; } };
             const mods = (viewData?.usmn) ? parseIdArray(viewData.usmn) : [];
-            const isModerator = mods.map(String).includes(String(currentUserData.id));
+            const isModerator = mods.map(String).includes(String(currentUserData?.id));
 
             // Verifica se o usuário não é gestor na empresa ou moderador
             if (!isManager && !isModerator) {
@@ -4072,7 +4089,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (viewType === 'dashboard') {
             customMenu.insertAdjacentHTML('beforeend', UI.menuItem({ action: 'my-profile', icon: 'fa-address-card', label: 'Meu Perfil' }));
         } else {
-            if (viewType === ENTITY.PROFILE && currentUserData.id === viewId) {
+            if (viewType === ENTITY.PROFILE && currentUserData && currentUserData.id === viewId) {
                 customMenu.insertAdjacentHTML('beforeend', `
                     <li><button data-sidebar-action="page-settings" class="cursor-pointer text-left rounded-3xl hover:bg-gray-200 transition-colors truncate w-full pt-1 pb-1 pr-2 flex items-center"><span class="fa-stack text-gray-200 mr-1"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-cog fa-stack-1x text-gray-700"></i></span><span class="truncate">Ajustes</a></span></li>
                 `);
@@ -6422,6 +6439,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (!localStorage.getItem('jwt_token')) {
+            // Rota pública: permite visualizar perfis e negócios com página pública
+            const path = window.location.pathname || '';
+            const isPublicEntityRoute = /^(\/profile\/(\d+)|\/business\/(\d+))$/.test(path);
+            if (isPublicEntityRoute) {
+                // Renderiza layout base para suportar entity view e feed containers
+                renderTemplate(mainWrapper, 'dashboard', null, () => {
+                    // Oculta o gatilho da sidebar para visitantes
+                    const st = document.querySelector('#sidebarTrigger');
+                    if (st) st.style.display = 'none';
+                    workzContent = document.querySelector('#workz-content');
+                    loadPage();
+                });
+                return;
+            }
+            // Fallback: landing pública com login e feed básico
             showNotLoggedIn();
             return;
         }
@@ -6741,6 +6773,7 @@ document.addEventListener('DOMContentLoaded', () => {
         viewId = null;
         viewData = null;
         viewType = null;
+        pageRestricted = false;
 
         if (peopleListMatch) {
             renderListV2();
@@ -6944,15 +6977,20 @@ document.addEventListener('DOMContentLoaded', () => {
             viewData = entityRow;
             applyEntityBackgroundImage(viewData);
 
-            // Restrição de acesso por privacidade de conteúdo
+            // Restrição de acesso por privacidade da página e do conteúdo
             // Equipes: somente membros aprovados da equipe
             if (viewType === ENTITY.TEAM) {
                 const isTeamMemberApproved = Array.isArray(userTeamsData)
                     ? userTeamsData.some(t => String(t.cm) === String(viewData.id) && Number(t.st) === 1)
                     : false;
                 viewRestricted = !isTeamMemberApproved;
+                pageRestricted = false;
             } else if (viewType === ENTITY.PROFILE) {
                 // Pessoas: feed_privacy
+                // Página: pública (=1) permite acesso sem login; caso contrário, exige login
+                const hasJwt = !!localStorage.getItem('jwt_token');
+                const pp = Number(viewData?.page_privacy ?? 0);
+                pageRestricted = !hasJwt && pp !== 1;
                 const fp = Number(viewData?.feed_privacy ?? 0);
                 const isOwner = String(currentUserData?.id ?? '') === String(viewData?.id ?? '');
                 const isFollower = Array.isArray(userPeople)
@@ -6966,12 +7004,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else if (fp === 1) {
                         // Seguidores
                         restricted = !isFollower;
+                    } else if (fp === 2) {
+                        // Usuários logados
+                        restricted = !hasJwt;
                     } else {
-                        // 2: Usuários logados; 3: Toda a internet (OK para logados)
+                        // 3: Toda a internet (OK mesmo sem login, desde que a página seja pública)
                         restricted = false;
                     }
                 }
-                viewRestricted = restricted;
+                viewRestricted = pageRestricted ? true : restricted;
             } else if (viewType === ENTITY.BUSINESS) {
                 // Negócios: feed_privacy
                 const fp = Number(viewData?.feed_privacy ?? 0);
@@ -6982,6 +7023,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isMemberApproved = Array.isArray(userBusinessesData)
                     ? userBusinessesData.some(r => String(r.em) === String(viewData?.id) && Number(r.st) === 1)
                     : false;
+                const hasJwt = !!localStorage.getItem('jwt_token');
+                const pp = Number(viewData?.page_privacy ?? 0);
+                pageRestricted = !hasJwt && pp !== 1;
                 let restricted = false;
                 if (fp === 0) {
                     // Moderadores
@@ -6989,13 +7033,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (fp === 1) {
                     // Usuários membros
                     restricted = !isMemberApproved;
+                } else if (fp === 2) {
+                    // Usuários logados
+                    restricted = !hasJwt;
                 } else {
-                    // 2: Usuários logados; 3: Toda a internet (OK para logados)
+                    // 3: Toda a internet (OK mesmo sem login, desde que a página seja pública)
                     restricted = false;
                 }
-                viewRestricted = restricted;
+                viewRestricted = pageRestricted ? true : restricted;
             } else {
                 viewRestricted = false;
+                pageRestricted = false;
+            }
+
+            // Se a página está restrita para visitantes, redireciona para a página inicial
+            if (pageRestricted) {
+                try { window.location.href = '/'; } catch (_) { try { navigateTo('/'); } catch (__) {} }
+                return;
             }
 
             const postConditions = getPostConditions(viewType, entityId);
@@ -7088,12 +7142,20 @@ document.addEventListener('DOMContentLoaded', () => {
             widgetTeamsCount = results.teamsCount ?? 0;
         }
 
-        // Depois os widgets, na ordem desejada
-        if (widgetPeople.length) await appendWidget('people', widgetPeople, widgetPeopleCount);
-        if (widgetBusinesses.length) await appendWidget('businesses', widgetBusinesses, widgetBusinessesCount);
-        if (widgetTeams.length) await appendWidget('teams', widgetTeams, widgetTeamsCount);
-        if ([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(viewType) && viewData) {
-            appendContactsWidget(viewData);
+        // Widgets: para visitantes (sem login), mostrar UI de login no wrapper;
+        // usuários logados mantêm widgets, desde que a página não esteja bloqueada
+        const isAuthed = !!localStorage.getItem('jwt_token');
+        if (!isAuthed) {
+            if (widgetWrapper) {
+                await renderTemplate(widgetWrapper, 'init', null, () => { try { renderLoginUI(); } catch (_) {} });
+            }
+        } else if (!pageRestricted) {
+            if (widgetPeople.length) await appendWidget('people', widgetPeople, widgetPeopleCount);
+            if (widgetBusinesses.length) await appendWidget('businesses', widgetBusinesses, widgetBusinessesCount);
+            if (widgetTeams.length) await appendWidget('teams', widgetTeams, widgetTeamsCount);
+            if ([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(viewType) && viewData) {
+                appendContactsWidget(viewData);
+            }
         }
 
         // Nível do usuário
@@ -7113,10 +7175,17 @@ document.addEventListener('DOMContentLoaded', () => {
             (viewType === ENTITY.PROFILE && currentUserData && normalizedViewId !== null && String(normalizedViewId) === String(currentUserData.id)) ||
             (viewType === ENTITY.BUSINESS && Number(memberStatus) === 1) ||
             (viewType === ENTITY.TEAM && Number(memberStatus) === 1 && !viewRestricted);
+        // Nunca mostrar gatilho se página bloqueada
+        if (pageRestricted) {
+            editorTriggerEl.innerHTML = '';
+            editorTriggerEl.hidden = true;
+        }
 
         const editorTriggerPromise = (async () => {
             if (!editorTriggerEl) return;
-            if (!shouldShowEditorTrigger) {
+            // Nunca mostrar gatilho se página bloqueada ou visitante
+            const isAuthed2 = !!localStorage.getItem('jwt_token');
+            if (!shouldShowEditorTrigger || !isAuthed2 || pageRestricted) {
                 editorTriggerEl.innerHTML = '';
                 editorTriggerEl.hidden = true;
                 return;
@@ -7580,6 +7649,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!viewType) return;
 
         if (feedLoading || feedFinished) return;
+        // Se a view está restrita (por feed_privacy/page_privacy), não carregar feed
+        if ((viewType === ENTITY.PROFILE || viewType === ENTITY.BUSINESS || viewType === ENTITY.TEAM) && viewRestricted) {
+            feedFinished = true;
+            feedLoading = false;
+            return;
+        }
         feedLoading = true;
 
         const orBlocks = [];
@@ -7619,7 +7694,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const res = await apiClient.post('/search', {
+        const feedPayload = {
             db: 'workz_data',
             table: 'hpl',
             columns: ['id', 'us', 'em', 'cm', 'tt', 'ct', 'dt', 'im'],
@@ -7631,7 +7706,17 @@ document.addEventListener('DOMContentLoaded', () => {
             fetchAll: true,
             limit: FEED_PAGE_SIZE,
             offset: feedOffset
-        });
+        };
+        // Visitante (sem login): só exibe posts pessoais de autores com página e conteúdo públicos
+        if (viewType === 'public') {
+            feedPayload.exists = [{
+                table: 'hus',
+                local: 'us',
+                remote: 'id',
+                conditions: { st: 1, feed_privacy: 3, page_privacy: 1 }
+            }];
+        }
+        const res = await apiClient.post('/search', feedPayload);
 
         const items = res?.data || [];
 
