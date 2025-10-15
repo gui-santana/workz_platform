@@ -2478,7 +2478,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         mainContent: `
-            <div class="w-full grid grid-cols-12 gap-6 rounded-3xl p-4 bg-white" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
+            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl p-4 bg-white" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
                 <div class="col-span-12 grid grid-cols-12 gap-4">
                     <div class="col-span-12 text-white font-bold content-center text-shadow-lg flex items-center justify-between">
                         <div id="wClock" class="text-md">00:00</div>
@@ -5225,7 +5225,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const stored = getDesktopBg();
         const url = stored || DEFAULT_BING_BG;
         try {
-            const target = document.querySelector('#main-content > div');
+            const target = document.querySelector('#main-content > .dashboard-main');
             if (target) {
                 target.style.backgroundImage = `url(${url})`;
                 target.style.backgroundPosition = 'center';
