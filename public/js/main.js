@@ -75,41 +75,110 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Publicação: estado de privacidade (sincronizado entre trigger e editor)
     const POST_PRIVACY_STORAGE_KEY = 'workz.post.privacy';
-    const DEFAULT_POST_PRIVACY = 3; // 0: Somente eu, 1: Seguidores/Membros, 2: Logados, 3: Público
+    const DEFAULT_POST_PRIVACY = 'public'; // tokens: 'me','mod','lv1','lv2','lv3'/'public'
     function getPostPrivacy() {
         try {
             const v = localStorage.getItem(POST_PRIVACY_STORAGE_KEY);
-            if (v == null || v === '') return DEFAULT_POST_PRIVACY;
-            const n = Number(v);
-            return Number.isFinite(n) ? n : DEFAULT_POST_PRIVACY;
+            if (!v) return DEFAULT_POST_PRIVACY;
+            // Backward compat for old numeric storage
+            if (/^\d+$/.test(v)) {
+                const n = Number(v);
+                if (n === 0) return 'me';
+                if (n === 1) return 'lv1';
+                if (n === 2) return 'lv2';
+                if (n >= 3) return 'lv3';
+                return DEFAULT_POST_PRIVACY;
+            }
+            return v;
         } catch (_) { return DEFAULT_POST_PRIVACY; }
     }
     function setPostPrivacy(val) {
-        try { localStorage.setItem(POST_PRIVACY_STORAGE_KEY, String(val)); } catch (_) {}
-        return Number(val) || DEFAULT_POST_PRIVACY;
+        const token = String(val || '').trim() || DEFAULT_POST_PRIVACY;
+        try { localStorage.setItem(POST_PRIVACY_STORAGE_KEY, token); } catch (_) {}
+        return token;
+    }
+    function getCurrentPublishingContext() {
+        try {
+            let vt = viewType;
+            let data = viewData;
+            if (vt === 'dashboard' || vt == null) { vt = ENTITY.PROFILE; data = currentUserData; }
+            let fpMax = Number(data?.feed_privacy ?? (vt === ENTITY.PROFILE ? 2 : 1));
+            if (!Number.isFinite(fpMax)) fpMax = (vt === ENTITY.TEAM) ? 1 : 2;
+            let isMod = false;
+            if (vt === ENTITY.BUSINESS) {
+                isMod = isBusinessManager(data?.id);
+            } else if (vt === ENTITY.TEAM) {
+                isMod = !!canManageTeam(data);
+            } else {
+                isMod = false;
+            }
+            return { vt, data, fpMax, isMod };
+        } catch (_) { return { vt: ENTITY.PROFILE, data: currentUserData, fpMax: 2, isMod: false }; }
+    }
+    function getPrivacyLabelsForContext(vt) {
+        if (vt === ENTITY.BUSINESS) {
+            return {
+                me: 'Somente eu',
+                mod: 'Moderadores',
+                lv1: 'Usuários membros',
+                lv2: 'Usuários logados',
+                lv3: 'Toda a internet'
+            };
+        } else if (vt === ENTITY.TEAM) {
+            return {
+                me: 'Somente eu',
+                mod: 'Moderadores',
+                lv1: 'Membros da equipe',
+                lv2: 'Todos do negócio'
+            };
+        }
+        // PROFILE (padrão)
+        return {
+            me: 'Somente eu',
+            lv1: 'Seguidores',
+            lv2: 'Usuários logados',
+            lv3: 'Toda a internet'
+        };
+    }
+    function buildAllowedPrivacyTokens({ vt, fpMax, isMod }) {
+        const tokens = [];
+        // 'Somente eu' sempre permitido
+        tokens.push('me');
+        // Moderadores apenas se usuário tiver nível adequado
+        if ((vt === ENTITY.BUSINESS || vt === ENTITY.TEAM) && isMod) tokens.push('mod');
+        // Níveis da página conforme limite
+        if (fpMax >= 1) tokens.push('lv1');
+        if (fpMax >= 2) tokens.push('lv2');
+        if (fpMax >= 3 && vt !== ENTITY.TEAM) tokens.push('lv3');
+        return tokens;
+    }
+    function coercePrivacyValue(allowedTokens, currentToken) {
+        if (allowedTokens.includes(currentToken)) return currentToken;
+        // Preferir valor mais aberto permitido (último da lista), mantendo 'me' como fallback
+        return allowedTokens[allowedTokens.length - 1] || 'me';
+    }
+    function renderPrivacySelect(selectEl, ctx) {
+        if (!selectEl || !ctx) return;
+        const labels = getPrivacyLabelsForContext(ctx.vt);
+        const allowed = buildAllowedPrivacyTokens(ctx);
+        const current = getPostPrivacy();
+        const chosen = coercePrivacyValue(allowed, current);
+        const optsHtml = allowed.map(tok => `<option value="${tok}">${labels[tok] || tok}</option>`).join('');
+        selectEl.innerHTML = optsHtml;
+        try { selectEl.value = chosen; } catch(_) {}
+        // Persist coerced value if different
+        if (chosen !== current) setPostPrivacy(chosen);
+        // Bind change
+        if (!selectEl._bound) {
+            const onChange = (e) => { setPostPrivacy(e?.target?.value ?? DEFAULT_POST_PRIVACY); };
+            selectEl.addEventListener('change', onChange);
+            selectEl._bound = onChange;
+        }
     }
     function setupPostPrivacyBindings(scope = document) {
-        const current = String(getPostPrivacy());
-        // Trigger selector (na área do feed)
-        const triggerSel = scope.querySelector('#postPrivacyTrigger');
-        if (triggerSel) {
-            try { triggerSel.value = current; } catch(_) {}
-            if (!triggerSel._bound) {
-                const onChange = (e) => { setPostPrivacy(e?.target?.value ?? DEFAULT_POST_PRIVACY); };
-                triggerSel.addEventListener('change', onChange);
-                triggerSel._bound = onChange;
-            }
-        }
-        // Editor selector (dentro do post-editor)
-        const editorSel = scope.querySelector('#postPrivacySelect');
-        if (editorSel) {
-            try { editorSel.value = current; } catch(_) {}
-            if (!editorSel._bound) {
-                const onChange = (e) => { setPostPrivacy(e?.target?.value ?? DEFAULT_POST_PRIVACY); };
-                editorSel.addEventListener('change', onChange);
-                editorSel._bound = onChange;
-            }
-        }
+        const ctx = getCurrentPublishingContext();
+        renderPrivacySelect(scope.querySelector('#postPrivacyTrigger'), ctx);
+        renderPrivacySelect(scope.querySelector('#postPrivacySelect'), ctx);
     }
 
     
@@ -2276,21 +2345,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     <a class="block w-full overflow-hidden whitespace-nowrap truncate">O que você quer publicar, ${currentUserData.tt.split(' ')[0]}?</a>
                 </div>                
             </div>
-            <div class="w-full p-3 flex gap-3">
+            <div class="w-full p-3 flex items-center gap-3">
                 <button class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-text" aria-label="Abrir editor com texto">
                     <i class="fas fa-font"></i>                    
                 </button>
                 <button class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-media" aria-label="Abrir editor e adicionar mídia">
                     <i class="fas fa-image"></i>                    
                 </button>                
-                <div class="ml-2">
+                <div class="ml-auto flex items-center gap-2">
                     <label for="postPrivacyTrigger" class="sr-only">Privacidade</label>
-                    <select id="postPrivacyTrigger" class="h-9 px-3 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm">
-                        <option value="0">Somente eu</option>
-                        <option value="1">Seguidores/Membros</option>
-                        <option value="2">Usuários logados</option>
-                        <option value="3">Toda a internet</option>
-                    </select>
+                    <select id="postPrivacyTrigger" class="h-9 px-3 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm"></select>
                 </div>
             </div>
         `,
@@ -3922,12 +3986,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <input id="postMediaPicker" class="hidden" type="file" multiple accept="image/*,video/*">
                         <div class="ml-auto flex items-center gap-2">
                             <label for="postPrivacySelect" class="text-xs text-slate-600">Privacidade</label>
-                            <select id="postPrivacySelect" class="h-8 px-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm">
-                                <option value="0">Somente eu</option>
-                                <option value="1">Seguidores/Membros</option>
-                                <option value="2">Usuários logados</option>
-                                <option value="3">Toda a internet</option>
-                            </select>
+                            <select id="postPrivacySelect" class="h-8 px-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm"></select>
                             <button id="publishGalleryBtn" type="button" class="px-3 py-2 rounded-2xl bg-indigo-600 text-white text-sm hover:bg-indigo-700">Publicar</button>
                         </div>
                     </div>
