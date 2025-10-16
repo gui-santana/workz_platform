@@ -73,6 +73,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     let feedInteractionsAttached = false;
 
+    // Publicação: estado de privacidade (sincronizado entre trigger e editor)
+    const POST_PRIVACY_STORAGE_KEY = 'workz.post.privacy';
+    const DEFAULT_POST_PRIVACY = 3; // 0: Somente eu, 1: Seguidores/Membros, 2: Logados, 3: Público
+    function getPostPrivacy() {
+        try {
+            const v = localStorage.getItem(POST_PRIVACY_STORAGE_KEY);
+            if (v == null || v === '') return DEFAULT_POST_PRIVACY;
+            const n = Number(v);
+            return Number.isFinite(n) ? n : DEFAULT_POST_PRIVACY;
+        } catch (_) { return DEFAULT_POST_PRIVACY; }
+    }
+    function setPostPrivacy(val) {
+        try { localStorage.setItem(POST_PRIVACY_STORAGE_KEY, String(val)); } catch (_) {}
+        return Number(val) || DEFAULT_POST_PRIVACY;
+    }
+    function setupPostPrivacyBindings(scope = document) {
+        const current = String(getPostPrivacy());
+        // Trigger selector (na área do feed)
+        const triggerSel = scope.querySelector('#postPrivacyTrigger');
+        if (triggerSel) {
+            try { triggerSel.value = current; } catch(_) {}
+            if (!triggerSel._bound) {
+                const onChange = (e) => { setPostPrivacy(e?.target?.value ?? DEFAULT_POST_PRIVACY); };
+                triggerSel.addEventListener('change', onChange);
+                triggerSel._bound = onChange;
+            }
+        }
+        // Editor selector (dentro do post-editor)
+        const editorSel = scope.querySelector('#postPrivacySelect');
+        if (editorSel) {
+            try { editorSel.value = current; } catch(_) {}
+            if (!editorSel._bound) {
+                const onChange = (e) => { setPostPrivacy(e?.target?.value ?? DEFAULT_POST_PRIVACY); };
+                editorSel.addEventListener('change', onChange);
+                editorSel._bound = onChange;
+            }
+        }
+    }
+
     
 
     // Evita que cliques internos da sidebar acionem o handler global de fechar
@@ -2231,26 +2270,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Nova versão do gatilho do editor com botão principal e atalhos
         editorTriggerV2: (currentUserData) => `
-            <div class="w-full p-4 flex items-center gap-3 bg-gradient-to-r from-indigo-50 to-white border-b border-gray-100 rounded-t-3xl">
-                <img class="page-thumb w-12 h-12 rounded-full pointer shadow-sm ring-2 ring-white" src="/images/no-image.jpg" alt="Avatar" />
-                <button id="post-editor" class="flex-1 h-12 rounded-2xl pointer bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 flex items-center justify-center gap-2 shadow-md transition-colors" aria-label="Abrir editor">
-                    <i class="fas fa-pen"></i>
-                    <span>Abrir Editor</span>
-                </button>
+            <div class="w-full p-3 border-b-2 border-gray-100 flex items-center gap-3">
+                <img class="page-thumb w-11 h-11 rounded-full pointer" src="/images/no-image.jpg" />
+                <div id="post-editor" class="flex-1 rounded-3xl h-11 pointer text-gray-500 px-4 text-left bg-gray-100 hover:bg-gray-200 flex items-center overflow-hidden whitespace-nowrap truncate">
+                    <a class="block w-full overflow-hidden whitespace-nowrap truncate">O que você quer publicar, ${currentUserData.tt.split(' ')[0]}?</a>
+                </div>                
             </div>
-            <div class="w-full p-3 grid grid-cols-3 gap-2">
-                <button class="h-11 pointer rounded-2xl flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-text" aria-label="Abrir editor com texto">
-                    <i class="fas fa-font"></i>
-                    <span class="text-sm font-medium">Texto</span>
+            <div class="w-full p-3 flex gap-3">
+                <button class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-text" aria-label="Abrir editor com texto">
+                    <i class="fas fa-font"></i>                    
                 </button>
-                <button class="h-11 pointer rounded-2xl flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-media" aria-label="Abrir editor e adicionar mídia">
-                    <i class="fas fa-image"></i>
-                    <span class="text-sm font-medium">Mídia</span>
-                </button>
-                <button class="h-11 pointer rounded-2xl flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-bg" aria-label="Abrir editor e definir plano de fundo">
-                    <i class="fas fa-fill-drip"></i>
-                    <span class="text-sm font-medium">Fundo</span>
-                </button>
+                <button class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-media" aria-label="Abrir editor e adicionar mídia">
+                    <i class="fas fa-image"></i>                    
+                </button>                
+                <div class="ml-2">
+                    <label for="postPrivacyTrigger" class="sr-only">Privacidade</label>
+                    <select id="postPrivacyTrigger" class="h-9 px-3 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm">
+                        <option value="0">Somente eu</option>
+                        <option value="1">Seguidores/Membros</option>
+                        <option value="2">Usuários logados</option>
+                        <option value="3">Toda a internet</option>
+                    </select>
+                </div>
             </div>
         `,
 
@@ -3877,9 +3918,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += `
                 <!-- Galeria (carrossel) - upload múltiplo e publicação -->
                 <section class="editor-card">                                                               
-                    <div class="flex items-center gap-2">                            
-                        <input id="postMediaPicker" class="hidden" type="file" multiple accept="image/*,video/*">                            
-                        <button id="publishGalleryBtn" type="button" class="ml-auto px-3 py-2 rounded-2xl bg-indigo-600 text-white text-sm hover:bg-indigo-700">Publicar</button>
+                    <div class="flex items-center gap-2">
+                        <input id="postMediaPicker" class="hidden" type="file" multiple accept="image/*,video/*">
+                        <div class="ml-auto flex items-center gap-2">
+                            <label for="postPrivacySelect" class="text-xs text-slate-600">Privacidade</label>
+                            <select id="postPrivacySelect" class="h-8 px-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm">
+                                <option value="0">Somente eu</option>
+                                <option value="1">Seguidores/Membros</option>
+                                <option value="2">Usuários logados</option>
+                                <option value="3">Toda a internet</option>
+                            </select>
+                            <button id="publishGalleryBtn" type="button" class="px-3 py-2 rounded-2xl bg-indigo-600 text-white text-sm hover:bg-indigo-700">Publicar</button>
+                        </div>
                     </div>
                     <div id="postMediaTray" class=""></div>                   
                 </section>
@@ -5154,10 +5204,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const existing = document.getElementById('content-privacy-notice');
             if (existing) try { existing.remove(); } catch (_) {}
             const html = `
-                <div id="content-privacy-notice" class="w-full mt-3">
-                    <div class="rounded-3xl w-full p-3 bg-yellow-50 border border-yellow-200 text-yellow-800 shadow-md">
-                        <i class="fas fa-lock mr-2"></i>
-                        <span>Conteúdo visível apenas para <strong>${text}</strong>.</span>
+                <div id="content-privacy-notice" class="px-6">
+                    <div class="w-full">
+                        <div class="rounded-3xl w-full p-2 bg-yellow-50 border border-yellow-100 text-yellow-800 shadow-sm">
+                            <i class="fas fa-lock mr-1"></i>
+                            <span>Conteúdo visível apenas para <strong>${text}</strong>.</span>
+                        </div>
                     </div>
                 </div>`;
             anchor.insertAdjacentHTML('afterend', html);
@@ -5977,6 +6029,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Estratégia local-first: override de picker e captura
                     try { setupLocalFirstGalleryUpload(sidebarWrapper); } catch (_) {}
                     try { setupEditorCaptureBridgeLocal(sidebarWrapper); } catch (_) {}
+                    // Sincronizar seletor de privacidade do editor
+                    try { setupPostPrivacyBindings(sidebarWrapper); } catch (_) {}
 
                     // Buscar elementos diretamente no sidebarWrapper
                     const appShellInSidebar = sidebarWrapper.querySelector('#appShell');
@@ -6439,6 +6493,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         // Estratégia local-first: override de picker e captura
                         try { setupLocalFirstGalleryUpload(sidebarWrapper); } catch (_) {}
                         try { setupEditorCaptureBridgeLocal(sidebarWrapper); } catch (_) {}
+                        // Sincronizar seletor de privacidade do editor
+                        try { setupPostPrivacyBindings(sidebarWrapper); } catch (_) {}
                         // Buscar elementos diretamente no sidebarWrapper
                         const appShellInSidebar = sidebarWrapper.querySelector('#appShell');
                         const gridCanvasInSidebar = sidebarWrapper.querySelector('#gridCanvas');
@@ -7566,6 +7622,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 document.addEventListener('click', _handler);
                 window._mainActionHandler = _handler;
+                // Sincronizar seletor de privacidade do trigger
+                try { setupPostPrivacyBindings(editorTriggerEl); } catch (_) {}
             });
         })();
 
