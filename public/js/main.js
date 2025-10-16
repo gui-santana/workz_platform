@@ -2478,7 +2478,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         mainContent: `
-            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] border border-white/60 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
+            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] border-2 border-gray shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
                 <div class="col-span-12 grid grid-cols-12 gap-4 h-full">
                     <div id="dashboard-statusbar" class="col-span-12 absolute left-4 right-4 top-2 h-8 lg:left-5 lg:right-5 lg:top-2.5 lg:h-9 text-sm lg:text-base text-white font-bold text-shadow-lg flex items-center justify-between">
                         <div id="wClock" class="text-md">00:00</div>
@@ -2747,8 +2747,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     ${appItems}
                 </div>
             </div>
-            <div id="app-quickbar" class="absolute left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[740px] bottom-4 lg:w-[calc(100%-40px)] lg:max-w-[880px] lg:bottom-4 rounded-full p-3 bg-white/20 border border-white/30 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]"\u003e
-                <div id="quickbar-track" class="flex items-center justify-center gap-3 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Acesso rápido a apps">
+            <div id="app-quickbar" class="absolute left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[740px] bottom-4 lg:w-[calc(100%-40px)] lg:max-w-[880px] lg:bottom-4 rounded-full bg-white/20 border border-white/30 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]"\u003e
+                <div id="quickbar-track" class="flex items-center justify-center gap-3 p-3 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Acesso rápido a apps">
                     <!-- itens do acesso rápido são injetados pelo JS em initAppLibrary() -->
                 </div>
             </div>
@@ -7967,7 +7967,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 function updateNav() {
                     try {
                         if (!track) { prevBtn.style.display = 'none'; nextBtn.style.display = 'none'; return; }
-                        const overflow = (track.scrollWidth - track.clientWidth) > 4;
+                        const overflow = (track.scrollWidth - track.clientWidth) > 3;
                         if (!overflow) { prevBtn.style.display = 'none'; nextBtn.style.display = 'none'; return; }
                         prevBtn.style.display = (track.scrollLeft <= 2) ? 'none' : '';
                         const rightEdge = Math.ceil(track.scrollLeft + track.clientWidth);
@@ -8038,14 +8038,14 @@ document.addEventListener('DOMContentLoaded', () => {
             // Botão iniciar (abre/fecha a grade de apps)
             html += `
                 <button data-start="1" class="relative shrink-0 snap-start" title="Menu iniciar">
-                    <div class="w-14 h-14 lg:w-16 lg:h-16 rounded-[22%] overflow-hidden bg-white/10 text-white flex items-center justify-center shadow-[0_10px_18px_rgba(0,0,0,0.24),_0_2px_6px_rgba(0,0,0,0.18)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
+                    <div class="w-12 h-12 rounded-full overflow-hidden bg-white/10 text-white flex items-center justify-center shadow-xl transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
                         <i class="fab fa-windows text-xl lg:text-2xl"></i>
                     </div>
                 </button>`;
             // Loja (sempre presente)
             html += `
                 <button data-store="1" class="relative shrink-0 snap-start" title="Loja de aplicativos">
-                    <div class="w-14 h-14 lg:w-16 lg:h-16 rounded-[22%] overflow-hidden bg-white/5 shadow-[0_10px_18px_rgba(0,0,0,0.24),_0_2px_6px_rgba(0,0,0,0.18)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
+                    <div class="w-12 h-12 rounded-full overflow-hidden bg-white/5 shadow-xl transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
                         <img src="/images/apps/store.jpg" alt="Loja" class="app-icon-image" />
                     </div>
                 </button>`;
@@ -9336,3 +9336,4 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
+
