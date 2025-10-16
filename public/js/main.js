@@ -649,16 +649,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isVideo = String(m.type).toLowerCase() === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video');
                 const mediaEl = isVideo
                     ? `<video src="${m.url}" class="w-full h-24 object-cover rounded-xl" muted loop playsinline></video>`
-                    : `<img src="${m.url}" class="w-full h-24 object-cover rounded-xl"/>`;
+                    : `<img src="${m.url}" class="w-full h-24 object-cover rounded-xl"\u003e`;
                 const isActive = (POST_MEDIA_STATE.activeIndex === i);
                 html += `
                     <div class="relative group ${isActive ? 'ring-2 ring-indigo-500 rounded-xl' : ''}" data-index="${i}">
                         ${mediaEl}
                         <span class="absolute top-1 left-1 text-xs bg-black/60 text-white rounded px-1">${i+1}/${items.length}</span>
                         <div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-left\" title=\"Mover para a esquerda\"><i class=\"fas fa-arrow-left text-[10px]\"></i></button>
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-right\" title=\"Mover para a direita\"><i class=\"fas fa-arrow-right text-[10px]\"></i></button>
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-red-600/80 text-white flex items-center justify-center\" data-action=\"remove\" title=\"Remover\"><i class=\"fas fa-trash text-[10px]\"></i></button>
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-left\" title=\"Mover para a esquerda"\u003e<i class=\"fas fa-arrow-left text-[10px]"\u003e</i></button>
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-right\" title=\"Mover para a direita"\u003e<i class=\"fas fa-arrow-right text-[10px]"\u003e</i></button>
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-red-600/80 text-white flex items-center justify-center\" data-action=\"remove\" title=\"Remover"\u003e<i class=\"fas fa-trash text-[10px]"\u003e</i></button>
                         </div>
                     </div>`;
             });
@@ -1464,16 +1464,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isVideo = String(m.type).toLowerCase() === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video');
                 const mediaEl = isVideo
                     ? `<video src="${m.url}" class="w-full h-24 object-cover rounded-xl" muted loop playsinline></video>`
-                    : `<img src="${m.url}" class="w-full h-24 object-cover rounded-xl"/>`;
+                    : `<img src="${m.url}" class="w-full h-24 object-cover rounded-xl"\u003e`;
                 const isActive = (POST_MEDIA_STATE.activeIndex === i);
                 html += `
                     <div class="relative group ${isActive ? 'ring-2 ring-indigo-500 rounded-xl' : ''}" data-index="${i}">
                         ${mediaEl}
                         <span class="absolute top-1 left-1 text-xs bg-black/60 text-white rounded px-1">${i+1}/${items.length}</span>
                         <div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-left\" title=\"Mover para a esquerda\"><i class=\"fas fa-arrow-left text-[10px]\"></i></button>
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-right\" title=\"Mover para a direita\"><i class=\"fas fa-arrow-right text-[10px]\"></i></button>
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-red-600/80 text-white flex items-center justify-center\" data-action=\"remove\" title=\"Remover\"><i class=\"fas fa-trash text-[10px]\"></i></button>
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-left\" title=\"Mover para a esquerda"\u003e<i class=\"fas fa-arrow-left text-[10px]"\u003e</i></button>
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-right\" title=\"Mover para a direita"\u003e<i class=\"fas fa-arrow-right text-[10px]"\u003e</i></button>
+                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-red-600/80 text-white flex items-center justify-center\" data-action=\"remove\" title=\"Remover"\u003e<i class=\"fas fa-trash text-[10px]"\u003e</i></button>
                         </div>
                     </div>`;
             });
@@ -2478,16 +2478,15 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         mainContent: `
-            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl p-4 bg-white" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
-                <div class="col-span-12 grid grid-cols-12 gap-4">
-                    <div class="col-span-12 text-white font-bold content-center text-shadow-lg flex items-center justify-between">
+            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] shadow-lg" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
+                <div class="col-span-12 grid grid-cols-12 gap-4 h-full">
+                    <div id="dashboard-statusbar" class="col-span-12 absolute left-4 right-4 top-2 h-8 lg:left-5 lg:right-5 lg:top-2.5 lg:h-9 text-sm lg:text-base text-white font-bold text-shadow-lg flex items-center justify-between">
                         <div id="wClock" class="text-md">00:00</div>
                         <button id="apps-menu-trigger" class="shrink-0 rounded-full bg-white/20 hover:bg-white/30 text-white p-2 transition" title="Abrir biblioteca de aplicativos" aria-label="Abrir biblioteca de aplicativos">
                             <i class="fas fa-th"></i>
                         </button>
                     </div>
-                    <div id="app-library" class="col-span-12 lg:col-span-9 flex-col space-y-4"></div>
-                    <div id="app-widget-container" class="hidden lg:block lg:col-span-3 flex-col bg-black/20 rounded-[2rem] p-3 backdrop-blur-md"></div>
+                <div id="app-library" class="col-span-12 h-full flex flex-col items-center justify-center space-y-4"></div>
                 </div>
             </div>
         `,
@@ -2727,17 +2726,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     templates.appLibrary = async ({ appsList }) => {
         const resolved = Array.isArray(appsList) ? appsList : (appsList ? [appsList] : []);
-        // Store tile (always visible)
-        const storeItem = `
-            <button data-store="1" data-app-name="loja" title="Workz! Store" class="">
-                <div class="w-full aspect-square cursor-pointer rounded-full shadow-md">
-                    <img src="/images/apps/store.jpg" alt="Workz! Store"class="app-icon-image rounded-full">
-                </div>                
-            </button>`;
 
         const appItems = resolved.map(app => `
             <button data-app-id="${app.id}" data-app-name="${(app.tt || 'App').toLowerCase()}" class="app-item-button">
-                <div class="w-full aspect-square cursor-pointer rounded-full shadow-md">
+                <div class="w-full aspect-square cursor-pointer ios-icon shadow-md rounded-full">
                     <img src="${resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 160 })}" alt="${app.tt || 'App'}" class="app-icon-image rounded-full">
                 </div>
                 <div class="w-full p-1 text-xs text-white text-shadow-lg truncate text-center">
@@ -2747,15 +2739,15 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('');
 
         return `
-            <div id="app-grid-container" class="bg-black/20 rounded-[2rem] p-3 backdrop-blur-md">
+            <div id=\"app-grid-container\" hidden class=\"bg-white/20 border border-white/30 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)] rounded-[2rem] p-3 mb-6 max-w-[400px] lg:max-w-[500px] mx-auto"\u003e
                 <div class="mb-6">
-                    <input type="text" id="app-search-input" placeholder="Buscar aplicativos..." class="w-full px-4 py-2 rounded-full border-0 bg-white/15 text-white text-base outline-none transition-all duration-200 ease-in-out placeholder:text-white/70 focus:bg-white/25 focus:shadow-[0_0_0_2px_rgba(251,146,60,0.5)]">
+                    <input type="text" id="app-search-input" placeholder="Buscar aplicativos..." class="w-full px-4 py-2 rounded-full border-0 bg-white/30 text-gray outline-none transition-all duration-200 ease-in-out placeholder:text-white/70 focus:bg-white/25 focus:shadow-[0_0_0_2px_rgba(251,146,60,0.5)]">
                 </div>
-                <div id="app-grid" class="grid grid-cols-4 lg:grid-cols-6 gap-3 h-auto overflow-y-auto scroll-snap-y-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                <div id="app-grid" class="grid grid-cols-4 lg:grid-cols-6 gap-4 lg:gap-5 h-auto overflow-y-auto scroll-snap-y-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                     ${appItems}
                 </div>
             </div>
-            <div id="app-quickbar" class="bg-black/20 rounded-full p-3 backdrop-blur-md">
+            <div id="app-quickbar" class="absolute left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[740px] bottom-4 lg:w-[calc(100%-40px)] lg:max-w-[880px] lg:bottom-4 rounded-full p-3 bg-white/20 border border-white/30 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]"\u003e
                 <div id="quickbar-track" class="flex items-center justify-center gap-3 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Acesso rápido a apps">
                     <!-- itens do acesso rápido são injetados pelo JS em initAppLibrary() -->
                 </div>
@@ -4519,7 +4511,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const isVid = (mtype === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video'));
                     const inner = isVid
                         ? `<video src="${murl}" class="absolute inset-0 w-full h-full object-cover" ${idx===0 ? 'autoplay' : ''} muted loop playsinline data-carousel-video></video>`
-                        : `<img src="${murl}" class="absolute inset-0 w-full h-full object-cover"/>`;
+                        : `<img src="${murl}" class="absolute inset-0 w-full h-full object-cover"\u003e`;
                     return `<div class="inline-block align-top w-full h-full relative">${inner}</div>`;
                 }).join('');
                 mediaMarkup = `
@@ -4572,7 +4564,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button type="button" class="w-full text-left px-3 py-2 hover:bg-white/10" data-feed-action="report-post" data-post-id="${postId}">
                             <i class="fas fa-flag mr-2"></i>Denunciar
                         </button>
-                        ${canDelete ? `<button type=\"button\" class=\"w-full text-left px-3 py-2 hover:bg-red-500/20 text-red-300\" data-feed-action=\"delete-post\" data-post-id=\"${postId}\"><i class=\\\"fas fa-trash mr-2\\\"></i>Excluir</button>` : ''}
+                        ${canDelete ? `<button type=\"button\" class=\"w-full text-left px-3 py-2 hover:bg-red-500/20 text-red-300\" data-feed-action=\"delete-post\" data-post-id=\"${postId}"\u003e<i class=\\\"fas fa-trash mr-2"\u003e</i>Excluir</button>` : ''}
                     </div>
                     <div class="px-4 pb-5 space-y-4">
                         ${title ? `<h3 class="text-lg font-semibold text-white drop-shadow">${title}</h3>` : ''}
@@ -7836,7 +7828,53 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Combined click listener for opening apps
+        const START_OPEN_KEY = 'workz.ui.startOpen';
+        const getStartOpen = () => { try { return localStorage.getItem(START_OPEN_KEY) === '1'; } catch(_) { return false; } };
+        const setStartOpen = (v) => { try { localStorage.setItem(START_OPEN_KEY, v ? '1' : '0'); } catch(_) {} };
+
+        function applyStartState() {
+            try {
+                const open = getStartOpen();
+                const gridBox = el.querySelector('#app-grid-container');
+                const dock = el.querySelector('#app-quickbar');
+                if (gridBox) { gridBox.hidden = !open; gridBox.style.display = open ? '' : 'none'; }
+                if (dock) { dock.hidden = false; dock.style.display = ''; }
+                const startButton = el.querySelector('[data-start]');
+                if (startButton) startButton.setAttribute('aria-pressed', open ? 'true' : 'false');
+            } catch(_) {}
+        }
+
+        if (el._startOutsideHandler) { try { document.removeEventListener('click', el._startOutsideHandler, true); } catch(_) {} }
+        const outsideHandler = (e) => {
+            try {
+                if (!getStartOpen()) return;
+                const gridBox = el.querySelector('#app-grid-container');
+                const dock = el.querySelector('#app-quickbar');
+                const btn = el.querySelector('[data-start]');
+                const t = e.target;
+                if ((gridBox && gridBox.contains(t)) || (dock && dock.contains(t)) || (btn && btn.contains(t))) return;
+                setStartOpen(false);
+                applyStartState();
+            } catch(_) {}
+        };
+        document.addEventListener('click', outsideHandler, true);
+        el._startOutsideHandler = outsideHandler;
+
+        if (el._startKeyHandler) { try { document.removeEventListener('keydown', el._startKeyHandler, true); } catch(_) {} }
+        const keyHandler = (e) => { if (e.key === 'Escape' && getStartOpen()) { setStartOpen(false); applyStartState(); } };
+        document.addEventListener('keydown', keyHandler, true);
+        el._startKeyHandler = keyHandler;
+
         const clickHandler = async (event) => {
+            const startBtn = event.target.closest('[data-start]');
+            if (startBtn) {
+                try {
+                    const next = !getStartOpen();
+                    setStartOpen(next);
+                    applyStartState();
+                } catch(_) {}
+                return;
+            }
             const storeBtn = event.target.closest('[data-store]');
             if (storeBtn) {
                 // Abre a loja (sem SSO - usa handshake embed para obter JWT)
@@ -7859,6 +7897,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Search + Hide favorites filter
         const searchInput = el.querySelector('#app-search-input');
         const appGrid = el.querySelector('#app-grid');
+        // Apply initial Start menu state (default collapsed) and ensure dock is visible
+        try { applyStartState && applyStartState(); } catch(_) {}
 
         const HIDE_FAV_KEY = 'workz.apps.hideFavorites';
         const getHideFav = () => { try { return localStorage.getItem(HIDE_FAV_KEY) === '1'; } catch (_) { return false; } };
@@ -7895,6 +7935,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ===== Quick access (Favoritos) – sincronizado com backend =====
         const track = el.querySelector('#quickbar-track');
+        const quickbar = el.querySelector('#app-quickbar');
+        if (quickbar && !quickbar._navInjected) {
+            quickbar._navInjected = true;
+            try {
+                const prevBtn = document.createElement('button');
+                prevBtn.id = 'quickbar-prev';
+                prevBtn.type = 'button';
+                prevBtn.title = 'Anterior';
+                prevBtn.setAttribute('aria-label', 'Anterior');
+                prevBtn.className = 'absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/30 hover:bg-white/40 text-white shadow backdrop-blur-md flex items-center justify-center z-10';
+                prevBtn.innerHTML = '<i class="fas fa-chevron-left"></i>';
+
+                const nextBtn = document.createElement('button');
+                nextBtn.id = 'quickbar-next';
+                nextBtn.type = 'button';
+                nextBtn.title = 'Próximo';
+                nextBtn.setAttribute('aria-label', 'Próximo');
+                nextBtn.className = 'absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/30 hover:bg-white/40 text-white shadow backdrop-blur-md flex items-center justify-center z-10';
+                nextBtn.innerHTML = '<i class="fas fa-chevron-right"></i>';
+
+                quickbar.appendChild(prevBtn);
+                quickbar.appendChild(nextBtn);
+
+                const scrollByAmount = () => Math.max(120, Math.round((track?.clientWidth || 0) * 0.6));
+                prevBtn.addEventListener('click', (e) => { e.preventDefault(); try { track.scrollBy({ left: -scrollByAmount(), behavior: 'smooth' }); } catch(_) {} });
+                nextBtn.addEventListener('click', (e) => { e.preventDefault(); try { track.scrollBy({ left: scrollByAmount(), behavior: 'smooth' }); } catch(_) {} });
+
+                function updateNav() {
+                    try {
+                        if (!track) { prevBtn.style.display = 'none'; nextBtn.style.display = 'none'; return; }
+                        const overflow = (track.scrollWidth - track.clientWidth) > 4;
+                        if (!overflow) { prevBtn.style.display = 'none'; nextBtn.style.display = 'none'; return; }
+                        prevBtn.style.display = (track.scrollLeft <= 2) ? 'none' : '';
+                        const rightEdge = Math.ceil(track.scrollLeft + track.clientWidth);
+                        nextBtn.style.display = (rightEdge >= track.scrollWidth - 2) ? 'none' : '';
+                    } catch(_) {}
+                }
+                quickbar._updateNav = updateNav;
+                track?.addEventListener('scroll', updateNav, { passive: true });
+                window.addEventListener('resize', updateNav);
+                setTimeout(updateNav, 0);
+            } catch(_) {}
+        }
         let quickCache = [];
         let quickFetchCooldownUntil = 0;
         async function fetchQuickFromServer() {
@@ -7950,11 +8033,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const ids = await fetchQuickFromServer();
             // Envolve os itens em um contêiner centrado e com largura do conteúdo
             let html = '<div class="flex items-center gap-3 w-max mx-auto">';
+            // Botão iniciar (abre/fecha a grade de apps)
+            html += `
+                <button data-start="1" class="relative shrink-0 snap-start" title="Menu iniciar">
+                    <div class="w-14 h-14 lg:w-16 lg:h-16 rounded-[22%] overflow-hidden bg-white/10 text-white flex items-center justify-center shadow-[0_10px_18px_rgba(0,0,0,0.24),_0_2px_6px_rgba(0,0,0,0.18)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
+                        <i class="fab fa-windows text-xl lg:text-2xl"></i>
+                    </div>
+                </button>`;
             // Loja (sempre presente)
             html += `
-                <button data-store="1" class="shrink-0 snap-start" title="Loja de aplicativos">
-                    <div class="w-14 h-14 rounded-full overflow-hidden shadow-md">
-                        <img src="/images/apps/store.jpg" alt="Loja" class="app-icon-image rounded-full" />
+                <button data-store="1" class="relative shrink-0 snap-start" title="Loja de aplicativos">
+                    <div class="w-14 h-14 lg:w-16 lg:h-16 rounded-[22%] overflow-hidden bg-white/5 shadow-[0_10px_18px_rgba(0,0,0,0.24),_0_2px_6px_rgba(0,0,0,0.18)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
+                        <img src="/images/apps/store.jpg" alt="Loja" class="app-icon-image" />
                     </div>
                 </button>`;
             ids.forEach(id => {
@@ -7962,17 +8052,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!app) return;
                 const img = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 120 });
                 const name = app?.tt || 'App';
-                html += `
-                    <div class="relative shrink-0 snap-start" data-quick-id="${app.id}">
-                        <button data-app-id="${app.id}" title="${name}">
-                            <div class="w-14 h-14 rounded-full overflow-hidden shadow-md">
-                                <img src="${img}" alt="${name}" class="app-icon-image rounded-full" />
-                            </div>
-                        </button>
-                    </div>`;
+                html += `                    
+                <button data-app-id="${app.id}" title="${name}" class="relative shrink-0 snap-start" data-quick-id="${app.id}">
+                    <div class="w-14 h-14 lg:w-16 lg:h-16 rounded-[22%] overflow-hidden bg-white/5 shadow-[0_10px_18px_rgba(0,0,0,0.24),_0_2px_6px_rgba(0,0,0,0.18)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
+                        <img src="${img}" alt="${name}" class="app-icon-image" />
+                    </div>
+                </button>`;
             });
             html += '</div>';
             track.innerHTML = html;
+            try { if (el.querySelector('#app-quickbar')?._updateNav) el.querySelector('#app-quickbar')._updateNav(); } catch (_) {}
+            // Atualiza variável CSS com a altura do dock (quickbar)
+            try {
+                setTimeout(() => {
+                    const qb = track && track.parentElement;
+                    const h = qb ? qb.offsetHeight : 0;
+                    const dash = document.querySelector('#main-content > .dashboard-main');
+                    if (dash && h) dash.style.setProperty('--quickbar-height', h + 'px');
+                }, 0);
+            } catch (_) {}
         }
 
         async function refreshQuickStars() {
@@ -9236,3 +9334,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
