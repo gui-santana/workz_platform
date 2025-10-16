@@ -2478,7 +2478,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         mainContent: `
-            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] shadow-lg" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
+            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] border border-white/60 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
                 <div class="col-span-12 grid grid-cols-12 gap-4 h-full">
                     <div id="dashboard-statusbar" class="col-span-12 absolute left-4 right-4 top-2 h-8 lg:left-5 lg:right-5 lg:top-2.5 lg:h-9 text-sm lg:text-base text-white font-bold text-shadow-lg flex items-center justify-between">
                         <div id="wClock" class="text-md">00:00</div>
@@ -2739,7 +2739,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('');
 
         return `
-            <div id=\"app-grid-container\" hidden class=\"bg-white/20 border border-white/30 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)] rounded-[2rem] p-3 mb-6 max-w-[400px] lg:max-w-[500px] mx-auto"\u003e
+            <div id=\"app-grid-container\" hidden class=\"bg-white/20 backdrop-blur-xl backdrop-saturate-150 border border-white/30 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)] rounded-[2rem] p-3 mb-6 max-w-[400px] lg:max-w-[500px] mx-auto"\u003e
                 <div class="mb-6">
                     <input type="text" id="app-search-input" placeholder="Buscar aplicativos..." class="w-full px-4 py-2 rounded-full border-0 bg-white/30 text-gray outline-none transition-all duration-200 ease-in-out placeholder:text-white/70 focus:bg-white/25 focus:shadow-[0_0_0_2px_rgba(251,146,60,0.5)]">
                 </div>
@@ -7845,25 +7845,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (el._startOutsideHandler) { try { document.removeEventListener('click', el._startOutsideHandler, true); } catch(_) {} }
+        try { if (window._startOutsideHandlerCapture) document.removeEventListener('click', window._startOutsideHandlerCapture, true); } catch(_) {}
         const outsideHandler = (e) => {
             try {
-                if (!getStartOpen()) return;
-                const gridBox = el.querySelector('#app-grid-container');
-                const dock = el.querySelector('#app-quickbar');
-                const btn = el.querySelector('[data-start]');
+                const gridBox = document.querySelector('#app-grid-container');
+                if (!gridBox) return;
+                const isVisible = !(gridBox.hidden || gridBox.style.display === 'none');
+                if (!isVisible) return;
+                const btn = document.querySelector('[data-start]');
                 const t = e.target;
-                if ((gridBox && gridBox.contains(t)) || (dock && dock.contains(t)) || (btn && btn.contains(t))) return;
+                if ((gridBox && gridBox.contains(t)) || (btn && btn.contains(t))) return;
                 setStartOpen(false);
                 applyStartState();
             } catch(_) {}
         };
         document.addEventListener('click', outsideHandler, true);
-        el._startOutsideHandler = outsideHandler;
+        window._startOutsideHandlerCapture = outsideHandler;
 
-        if (el._startKeyHandler) { try { document.removeEventListener('keydown', el._startKeyHandler, true); } catch(_) {} }
-        const keyHandler = (e) => { if (e.key === 'Escape' && getStartOpen()) { setStartOpen(false); applyStartState(); } };
+        try { if (window._startKeyHandlerCapture) document.removeEventListener('keydown', window._startKeyHandlerCapture, true); } catch(_) {}
+        const keyHandler = (e) => { if (e.key === 'Escape') { try { const gridBox = document.querySelector('#app-grid-container'); const isVisible = gridBox && !(gridBox.hidden || gridBox.style.display === 'none'); if (isVisible) { setStartOpen(false); applyStartState(); } } catch(_) {} } };
         document.addEventListener('keydown', keyHandler, true);
-        el._startKeyHandler = keyHandler;
+        window._startKeyHandlerCapture = keyHandler;
 
         const clickHandler = async (event) => {
             const startBtn = event.target.closest('[data-start]');
@@ -9334,16 +9336,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
