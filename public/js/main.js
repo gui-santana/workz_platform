@@ -7832,12 +7832,50 @@ document.addEventListener('DOMContentLoaded', () => {
         const getStartOpen = () => { try { return localStorage.getItem(START_OPEN_KEY) === '1'; } catch(_) { return false; } };
         const setStartOpen = (v) => { try { localStorage.setItem(START_OPEN_KEY, v ? '1' : '0'); } catch(_) {} };
 
+        // Helpers para transição suave (fade-in/fade-out) do grid de apps
+        function showGridBox(gridBox) {
+            try {
+                gridBox.classList.add('fade-toggle');
+                // Remover estados de saída e garantir renderização
+                try { if (gridBox._fadeOutHandler) gridBox.removeEventListener('transitionend', gridBox._fadeOutHandler); gridBox._fadeOutHandler = null; } catch(_) {}
+                gridBox.hidden = false;
+                gridBox.style.display = '';
+                gridBox.classList.remove('is-closed');
+                // Força reflow para garantir que a transição ocorra ao adicionar is-open
+                void gridBox.offsetWidth;
+                gridBox.classList.add('is-open');
+            } catch(_) {}
+        }
+
+        function hideGridBox(gridBox) {
+            try {
+                gridBox.classList.add('fade-toggle');
+                // Inicia transição de saída
+                gridBox.classList.remove('is-open');
+                gridBox.classList.add('is-closed');
+                const onEnd = (ev) => {
+                    if (ev && ev.target !== gridBox) return;
+                    try { gridBox.removeEventListener('transitionend', onEnd); } catch(_) {}
+                    // Após o fade-out, efetivamente esconde o elemento
+                    gridBox.hidden = true;
+                    gridBox.style.display = 'none';
+                    try { gridBox._fadeOutHandler = null; } catch(_) {}
+                };
+                // Garante que o listener não fique duplicado
+                try { if (gridBox._fadeOutHandler) gridBox.removeEventListener('transitionend', gridBox._fadeOutHandler); } catch(_) {}
+                try { gridBox._fadeOutHandler = onEnd; } catch(_) {}
+                gridBox.addEventListener('transitionend', onEnd);
+            } catch(_) {}
+        }
+
         function applyStartState() {
             try {
                 const open = getStartOpen();
                 const gridBox = el.querySelector('#app-grid-container');
                 const dock = el.querySelector('#app-quickbar');
-                if (gridBox) { gridBox.hidden = !open; gridBox.style.display = open ? '' : 'none'; }
+                if (gridBox) {
+                    if (open) { showGridBox(gridBox); } else { hideGridBox(gridBox); }
+                }
                 if (dock) { dock.hidden = false; dock.style.display = ''; }
                 const startButton = el.querySelector('[data-start]');
                 if (startButton) startButton.setAttribute('aria-pressed', open ? 'true' : 'false');
@@ -7850,7 +7888,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const gridBox = document.querySelector('#app-grid-container');
                 if (!gridBox) return;
-                const isVisible = !(gridBox.hidden || gridBox.style.display === 'none');
+                const isVisible = gridBox.classList?.contains('is-open') && !gridBox.hidden;
                 if (!isVisible) return;
                 const btn = document.querySelector('[data-start]');
                 const t = e.target;
@@ -7863,7 +7901,15 @@ document.addEventListener('DOMContentLoaded', () => {
         window._startOutsideHandlerCapture = outsideHandler;
 
         try { if (window._startKeyHandlerCapture) document.removeEventListener('keydown', window._startKeyHandlerCapture, true); } catch(_) {}
-        const keyHandler = (e) => { if (e.key === 'Escape') { try { const gridBox = document.querySelector('#app-grid-container'); const isVisible = gridBox && !(gridBox.hidden || gridBox.style.display === 'none'); if (isVisible) { setStartOpen(false); applyStartState(); } } catch(_) {} } };
+        const keyHandler = (e) => {
+            if (e.key === 'Escape') {
+                try {
+                    const gridBox = document.querySelector('#app-grid-container');
+                    const isVisible = gridBox && gridBox.classList?.contains('is-open') && !gridBox.hidden;
+                    if (isVisible) { setStartOpen(false); applyStartState(); }
+                } catch(_) {}
+            }
+        };
         document.addEventListener('keydown', keyHandler, true);
         window._startKeyHandlerCapture = keyHandler;
 
