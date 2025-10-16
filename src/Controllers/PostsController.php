@@ -33,6 +33,12 @@ class PostsController
         if ($cm > 0) { $em = 0; }
         if ($em > 0) { $cm = 0; }
         $ct = $input['ct'] ?? null;
+        // Privacidade de publicação (0=only me; 1=followers/moderators; 2=logged-in/members; 3=public)
+        $postPrivacy = isset($input['post_privacy']) ? (int)$input['post_privacy'] : null;
+        if ($postPrivacy !== null) {
+            if ($postPrivacy < 0) $postPrivacy = 0;
+            if ($postPrivacy > 3) $postPrivacy = 3;
+        }
 
         if ($userId <= 0 || $tp === '' || $ct === null) {
             http_response_code(400);
@@ -60,6 +66,7 @@ class PostsController
             'st' => 1,
             'ct' => $ctJson,
         ];
+        if ($postPrivacy !== null) { $data['post_privacy'] = $postPrivacy; }
 
         $id = $this->db->insert('workz_data', 'hpl', $data);
         if ($id) {
@@ -91,7 +98,7 @@ class PostsController
 
         $order = ['by' => 'dt', 'dir' => 'DESC'];
 
-        $rows = $this->db->search('workz_data', 'hpl', ['id','us','tp','dt','cm','em','ct'], $conditions, true, $limit, $offset, $order);
+        $rows = $this->db->search('workz_data', 'hpl', ['id','us','tp','dt','cm','em','ct','post_privacy'], $conditions, true, $limit, $offset, $order);
         if ($rows === false) {
             http_response_code(500);
             echo json_encode(['status' => 'error', 'message' => 'Failed to load feed.']);

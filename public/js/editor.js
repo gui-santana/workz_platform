@@ -76,7 +76,7 @@ const init = () => {
     const outCanvas = document.getElementById('outCanvas');
     const octx = outCanvas.getContext('2d');
   
-    const btnEnviar = document.getElementById('btnEnviar');
+  const btnEnviar = document.getElementById('btnEnviar');
     const exportSettings = document.getElementById('exportSettings');
     const vidDur = document.getElementById('vidDur');
     const vidFPS = document.getElementById('vidFPS');
@@ -96,9 +96,24 @@ const init = () => {
     // Listener para atualizar informações quando duração for alterada manualmente
     vidDur.addEventListener('input', updateVideoExportInfo);
 
-    // Limpar recursos da câmera quando a página for fechada
-    window.addEventListener('beforeunload', cleanupCamera);
-    window.addEventListener('unload', cleanupCamera);
+  // Limpar recursos da câmera quando a página for fechada
+  window.addEventListener('beforeunload', cleanupCamera);
+  window.addEventListener('unload', cleanupCamera);
+
+  // ===== Post privacy (shared with main) =====
+  const POST_PRIVACY_STORAGE_KEY = 'workz.post.privacy';
+  function getPostPrivacyToken() {
+    try { return localStorage.getItem(POST_PRIVACY_STORAGE_KEY) || 'public'; } catch(_) { return 'public'; }
+  }
+  function tokenToPrivacyCode(token, vt) {
+    const t = String(token || '').trim();
+    if (t === 'me') return 0;
+    if (t === 'mod') return 1;
+    if (t === 'lv1') return (vt === 'profile') ? 1 : 2;
+    if (t === 'lv2') return 2;
+    if (t === 'lv3' || t === 'public') return 3;
+    return 2;
+  }
   
     const SNAP_GRID = 20, SNAP_TOL = 6;
     const BASE_W = 900, BASE_H = 1200;
@@ -1640,13 +1655,19 @@ const init = () => {
         const teamId = (vt === 'team' && vd && vd.id) ? Number(vd.id) || 0 : 0;
         const businessId = (vt === 'business' && vd && vd.id) ? Number(vd.id) || 0 : 0;
         
-        // Preparar dados para envio
-        const formData = new FormData();
-        formData.append('file', blob, 'post_image.jpg');
-        formData.append('userId', userData.id);
-        formData.append('type', 'image');
-        formData.append('team', teamId);
-        formData.append('business', businessId);
+    // Preparar dados para envio
+    const formData = new FormData();
+    formData.append('file', blob, 'post_image.jpg');
+    formData.append('userId', userData.id);
+    formData.append('type', 'image');
+    formData.append('team', teamId);
+    formData.append('business', businessId);
+    try {
+      const tok = getPostPrivacyToken();
+      const vtNow = (vt && vt.length) ? vt : (window.viewType || 'profile');
+      const pp = tokenToPrivacyCode(tok, vtNow);
+      formData.append('post_privacy', String(pp));
+    } catch(_) {}
 
         // Enviar para servidor
         updateEditorLoader('Enviando imagem...');
@@ -1725,13 +1746,19 @@ const init = () => {
         const teamId = (vt === 'team' && vd && vd.id) ? Number(vd.id) || 0 : 0;
         const businessId = (vt === 'business' && vd && vd.id) ? Number(vd.id) || 0 : 0;
         
-        // Preparar dados para envio
-        const formData = new FormData();
-        formData.append('file', videoBlob, 'post_video.webm');
-        formData.append('userId', userData.id);
-        formData.append('type', 'video');
-        formData.append('team', teamId);
-        formData.append('business', businessId);
+    // Preparar dados para envio
+    const formData = new FormData();
+    formData.append('file', videoBlob, 'post_video.webm');
+    formData.append('userId', userData.id);
+    formData.append('type', 'video');
+    formData.append('team', teamId);
+    formData.append('business', businessId);
+    try {
+      const tok = getPostPrivacyToken();
+      const vtNow = (vt && vt.length) ? vt : (window.viewType || 'profile');
+      const pp = tokenToPrivacyCode(tok, vtNow);
+      formData.append('post_privacy', String(pp));
+    } catch(_) {}
 
         btnEnviar.querySelector('.enviar-text').textContent = 'Salvando vídeo...';
 

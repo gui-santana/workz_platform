@@ -42,6 +42,7 @@ try {
           `cm` varchar(255) DEFAULT NULL COMMENT 'Equipe',
           `em` varchar(255) DEFAULT NULL COMMENT 'Negócio',
           `ct` longtext NOT NULL COMMENT 'Conteúdo em JSON',
+          `post_privacy` tinyint(1) NULL DEFAULT NULL COMMENT '0=me;1=followers/moderators;2=logged/members;3=public',
           PRIMARY KEY (`id`),
           KEY `idx_user` (`us`),
           KEY `idx_type` (`tp`),
@@ -55,6 +56,21 @@ try {
         $results[] = "Tabela 'hpl' já existe";
     }
     
+    // 4a. Garantir coluna post_privacy em tabelas existentes
+    try {
+        $pdo->exec("ALTER TABLE `hpl` ADD COLUMN IF NOT EXISTS `post_privacy` tinyint(1) NULL DEFAULT NULL COMMENT '0=me;1=followers/moderators;2=logged/members;3=public'");
+        $results[] = "Coluna 'post_privacy' garantida";
+    } catch (Exception $e) {
+        // Ignorar erros de versões antigas do MySQL sem IF NOT EXISTS; tentar detecção manual
+        try {
+            $col = $pdo->query("SHOW COLUMNS FROM `hpl` LIKE 'post_privacy'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE `hpl` ADD COLUMN `post_privacy` tinyint(1) NULL DEFAULT NULL COMMENT '0=me;1=followers/moderators;2=logged/members;3=public'");
+                $results[] = "Coluna 'post_privacy' adicionada";
+            }
+        } catch (Exception $ie) { /* noop */ }
+    }
+
     // 4. Testar inserção
     $testData = [
         'us' => 1,

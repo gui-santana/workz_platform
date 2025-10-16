@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS `hpl` (
   `em` INT UNSIGNED DEFAULT 0,
   `st` TINYINT(1) NOT NULL DEFAULT 1,
   `ct` LONGTEXT NOT NULL,
+  `post_privacy` TINYINT(1) NULL DEFAULT NULL,
   `im` VARCHAR(255) NULL,
   PRIMARY KEY (`id`),
   KEY `idx_user` (`us`),
@@ -61,6 +62,10 @@ CREATE TABLE IF NOT EXISTS `hpl` (
   KEY `idx_st` (`st`),
   CONSTRAINT `fk_hpl_us` FOREIGN KEY (`us`) REFERENCES `workz_data`.`hus`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Tabela de posts do editor';
+
+-- Garantir coluna post_privacy em upgrades idempotentes
+ALTER TABLE `hpl`
+  ADD COLUMN IF NOT EXISTS `post_privacy` TINYINT(1) NULL DEFAULT NULL AFTER `ct`;
 
 -- 2.3) Tabela: hpl_comments (comentarios dos posts)
 CREATE TABLE IF NOT EXISTS `hpl_comments` (

@@ -55,6 +55,9 @@ function handleFileUpload($pdo) {
     if ($cm > 0) { $em = 0; }
     if ($em > 0) { $cm = 0; }
 
+    // Privacidade por publicação (opcional)
+    $pp = isset($_POST['post_privacy']) && is_numeric($_POST['post_privacy']) ? max(0, min(3, (int)$_POST['post_privacy'])) : null;
+
     // Validar arquivo
     if ($file['error'] !== UPLOAD_ERR_OK) {
         http_response_code(400);
@@ -119,14 +122,15 @@ function handleFileUpload($pdo) {
     // Salvar no banco de dados
     try {
         // Define status publicado (st = 1) para aparecer no feed
-        $stmt = $pdo->prepare("INSERT INTO hpl (us, tp, dt, cm, em, st, ct) VALUES (?, ?, NOW(), ?, ?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO hpl (us, tp, dt, cm, em, st, ct, post_privacy) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?)");
         $stmt->execute([
             $userId,
             $tpDb,
             $cm,
             $em,
             1,
-            json_encode($content, JSON_UNESCAPED_UNICODE)
+            json_encode($content, JSON_UNESCAPED_UNICODE),
+            $pp
         ]);
 
         $postId = $pdo->lastInsertId();
@@ -169,6 +173,7 @@ function handlePostData($pdo) {
     $userId = (int)$input['userId'];
     $content = $input['content'];
     $type = $input['type'] ?? 'mixed';
+    $pp = isset($input['post_privacy']) && is_numeric($input['post_privacy']) ? max(0, min(3, (int)$input['post_privacy'])) : null;
     $tpMap = ['image' => 1, 'video' => 2, 'mixed' => 3];
     $tpDb = isset($tpMap[$type]) ? $tpMap[$type] : (is_numeric($type) ? (int)$type : 0);
     $cm = isset($input['team']) && is_numeric($input['team']) ? (int)$input['team'] : 0;
@@ -178,14 +183,15 @@ function handlePostData($pdo) {
 
     try {
         // Define status publicado (st = 1) para aparecer no feed
-        $stmt = $pdo->prepare("INSERT INTO hpl (us, tp, dt, cm, em, st, ct) VALUES (?, ?, NOW(), ?, ?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO hpl (us, tp, dt, cm, em, st, ct, post_privacy) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?)");
         $stmt->execute([
             $userId,
             $tpDb,
             $cm,
             $em,
             1,
-            json_encode($content, JSON_UNESCAPED_UNICODE)
+            json_encode($content, JSON_UNESCAPED_UNICODE),
+            $pp
         ]);
 
         $postId = $pdo->lastInsertId();

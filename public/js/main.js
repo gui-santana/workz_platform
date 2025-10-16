@@ -175,6 +175,21 @@ document.addEventListener('DOMContentLoaded', () => {
             selectEl._bound = onChange;
         }
     }
+    function tokenToPrivacyCode(token, vt) {
+        const t = String(token || '').trim();
+        if (t === 'me') return 0;
+        if (t === 'mod') return 1;
+        if (t === 'lv1') {
+            // Perfil: Seguidores (1); Negócio/Equipe: Membros (2)
+            return (vt === ENTITY.PROFILE) ? 1 : 2;
+        }
+        if (t === 'lv2') {
+            // Perfil: Logados (2); Negócio: Logados (2); Equipe: Todos do negócio (2)
+            return 2;
+        }
+        if (t === 'lv3' || t === 'public') return 3;
+        return 2;
+    }
     function setupPostPrivacyBindings(scope = document) {
         const ctx = getCurrentPublishingContext();
         renderPrivacySelect(scope.querySelector('#postPrivacyTrigger'), ctx);
@@ -967,7 +982,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
             const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
 
-            const payload = { tp, cm, em, ct: { caption, media: items } };
+            const vtNow = String(viewType || '');
+            const tok = getPostPrivacy();
+            const ppCode = tokenToPrivacyCode(tok, vtNow === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow);
+            const payload = { tp, cm, em, post_privacy: Number(ppCode), ct: { caption, media: items, post_privacy_token: tok } };
             const res = await apiClient.post('/posts', payload);
             if (res?.error || res?.status === 'error') {
                 notifyError(res?.message || 'Não foi possível publicar o post.');
@@ -1203,7 +1221,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
 
                 const tp = isVideo ? 'video' : 'image';
-                const payload = { tp, cm, em, ct: { caption, media: [mediaDesc] } };
+                const vtNow = String(viewType || '');
+                const tok = getPostPrivacy();
+                const ppCode = tokenToPrivacyCode(tok, vtNow === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow);
+                const payload = { tp, cm, em, post_privacy: Number(ppCode), ct: { caption, media: [mediaDesc], post_privacy_token: tok } };
                 const res = await apiClient.post('/posts', payload);
                 if (res?.error || res?.status === 'error') { notifyError(res?.message || 'Não foi possível publicar.'); return; }
                 notifySuccess('Post publicado!');
@@ -1782,7 +1803,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
             const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
 
-            const payload = { tp, cm, em, ct: { caption, media: items } };
+            const vtNow5 = String(viewType || '');
+            const tok5 = getPostPrivacy();
+            const ppCode5 = tokenToPrivacyCode(tok5, vtNow5 === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow5);
+            const payload = { tp, cm, em, post_privacy: Number(ppCode5), ct: { caption, media: items, post_privacy_token: tok5 } };
             const res = await apiClient.post('/posts', payload);
             if (res?.error || res?.status === 'error') {
                 notifyError(res?.message || 'Não foi possível publicar o post.');
@@ -1901,7 +1925,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
 
                 const tp = isVideo ? 'video' : 'image';
-                const payload = { tp, cm, em, ct: { caption, media: [mediaDesc] } };
+                const vtNow4 = String(viewType || '');
+                const tok4 = getPostPrivacy();
+                const ppCode4 = tokenToPrivacyCode(tok4, vtNow4 === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow4);
+                const payload = { tp, cm, em, post_privacy: ppCode4, ct: { caption, media: [mediaDesc], post_privacy_token: tok4 } };
                 const res = await apiClient.post('/posts', payload);
                 if (res?.error || res?.status === 'error') { notifyError(res?.message || 'Não foi possível publicar.'); return; }
                 notifySuccess('Post publicado!');
@@ -4296,6 +4323,69 @@ document.addEventListener('DOMContentLoaded', () => {
         return safe.replace(/(?:\r\n|\n|\r)/g, '<br>');
     }
 
+    // ===== Post privacy badge helpers =====
+    function getPostScope(post) {
+        try {
+            if (Number(post?.em) > 0) return 'business';
+            if (Number(post?.cm) > 0) return 'team';
+        } catch (_) {}
+        return 'profile';
+    }
+    function extractPrivacyToken(ct) {
+        try {
+            if (!ct) return null;
+            const obj = (typeof ct === 'string') ? JSON.parse(ct) : (typeof ct === 'object' ? ct : null);
+            if (!obj) return null;
+            return obj.post_privacy_token || obj.privacy_token || obj.privacy || null;
+        } catch (_) { return null; }
+    }
+    function getPostPrivacyDisplay(post) {
+        const scope = getPostScope(post);
+        const token = extractPrivacyToken(post?.ct);
+        const code = (post && post.post_privacy != null) ? Number(post.post_privacy) : null;
+        const out = { label: null, icon: 'fa-lock', tooltip: 'Privacidade', code, token, scope };
+        const byTok = (t) => {
+            switch (String(t)) {
+                case 'me':
+                    return { label: 'Somente eu', icon: 'fa-lock' };
+                case 'mod':
+                    return { label: 'Moderadores', icon: 'fa-user-shield' };
+                case 'lv1':
+                    if (scope === 'profile') return { label: 'Seguidores', icon: 'fa-user-friends' };
+                    if (scope === 'team') return { label: 'Membros da equipe', icon: 'fa-users' };
+                    return { label: 'Usuários membros', icon: 'fa-users' }; // business
+                case 'lv2':
+                    if (scope === 'team') return { label: 'Todos do negócio', icon: 'fa-users' };
+                    return { label: 'Usuários logados', icon: 'fa-user' };
+                case 'lv3':
+                case 'public':
+                    return { label: 'Toda a internet', icon: 'fa-globe' };
+            }
+            return null;
+        };
+        const byCode = (c) => {
+            if (c === 0) return { label: 'Somente eu', icon: 'fa-lock' };
+            if (c === 1) {
+                // Perfil: Seguidores; Demais: Moderadores
+                return (scope === 'profile') ? { label: 'Seguidores', icon: 'fa-user-friends' } : { label: 'Moderadores', icon: 'fa-user-shield' };
+            }
+            if (c === 2) {
+                if (scope === 'profile') return { label: 'Usuários logados', icon: 'fa-user' };
+                if (scope === 'team') return { label: 'Membros da equipe', icon: 'fa-users' }; // fallback restritivo
+                return { label: 'Usuários membros', icon: 'fa-users' }; // business (fallback restritivo)
+            }
+            if (c >= 3) return { label: 'Toda a internet', icon: 'fa-globe' };
+            return null;
+        };
+        let meta = null;
+        if (token) meta = byTok(token);
+        if (!meta && code != null) meta = byCode(code);
+        if (!meta) return null;
+        out.label = meta.label; out.icon = meta.icon;
+        out.tooltip = meta.label;
+        return out;
+    }
+
     async function ensureFeedUsersLoaded(ids = []) {
         const normalized = Array.from(new Set((ids || []).map(normalizeNumericId).filter((id) => id !== null)));
         if (!normalized.length) return;
@@ -4456,23 +4546,58 @@ document.addEventListener('DOMContentLoaded', () => {
         const companiesMap = await fetchCompaniesPrivacy(Array.from(companyIds));
         const teamsMap = await fetchTeamsPrivacy(Array.from(teamIds));
 
+        const isAuthed = !!localStorage.getItem('jwt_token');
         const allowed = items.filter((it) => {
             const us = normalizeNumericId(it?.us); const em = normalizeNumericId(it?.em); const cm = normalizeNumericId(it?.cm);
+            const authorOwner = String(us) === currentIdStr;
+            const pcodeRaw = (it && it.post_privacy != null) ? Number(it.post_privacy) : null;
+            const getToken = () => {
+                try {
+                    const raw = it?.ct;
+                    if (!raw) return null;
+                    const obj = (typeof raw === 'string') ? JSON.parse(raw) : (typeof raw === 'object' ? raw : null);
+                    return obj && (obj.post_privacy_token || obj.privacy_token || obj.privacy) ? (obj.post_privacy_token || obj.privacy_token || obj.privacy) : null;
+                } catch (_) { return null; }
+            };
+            const token = getToken();
             // Personal post
             if ((!em || em === 0) && (!cm || cm === 0)) {
-                if (String(us) === currentIdStr) return true; // owner always sees
+                if (authorOwner) return true; // autor sempre vê
+                // Pós específicos (post_privacy) prevalecem quando presentes
+                if (pcodeRaw != null) {
+                    const p = pcodeRaw;
+                    if (p <= 0) return false; // somente autor
+                    if (p === 1) {
+                        return Array.isArray(userPeople) && userPeople.map(String).includes(String(us));
+                    }
+                    if (p === 2) return isAuthed;
+                    return true; // 3
+                }
+                // Fallback: privacidade do autor (feed_privacy)
                 const info = feedUserCache.get(String(us));
                 const fp = Number(info?.feed_privacy ?? 2);
                 if (fp === 0) return false; // Somente eu
                 if (fp === 1) {
-                    // Seguidores: garantir que segue
                     return Array.isArray(userPeople) && userPeople.map(String).includes(String(us));
                 }
                 return true; // 2 ou 3
             }
             // Business post
             if (em && em > 0) {
+                if (authorOwner) return true;
                 const row = companiesMap.get(String(em));
+                if (pcodeRaw != null) {
+                    const p = pcodeRaw;
+                    if (p <= 0) return false; // somente autor
+                    if (token === 'mod' || p === 1) return isBusinessManagerLocal(em);
+                    if (token === 'lv1') return isBusinessMemberApproved(em);
+                    if (token === 'lv2') return isAuthed;
+                    if (token === 'lv3' || p >= 3) return true;
+                    // Sem token: interpretação restritiva
+                    if (p === 2) return isBusinessMemberApproved(em);
+                    return false;
+                }
+                // Fallback: privacidade da empresa
                 const fp = Number(row?.feed_privacy ?? 1);
                 if (fp === 0) return isBusinessManagerLocal(em);
                 if (fp === 1) return isBusinessMemberApproved(em);
@@ -4481,13 +4606,25 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             // Team post
             if (cm && cm > 0) {
+                if (authorOwner) return true;
                 const row = teamsMap.get(String(cm));
+                const biz = row?.em != null ? row.em : null;
+                if (pcodeRaw != null) {
+                    const p = pcodeRaw;
+                    if (p <= 0) return false; // somente autor
+                    if (token === 'mod' || p === 1) return isTeamModeratorLocal(cm);
+                    if (token === 'lv1') return isTeamMemberApproved(cm);
+                    if (token === 'lv2') return biz != null ? isBusinessMemberApproved(biz) : false;
+                    if (token === 'lv3' || p >= 3) return true; // não esperado, mas permissivo
+                    // Sem token: interpretação restritiva
+                    if (p === 2) return isTeamMemberApproved(cm);
+                    return false;
+                }
+                // Fallback: privacidade da equipe
                 const fp = Number(row?.feed_privacy ?? 1);
                 if (fp === 0) return isTeamModeratorLocal(cm);
                 if (fp === 1) return isTeamMemberApproved(cm);
                 if (fp === 2) {
-                    // Todos do negócio: membro de negócio do time
-                    const biz = row?.em != null ? row.em : null;
                     return biz != null ? isBusinessMemberApproved(biz) : false;
                 }
                 return false;
@@ -4662,6 +4799,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <span class="font-semibold text-s leading-tight">${authorName}</span>
                             ${formattedDate ? `<time class="text-xs text-white/70">${formattedDate}</time>` : ''}
                         </div>
+                        ${(() => { try { const m = getPostPrivacyDisplay(post); return m ? `<span class=\"ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/40 text-white text-[11px]\" title=\"${m.tooltip}\"><i class=\"fas ${m.icon}\"></i>${m.label}</span>` : ''; } catch(_) { return ''; } })()}
                     </header>
                     <button type="button" class="absolute top-2 right-2 w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center backdrop-blur-sm" data-feed-action="open-post-menu" data-post-id="${postId}" data-media-url="${post?.feedMediaUrl || ''}" data-media-type="${post?.feedMediaType || ''}">
                         <i class="fas fa-ellipsis-h"></i>
@@ -8344,7 +8482,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const feedPayload = {
             db: 'workz_data',
             table: 'hpl',
-            columns: ['id', 'us', 'em', 'cm', 'tt', 'ct', 'dt', 'im'],
+            columns: ['id', 'us', 'em', 'cm', 'tt', 'ct', 'dt', 'im', 'post_privacy'],
             conditions: {
                 st: 1,                // AND st = 1
                 _or: orBlocks         // AND ( us IN (...) OR em IN (...) OR cm IN (...) )
@@ -8374,10 +8512,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Ajusta itens conforme privacidade no dashboard
-        if (viewType === 'dashboard') {
-            try { items = await filterDashboardItems(items); } catch (_) {}
-        }
+        // Ajusta itens conforme privacidade de página e da publicação
+        try { items = await filterDashboardItems(items); } catch (_) {}
 
         // se após filtro não restou nada
         if (!items.length) {

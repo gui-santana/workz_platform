@@ -73,6 +73,7 @@ Campos usados no código:
 - `em` (empresa — opcional; 0 quando não aplicável)
 - `st` (status de publicação, padrão 1)
 - `ct` (JSON com a mídia e metadados do post)
+- `post_privacy` (tinyint; privacidade por publicação — 0=somente eu; 1=seguidores/moderadores; 2=logados/membros; 3=público)
 Índices recomendados/usados: `us`, `tp`, `dt`, `st`.
 
 ### Tabela: `hpl_comments` (Comentários dos posts)
