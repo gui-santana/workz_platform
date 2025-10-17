@@ -2871,7 +2871,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('');
 
         return `
-            <div id=\"app-grid-container\" hidden class=\"bg-white/20 backdrop-blur-xl backdrop-saturate-150 border border-white/30 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)] rounded-[2rem] p-3 mb-6 max-w-[400px] lg:max-w-[500px] mx-auto"\u003e
+            <div id=\"app-grid-container\" hidden class=\"bg-white/20 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)] rounded-[2rem] p-3 mb-6 max-w-[400px] lg:max-w-[500px] mx-auto"\u003e
                 <div class="mb-6">
                     <input type="text" id="app-search-input" placeholder="Buscar aplicativos..." class="w-full px-4 py-2 rounded-full border-0 bg-white/30 text-gray outline-none transition-all duration-200 ease-in-out placeholder:text-white/70 focus:bg-white/25 focus:shadow-[0_0_0_2px_rgba(251,146,60,0.5)]">
                 </div>
@@ -2879,7 +2879,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ${appItems}
                 </div>
             </div>
-            <div id="app-quickbar" class="absolute left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[740px] bottom-4 lg:w-[calc(100%-40px)] lg:max-w-[880px] lg:bottom-4 rounded-full bg-white/20 border border-white/30 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]"\u003e
+            <div id="app-quickbar" class="absolute left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[740px] bottom-4 lg:w-[calc(100%-40px)] lg:max-w-[880px] lg:bottom-4 rounded-full bg-white/20 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]"\u003e
                 <div id="quickbar-track" class="flex items-center justify-center gap-3 p-3 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Acesso rápido a apps">
                     <!-- itens do acesso rápido são injetados pelo JS em initAppLibrary() -->
                 </div>

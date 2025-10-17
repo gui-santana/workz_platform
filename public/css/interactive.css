@@ -49,8 +49,7 @@
     height: 30px;
     display: flex;
     align-items: center;
-    justify-content: flex-start; /* Align buttons to the left */
-    padding: 0 5px 5px;
+    justify-content: flex-start; /* Align buttons to the left */    
     position: relative;
 }
 

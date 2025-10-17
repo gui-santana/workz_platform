@@ -165,7 +165,7 @@ class AppsController
         $app = $this->generalModel->search(
             'workz_apps',
             'apps',
-            ['id', 'tt', 'st', 'access_level', 'js_code', 'color'],
+            ['id', 'tt', 'im', 'st', 'access_level', 'js_code', 'color'],
             ['slug' => $slug],
             false // fetchOne
         );
@@ -204,8 +204,10 @@ class AppsController
         // 4. Injetar o código JS e configurações
         $jsCode = $app['js_code'] ?? 'console.error("Nenhum código de aplicativo encontrado.");';
         $appColor = $app['color'] ?? '#3b82f6';
+        $appIcon = $app['im'] ?? '/images/no-image.jpg';
 
-        $output = str_replace('{{APP_SCRIPT}}', $jsCode, $template);
+        $output = str_replace('{{APP_ICON}}', $appIcon, $template);
+        $output = str_replace('{{APP_SCRIPT}}', $jsCode, $output);
         $output = str_replace('{{APP_COLOR}}', htmlspecialchars($appColor), $output);
 
         // 5. Servir o HTML

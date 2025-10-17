@@ -9,11 +9,41 @@
     <style>
         :root {
             --pico-primary: {{APP_COLOR}}; /* Cor injetada pelo backend */
+            --pico-card-background-color: #fff; /* Garantir fundo branco para o loader em tema escuro */
         }
         body { padding: 1rem; }
+
+        #app-loader {
+            position: fixed;
+            inset: 0; /* top, right, bottom, left */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 1.5rem;
+            background-color: var(--pico-card-background-color);
+            z-index: 1000;
+            transition: opacity 0.3s ease-out, visibility 0.3s ease-out;
+            opacity: 1;
+            visibility: visible;
+        }
+        #app-loader.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+        #app-loader img {
+            width: 72px;
+            height: 72px;
+            border-radius: var(--pico-border-radius);
+        }
     </style>
 </head>
 <body>
+    <div id="app-loader" aria-label="Carregando aplicativo">
+        <img src="{{APP_ICON}}" alt="Ícone do App">
+        <div aria-busy="true"></div>
+    </div>
+
     <main id="app-root" class="container"></main>
 
     <!-- SDK para comunicação com a plataforma Workz! -->
@@ -25,6 +55,8 @@
     <!-- Ponto de entrada unificado para o App -->
     <script>
       document.addEventListener('DOMContentLoaded', async () => {
+        const loader = document.getElementById('app-loader');
+
         if (typeof window.WorkzSDK === 'undefined') {
           console.error('WorkzSDK não foi encontrado. O aplicativo não pode ser iniciado.');
           return;
@@ -37,9 +69,13 @@
           // Agora que o SDK está pronto, podemos iniciar o aplicativo.
           if (window.StoreApp && typeof window.StoreApp.bootstrap === 'function') {
             window.StoreApp.bootstrap();
+          } else {
+            console.error('Ponto de entrada do aplicativo (window.StoreApp.bootstrap) não encontrado.');
           }
         } catch (error) {
           console.error('Falha ao inicializar o WorkzSDK ou o aplicativo:', error);
+        } finally {
+            loader.classList.add('hidden');
         }
       });
     </script>

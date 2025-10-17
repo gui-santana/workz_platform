@@ -62,7 +62,7 @@ function newWindow(target, id, icon, title) {
   var windowEl = document.createElement("div");
   windowEl.setAttribute("name", id);
   windowEl.id = "window_" + (n + 1);
-  windowEl.classList.add("window", "bg-white");
+  windowEl.classList.add("window", "bg-white/30", "backdrop-blur-xl", "rounded-lg");
   document.getElementById("desktop").appendChild(windowEl);
   interactive(windowEl.id, {
     resize: true,
@@ -76,17 +76,27 @@ function newWindow(target, id, icon, title) {
   desktop();
   if (target !== null) {
     var root = document.createElement("div");
+    
+    // Após a chamada de interactive(), o dragPoint (cabeçalho) já deve existir.
+    // Precisamos obter sua altura real para ajustar a área de conteúdo.
+    let headerHeight = 0;
+    const dragPoint = windowEl.querySelector('.dragPoint');
+    if (dragPoint) {
+      // offsetHeight fornece a altura total do elemento, incluindo padding e borda.
+      headerHeight = dragPoint.offsetHeight + 10;
+    }
+
     root.classList.add(
-      "w-full",
-      "rounded-lg"
+      "w-full",            
     );
-    root.style.height = "calc(100% - 30px)"; // Adjust height for new header
+    // Ajusta a altura do conteúdo com base na altura real do cabeçalho
+    root.style.height = `calc(100% - ${headerHeight}px)`;
     windowEl.appendChild(root);
 
     var iframe = document.createElement("iframe");
     iframe.src = target;
     iframe.classList.add(
-      "rounded-lg",
+      "rounded-b-lg",
       "border-none",
       "w-full",
       "h-full"
@@ -157,7 +167,7 @@ function resizable(element) {
     "transition-opacity", // Tailwind for transition: opacity
     "duration-300",     // A faster duration
     "ease-in-out",      // A nice easing function
-    "rounded-md",
+    "rounded-lg",
     "border",
     "overflow-hidden",
     "absolute",
@@ -241,6 +251,8 @@ function initialResizeCssProperties(element, parent) {
   parent.style.gridTemplateRows = "5px " + h + " 5px";
   parent.style.gridTemplateColumns = "4px " + w + " 4px";
   parent.style.backgroundColor = computed.getPropertyValue("background-color");
+  parent.style.backdropFilter = computed.getPropertyValue("backdrop-filter");
+
 
   element.style.top = "0px";
   element.style.left = "0px";
@@ -421,8 +433,7 @@ function draggable(element, title, iconSrc) { // Receive data
     "div",
     element.id + "_header",
     "dragPoint"
-  );
-  dragPoint.classList.add("w-rounded-5-t");
+  );  
   initialDragPointStyling(dragPoint);
 
   let titleArea = createElementWithClassName('div', 'window-title-area');
@@ -432,7 +443,7 @@ function draggable(element, title, iconSrc) { // Receive data
       imgIcon.id = "window_icon_" + element.getAttribute("name"); // Use window name for ID
       imgIcon.style.height = "20px";
       imgIcon.style.width = "20px";
-      imgIcon.classList.add("rounded-md", "mr-2");
+      imgIcon.classList.add("rounded-full", "mr-2");
       titleArea.appendChild(imgIcon);
   }
   if (title) {
@@ -441,6 +452,7 @@ function draggable(element, title, iconSrc) { // Receive data
       windowTitle.textContent = title;
       titleArea.appendChild(windowTitle);
   }
+  dragPoint.classList.add("py-5", "px-3");
   dragPoint.appendChild(titleArea);
 
   // Insere o dragPoint como primeiro filho do elemento
@@ -484,6 +496,7 @@ function resizePointsStyling(element, dragPoint) {
   for (let i = 0; i < 5; i++) {
     let sibling = element.nextSibling;
     sibling.style.backgroundColor = dragPoint.style.backgroundColor;
+    sibling.style.backdropFilter = dragPoint.style.backdropFilter;
     element = sibling;
   }
 }
@@ -705,10 +718,10 @@ function addMinimizeFunction(element, minZone, icons, doubleClick) {
 function addMinimizeArea(minZone) {
   if (document.getElementById("minimizeZone") == null) {
     let minArea = document.createElement("div");
-    minArea.classList.add("z-index-3", "opacity-0", "ease-all-10s");
+    minArea.classList.add("opacity-0", "duration-300", "ease-in-out");
     minArea.id = "minimizeZone";
     minArea.style.background =
-      "radial-gradient(at bottom, rgba(0,0,0,.5) 10%, transparent 55%)";
+      "radial-gradient(at bottom, rgba(120,120,120,10) 0%, rgba(200,200,200,10) 20%, transparent 55%)";
     if (minZone == undefined) {
       document.getElementById("desktop").append(minArea);
     } else {
@@ -847,7 +860,7 @@ function getItemCountToFitElementByWidth(item, element) {
  */
 function createMinimizedElementRep(id, title) {
   let element = createElementWithIdAndClassName("button", id, "minimizedItem");
-  let appIcon = createElementWithIdAndClassName("img", "icon_" + id, "rounded-md");
+  let appIcon = createElementWithIdAndClassName("img", "icon_" + id, "rounded-full");
   element.name = title;  
   appIcon.classList.add("opacity-0", "duration-150", "ease-in-out", "shadow-md");
   setTimeout(() => {
@@ -861,7 +874,7 @@ function createMinimizedElementRep(id, title) {
   element.classList.add(
     "pointer",
     "transition",
-    "duration-150",
+    "duration-200",
     "ease-in-out",
     "hover:scale-105",
     "border-none",
