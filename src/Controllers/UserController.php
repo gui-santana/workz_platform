@@ -21,6 +21,7 @@ class UserController
      */
     public function me(?object $payload): void
     {
+        header("Content-Type: application/json");
         // O payload contém o ID do usuário em 'sub' (subject)
         $userId = $payload->sub;
         
@@ -42,6 +43,7 @@ class UserController
 
     public function register(): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {

@@ -17,6 +17,7 @@ class GeneralController
 
     public function insert(): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             http_response_code(400);
@@ -54,6 +55,7 @@ class GeneralController
 
     public function update(): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             http_response_code(400);
@@ -91,6 +93,7 @@ class GeneralController
 
     public function search(): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true);
         
         if (json_last_error() !== JSON_ERROR_NONE) {
@@ -143,6 +146,7 @@ class GeneralController
 
     public function count(): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             http_response_code(400);
@@ -183,6 +187,7 @@ class GeneralController
 
     public function delete(): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             http_response_code(400);
@@ -219,6 +224,7 @@ class GeneralController
 
     public function uploadImage(): void
     {
+        header("Content-Type: application/json");
         $entityType = $_POST['entity_type'] ?? '';
         $entityId = $_POST['entity_id'] ?? '';
         $imageType = $_POST['image_type'] ?? 'im';
@@ -331,6 +337,7 @@ class GeneralController
 
     public function changeEmail(): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             echo json_encode(['message' => 'Invalid JSON input.', 'status' => 'error']);
@@ -404,6 +411,7 @@ class GeneralController
 
     public function changePassword(): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true);
         if (json_last_error() !== JSON_ERROR_NONE) {
             echo json_encode(['message' => 'Invalid JSON input.', 'status' => 'error']);
@@ -476,9 +484,3 @@ class GeneralController
         return preg_match($regex, $password) === 1;
     }
 }
-
-
-
-
-
-

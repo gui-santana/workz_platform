@@ -17,6 +17,7 @@ class PostsController
     // Cria um post na tabela workz_data.hpl usando o modelo General
     public function create(?object $payload): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
 
         if (!$payload) {
@@ -81,6 +82,7 @@ class PostsController
     // Lista posts para o feed (padrão: mais recentes)
     public function feed(?object $payload): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $limit = isset($input['limit']) ? max(1, min(100, (int)$input['limit'])) : 20;
@@ -126,6 +128,7 @@ class PostsController
     // Upload de mídias (imagens/vídeos) para uso em posts. Aceita múltiplos arquivos.
     public function uploadMedia(?object $payload): void
     {
+        header("Content-Type: application/json");
         if (!$payload) {
             http_response_code(401);
             echo json_encode(['status' => 'error', 'message' => 'Unauthorized']);

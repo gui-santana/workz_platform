@@ -10,6 +10,7 @@ class AppsController
 {
     private General $generalModel;
 
+    // ... (construtor e outros métodos existentes) ...
     public function __construct()
     {
         $this->generalModel = new General();
@@ -22,6 +23,7 @@ class AppsController
      */
     public function catalog(): void
     {
+        header("Content-Type: application/json");
         try {
             $res = $this->generalModel->search(
                 'workz_apps',
@@ -48,6 +50,7 @@ class AppsController
      */
     public function entitlements(object $auth): void
     {
+        header("Content-Type: application/json");
         try {
             $userId = (int)($auth->sub ?? 0);
             if ($userId <= 0) { http_response_code(401); echo json_encode(['error' => 'Unauthorized']); return; }
@@ -90,6 +93,7 @@ class AppsController
      */
     public function sso(object $auth): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $appId = (int)($input['app_id'] ?? 0);
         $ctx   = $input['ctx'] ?? null; // ['type' => ..., 'id' => ...]
@@ -141,5 +145,71 @@ class AppsController
             'user' => [ 'id' => $userId ],
             'context' => $payload['ctx'],
         ]);
+    }
+
+    /**
+     * GET /app/run/{slug}
+     * O "App Runner" que serve o HTML do aplicativo com o JS injetado.
+     * Protegido por AuthMiddleware.
+     */
+    public function run(object $auth, string $slug): void
+    {
+        $userId = (int)($auth->sub ?? 0);
+        if ($userId <= 0) {
+            http_response_code(401);
+            echo "Acesso negado. Faça login para usar os aplicativos.";
+            return;
+        }
+
+        // 1. Buscar metadados do app pelo slug
+        $app = $this->generalModel->search(
+            'workz_apps',
+            'apps',
+            ['id', 'tt', 'st', 'access_level', 'js_code', 'color'],
+            ['slug' => $slug],
+            false // fetchOne
+        );
+
+        if (!$app || (int)$app['st'] !== 1) {
+            http_response_code(404);
+            echo "Aplicativo não encontrado ou inativo.";
+            return;
+        }
+
+        // 2. Verificar permissões de acesso
+        $accessLevel = (int)$app['access_level'];
+        if ($accessLevel > 1) { // Requer vínculo
+            $hasAccess = $this->generalModel->count(
+                'workz_apps',
+                'gapp',
+                ['us' => $userId, 'ap' => $app['id'], 'st' => 1]
+            ) > 0;
+
+            if (!$hasAccess) {
+                http_response_code(403);
+                echo "Você não tem permissão para acessar este aplicativo.";
+                return;
+            }
+        }
+
+        // 3. Carregar o template HTML (usaremos o embed.html como padrão)
+        $templatePath = dirname(__DIR__, 2) . '/public/apps/embed.html';
+        if (!file_exists($templatePath)) {
+            http_response_code(500);
+            echo "Erro interno: Template do aplicativo não encontrado.";
+            return;
+        }
+        $template = file_get_contents($templatePath);
+
+        // 4. Injetar o código JS e configurações
+        $jsCode = $app['js_code'] ?? 'console.error("Nenhum código de aplicativo encontrado.");';
+        $appColor = $app['color'] ?? '#3b82f6';
+
+        $output = str_replace('{{APP_SCRIPT}}', $jsCode, $template);
+        $output = str_replace('{{APP_COLOR}}', htmlspecialchars($appColor), $output);
+
+        // 5. Servir o HTML
+        header('Content-Type: text/html; charset=utf-8');
+        echo $output;
     }
 }

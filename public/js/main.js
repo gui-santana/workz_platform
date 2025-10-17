@@ -2572,7 +2572,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         workzContent: `
-            <div class="col-span-12 rounded-b-3xl h-48 bg-gray-200 bg-cover bg-center"></div>
+            <div class="snap-start col-span-12 rounded-b-3xl h-48 bg-gray-200 bg-cover bg-center"></div>
             <div class="col-span-12 clearfix grid grid-cols-12 gap-6 mx-4 sm:mx-6">
                 <div class="col-span-12 sm:col-span-8 lg:col-span-9 flex flex-col grid grid-cols-12 gap-x-6 -mt-24">
                     <!-- Coluna da Esquerda (Menu de Navegação) -->
@@ -2610,12 +2610,12 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         mainContent: `
-            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] border-2 border-gray shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
+            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] border-4 border-gray shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
                 <div class="col-span-12 grid grid-cols-12 gap-4 h-full">
                     <div id="dashboard-statusbar" class="col-span-12 absolute left-4 right-4 top-2 h-8 lg:left-5 lg:right-5 lg:top-2.5 lg:h-9 text-sm lg:text-base text-white font-bold text-shadow-lg flex items-center justify-between">
-                        <div id="wClock" class="text-md">00:00</div>
-                        <button id="apps-menu-trigger" class="shrink-0 rounded-full bg-white/20 hover:bg-white/30 text-white p-2 transition" title="Abrir biblioteca de aplicativos" aria-label="Abrir biblioteca de aplicativos">
-                            <i class="fas fa-th"></i>
+                        <div id="wClock" class="text-md text-shadow-lg/30">00:00</div>                                                
+                        <button id="apps-menu-trigger" class="text-white" title="Configurações da Área de Trabalho" aria-label="Configurações da Área de Trabalho">
+                            <i class="fas fa-cog"></i>
                         </button>
                     </div>
                 <div id="app-library" class="col-span-12 h-full flex flex-col items-center justify-center space-y-4"></div>
@@ -3216,9 +3216,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const appearance = UI.shortcutList([
                 { id: 'desktop', icon: 'fa-th', label: 'Área de Trabalho' }
             ]);
-            const applications = UI.shortcutList([
-                { id: 'apps', icon: 'fa-shapes', label: 'Aplicativos' }
-            ]);
+            
             const pages = UI.shortcutList([
                 { id: 'people', icon: 'fa-user-friends', label: 'Pessoas' },
                 { id: 'businesses', icon: 'fa-briefcase', label: 'Negócios' },
@@ -3243,8 +3241,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <i class="fas fa-chevron-right"></i>
                     </div>
                 </div>
-                ${appearance}
-                ${applications}
+                ${appearance}                
                 ${pages}
                 ${logout}
             `;
@@ -3321,16 +3318,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (view === 'desktop') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: (navTitle || 'Área de Trabalho') });
 
-            const hideFav = (function(){ try { return localStorage.getItem('workz.apps.hideFavorites') === '1'; } catch (_) { return false; } })();
-            const bgUrl = (function(){ try { return localStorage.getItem('workz.desktop.background') || DEFAULT_BING_BG; } catch (_) { return DEFAULT_BING_BG; } })();
-
-            const hideFavCard = UI.sectionCard(
-                UI.row('desktop-hide-favorites', 'Ocultar favoritos da biblioteca', `
-                    <button id="desktop-hide-favorites" data-action="desktop-toggle-hide-favorites" class="ios-switch" role="switch" aria-checked="${hideFav ? 'true' : 'false'}" aria-label="Ocultar favoritos da biblioteca" tabindex="0">
-                        <span class="ios-switch-handle"></span>
-                    </button>
-                `, { top: true, bottom: true })
-            );
+            const applications = UI.shortcutList([
+                { id: 'apps', icon: 'fa-shapes', label: 'Aplicativos' }
+            ]);
+            
+            const bgUrl = (function(){ try { return localStorage.getItem('workz.desktop.background') || DEFAULT_BING_BG; } catch (_) { return DEFAULT_BING_BG; } })();            
 
             const bgCard = `
                 <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
@@ -3347,7 +3339,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
 
-            html += hideFavCard + bgCard;
+            html += bgCard;
+
+            html += applications;
 
         } else if (view === 'password') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
@@ -3708,6 +3702,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 conditions: { us: currentUserData.id },
                 fetchAll: true
             });
+            const hideFav = (function(){ try { return localStorage.getItem('workz.apps.hideFavorites') === '1'; } catch (_) { return false; } })();
+            const hideFavCard = UI.sectionCard(
+                UI.row('desktop-hide-favorites', 'Ocultar favoritos da biblioteca', `
+                    <button id="desktop-hide-favorites" data-action="desktop-toggle-hide-favorites" class="ios-switch" role="switch" aria-checked="${hideFav ? 'true' : 'false'}" aria-label="Ocultar favoritos da biblioteca" tabindex="0">
+                        <span class="ios-switch-handle"></span>
+                    </button>
+                `, { top: true, bottom: true })
+            );
             const appIds = Array.isArray(userApps?.data) ? userApps.data.map(o => o.ap) : [];
             const apps = await fetchByIds(appIds, 'apps');
             const list = Array.isArray(apps) ? apps : (apps ? [apps] : []);
@@ -3732,7 +3734,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="col-span-5 p-3 truncate">${name}</div>
                 </div>`;
             }).join('');
-            html += searchCardApps + UI.sectionCard(`<div id="apps-list">${storeRow}${rows}</div>`);
+            html += hideFavCard + searchCardApps + UI.sectionCard(`<div id="apps-list">${storeRow}${rows}</div>`);
         } else if (view === 'app-settings') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const app = data || {};
@@ -4381,7 +4383,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (token) meta = byTok(token);
         if (!meta && code != null) meta = byCode(code);
         if (!meta) return null;
-        out.label = meta.label; out.icon = meta.icon;
+        out.label = meta.label; 
+        out.icon = meta.icon;
         out.tooltip = meta.label;
         return out;
     }
@@ -4765,10 +4768,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="h-full whitespace-nowrap transition-transform duration-300 ease-out" data-carousel-track style="transform: translateX(0);">
                         ${slides}
                     </div>
-                    <div class="absolute inset-x-0 bottom-2 z-30 flex items-center justify-center gap-2 text-xs">
-                        <button type="button" class="px-2 py-1 rounded-full bg-black/40 text-white" data-feed-action="prev-slide" data-post-id="${postId}">&#10094;</button>
-                        <span class="rounded-full bg-black/40 text-white px-2 py-1" data-role="carousel-indicator" data-post-id="${postId}">1/${post.media.length}</span>
-                        <button type="button" class="px-2 py-1 rounded-full bg-black/40 text-white" data-feed-action="next-slide" data-post-id="${postId}">&#10095;</button>
+                    <div class="absolute inset-y-0 left-0 flex items-center p-2 z-20">
+                        <button type="button" class="w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center" data-feed-action="prev-slide" data-post-id="${postId}" aria-label="Anterior">
+                            <i class="fas fa-chevron-left text-sm"></i>
+                        </button>
+                    </div>
+                    <div class="absolute inset-y-0 right-0 flex items-center p-2 z-20">
+                        <button type="button" class="w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center" data-feed-action="next-slide" data-post-id="${postId}" aria-label="Próximo">
+                            <i class="fas fa-chevron-right text-sm"></i>
+                        </button>
                     </div>
                 </div>`;
             } else if (post?.feedMediaType === 'video' && post?.feedMediaUrl) {
@@ -4785,25 +4793,24 @@ document.addEventListener('DOMContentLoaded', () => {
             );
 
             return `
-        <article class="col-span-12 sm:col-span-6 lg:col-span-4" data-post-id="${postId}">
-            <div class="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-lg bg-gray-900 text-white">
+        <article class="snap-center col-span-12 sm:col-span-6 lg:col-span-4" data-post-id="${postId}">
+            <div class="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-lg text-white">
                 <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}"></div>
                 ${mediaMarkup}
-                <div class="absolute inset-0 bg-gradient-to-b from-black/10 via-black/10 to-black/40"></div>
-                <div class="relative z-1 flex flex-col h-full justify-between">
-                    <header class="flex items-center gap-2 p-4">
-                        <span class="w-9 h-9 rounded-full overflow-hidden border border-white/30 bg-black/40 flex items-center justify-center">
-                            <img src="${avatarSrc}" alt="${authorName}" class="w-full h-full object-cover">
-                        </span>
-                        <div class="flex flex-col">
-                            <span class="font-semibold text-s leading-tight">${authorName}</span>
-                            ${formattedDate ? `<time class="text-xs text-white/70">${formattedDate}</time>` : ''}
+                <div class="absolute inset-0 bg-gradient-to-b from-black/15 via-black/10 to-black/20"></div>
+                <div class="relative z-1 w-full h-full">
+                    <header class="absolute top-3 left-3 right-3 flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                            <img src="${avatarSrc}" alt="${authorName}" class="w-9 h-9 rounded-full pointer">                            
+                            <div class="flex flex-col truncate font-semibold text-sm leading-tight text-shadow-lg">
+                                <a href="#">${authorName}</a>
+                                ${formattedDate ? `<time class="text-[11px] text-white/70">${formattedDate}</time>` : ''}
+                            </div>
                         </div>
-                        ${(() => { try { const m = getPostPrivacyDisplay(post); return m ? `<span class=\"ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/40 text-white text-[11px]\" title=\"${m.tooltip}\"><i class=\"fas ${m.icon}\"></i>${m.label}</span>` : ''; } catch(_) { return ''; } })()}
-                    </header>
-                    <button type="button" class="absolute top-2 right-2 w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center backdrop-blur-sm" data-feed-action="open-post-menu" data-post-id="${postId}" data-media-url="${post?.feedMediaUrl || ''}" data-media-type="${post?.feedMediaType || ''}">
-                        <i class="fas fa-ellipsis-h"></i>
-                    </button>
+                        <button type="button" class="w-7 h-7 text-white flex items-center justify-center" data-feed-action="open-post-menu" data-post-id="${postId}" data-media-url="${post?.feedMediaUrl || ''}" data-media-type="${post?.feedMediaType || ''}">
+                            <i class="fas fa-ellipsis-v"></i>
+                        </button>
+                    </header>                    
                     <div class="absolute top-12 right-2 w-44 bg-black/80 text-white rounded-xl shadow-lg border border-white/10 hidden z-40" data-role="post-menu" data-post-id="${postId}" data-media-url="${post?.feedMediaUrl || ''}" data-media-type="${post?.feedMediaType || ''}" data-can-delete="${canDelete ? '1' : '0'}">
                         <button type="button" class="w-full text-left px-3 py-2 hover:bg-white/10" data-feed-action="download-media" data-post-id="${postId}">
                             <i class="fas fa-download mr-2"></i>${post?.feedMediaType === 'video' ? 'Baixar vídeo' : 'Baixar imagem'}
@@ -4813,19 +4820,20 @@ document.addEventListener('DOMContentLoaded', () => {
                         </button>
                         ${canDelete ? `<button type=\"button\" class=\"w-full text-left px-3 py-2 hover:bg-red-500/20 text-red-300\" data-feed-action=\"delete-post\" data-post-id=\"${postId}"\u003e<i class=\\\"fas fa-trash mr-2"\u003e</i>Excluir</button>` : ''}
                     </div>
-                    <div class="px-4 pb-5 space-y-4">
-                        ${title ? `<h3 class="text-lg font-semibold text-white drop-shadow">${title}</h3>` : ''}
-                        ${caption ? `<p class="text-sm text-white/90 leading-relaxed">${caption}</p>` : ''}
-                        <div class="flex items-center gap-3">
-                            <button type="button" class="flex items-center justify-center w-10 h-10 rounded-full bg-black/40 hover:bg-black/60 transition text-lg ${userLiked ? 'text-red-400' : 'text-white'}" data-feed-action="toggle-like" data-post-id="${postId}" data-liked="${userLiked ? '1' : '0'}" aria-pressed="${userLiked}">
+                    <footer class="absolute bottom-0 left-0 right-0 px-3 pb-3 pt-14 space-y-2 pointer-events-none">
+                        ${title ? `<h3 class="text-base font-semibold text-white drop-shadow pointer-events-auto">${title}</h3>` : ''}
+                        ${caption ? `<p class="text-[13px] text-white/90 leading-relaxed pointer-events-auto">${caption}</p>` : ''}
+                        <div class="flex items-center gap-2 pointer-events-auto">
+                            <button type="button" class="flex items-center justify-center w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 transition text-base ${userLiked ? 'text-red-400' : 'text-white'}" data-feed-action="toggle-like" data-post-id="${postId}" data-liked="${userLiked ? '1' : '0'}" aria-pressed="${userLiked}">
                                 <i class="${userLiked ? 'fas' : 'far'} fa-heart"></i>
                             </button>
-                            <button type="button" class="flex items-center justify-center w-10 h-10 rounded-full bg-black/40 hover:bg-black/60 transition text-lg text-white" data-feed-action="open-comments" data-post-id="${postId}">
+                            <button type="button" class="flex items-center justify-center w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 transition text-base text-white" data-feed-action="open-comments" data-post-id="${postId}">
                                 <i class="far fa-comment"></i>
                             </button>
-                            <span class="text-sm text-white/90" data-role="like-count" data-post-id="${postId}" data-count="${likeTotal}">${likeTotal} ${likeLabel}</span>
+                            <span class="text-xs text-white/90" data-role="like-count" data-post-id="${postId}" data-count="${likeTotal}">${likeTotal} ${likeLabel}</span>
+                            ${post?.hasCarousel ? `<span class=\"ml-auto text-xs text-white/85 rounded-full bg-black/35 px-2 py-0.5\" data-role=\"carousel-indicator\" data-post-id=\"${postId}\">1/${post.media.length}</span>` : ''}
                         </div>
-                        <div class="space-y-3 hidden" data-role="comment-block" data-post-id="${postId}">
+                        <div class="space-y-3 hidden pointer-events-auto" data-role="comment-block" data-post-id="${postId}">
                             <div class="space-y-3" data-role="comment-list" data-post-id="${postId}">
                                 ${commentList || '<p class="text-xs text-white/60" data-role="empty-comments">Ainda sem comentários.</p>'}
                             </div>
@@ -4834,7 +4842,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <button type="submit" class="text-sm font-semibold text-white hover:text-indigo-200 transition">Publicar</button>
                             </form>
                         </div>
-                    </div>
+                    </footer>
                 </div>
             </div>
         </article>`;
@@ -6635,10 +6643,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (el && el.dataset.sidebarAction === 'post-editor') {
                 // Remover w-0 e adicionar classes de largura
                 sidebarWrapper.classList.remove('w-0');
-                sidebarWrapper.classList.add('lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
+                sidebarWrapper.classList.add('xl:w-1/4', 'lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
             } else {
                 // Comportamento normal de toggle para outros elementos
                 sidebarWrapper.classList.toggle('w-0');
+                sidebarWrapper.classList.toggle('xl:w-1/4');
                 sidebarWrapper.classList.toggle('lg:w-1/3');
                 sidebarWrapper.classList.toggle('sm:w-1/2');
                 sidebarWrapper.classList.toggle('w-full');
@@ -8025,23 +8034,32 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_) {}
     }
     async function launchApp(app, opts = {}) {
-        let baseUrl = app?.embed_url || app?.src || app?.page_privacy || null;
-        if (!app || !baseUrl) { return; }
-        // Deriva contexto atual
+        if (!app || !app.slug) { return; }
+
+        let baseUrl = `/api/app/run/${app.slug}`;
+
         let ctx = null;
         if (viewType === ENTITY.BUSINESS && viewId) ctx = { type: 'business', id: viewId };
         else if (viewType === ENTITY.TEAM && viewId) ctx = { type: 'team', id: viewId };
         else if (currentUserData?.id) ctx = { type: 'user', id: currentUserData.id };
 
         let finalUrl = baseUrl;
-        const wantSSO = opts.sso !== false;
-        if (wantSSO) {
+        const wantSSO = opts.sso !== false; // SSO é para o app, não para o runner
+        const mainToken = localStorage.getItem('jwt_token');
+
+        // O runner SEMPRE precisa de um token para autenticar o carregamento do iframe.
+        // Usamos o token principal do usuário para isso.
+        if (mainToken) {
+            finalUrl += `?token=${encodeURIComponent(mainToken)}`;
+        }
+
+        if (wantSSO) { // Se o app precisar de um token de SSO próprio (diferente do principal)
             try {
                 const sso = await apiClient.post('/apps/sso', { app_id: app.id, ctx });
                 const token = sso?.token || null;
                 if (token) {
-                    const sep = (finalUrl.indexOf('?') >= 0) ? '&' : '?';
-                    finalUrl = `${finalUrl}${sep}token=${encodeURIComponent(token)}`;
+                    // O app receberá este token via postMessage ou outro mecanismo no futuro.
+                    // Por enquanto, o runner só precisa do token principal.
                 }
             } catch (_) {}
         }
@@ -8064,6 +8082,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     ev.source?.postMessage({ type: 'workz-sdk:auth', jwt, user: currentUserData || null, context: ctx }, '*');
                 } catch (_) {}
+            } else if (data.type === 'app:launch') {
+                // App embutido está pedindo para abrir outro app
+                const appIdToLaunch = data?.payload?.appId;
+                if (appIdToLaunch) {
+                    launchAppById(appIdToLaunch);
+                }
             }
         }, false);
     } catch (_) {}
@@ -8338,9 +8362,9 @@ document.addEventListener('DOMContentLoaded', () => {
             let html = '<div class="flex items-center gap-3 w-max mx-auto">';
             // Botão iniciar (abre/fecha a grade de apps)
             html += `
-                <button data-start="1" class="relative shrink-0 snap-start" title="Menu iniciar">
+                <button data-start="1" class="relative shrink-0 snap-start" title="Início">
                     <div class="w-12 h-12 rounded-full overflow-hidden bg-white/10 text-white flex items-center justify-center shadow-xl transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
-                        <i class="fab fa-windows text-xl lg:text-2xl"></i>
+                        <img src="/images/apps/inicio.png" alt="Início" class="app-icon-image" />
                     </div>
                 </button>`;
             // Loja (sempre presente)
@@ -8357,7 +8381,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const name = app?.tt || 'App';
                 html += `                    
                 <button data-app-id="${app.id}" title="${name}" class="relative shrink-0 snap-start" data-quick-id="${app.id}">
-                    <div class="w-14 h-14 lg:w-16 lg:h-16 rounded-[22%] overflow-hidden bg-white/5 shadow-[0_10px_18px_rgba(0,0,0,0.24),_0_2px_6px_rgba(0,0,0,0.18)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
+                    <div class="w-12 h-12 rounded-full overflow-hidden bg-white/5 shadow-[0_10px_18px_rgba(0,0,0,0.24),_0_2px_6px_rgba(0,0,0,0.18)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
                         <img src="${img}" alt="${name}" class="app-icon-image" />
                     </div>
                 </button>`;
@@ -8409,8 +8433,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const mount = document.querySelector('.sidebar-content');
             SidebarNav.setMount(mount);
             SidebarNav.resetRoot(currentUserData);
-            setTimeout(() => {
-                try { SidebarNav.push({ view: 'apps', title: 'Aplicativos', payload: { data: currentUserData } }); } catch (_) {}
+            setTimeout(() => {                
+                try { SidebarNav.push({ view: 'desktop', title: 'Área de Trabalho', payload: { data: currentUserData } }); } catch (_) {}
             }, 60);
         } catch (_) {}
     }
@@ -9169,10 +9193,8 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const result = await apiClient.post('/login', data);
             if (result?.token) {
-                localStorage.setItem('jwt_token', result.token);
-                showLoading();
-                installSidebarClickShield();
-    startup();
+                localStorage.setItem('jwt_token', result.token);                
+                window.location.reload();
             } else {
                 await showMessage(messageContainer, result?.error || 'Credenciais inválidas. Verifique seus dados.', 'error', { dismissAfter: 6000 });
             }
@@ -9241,9 +9263,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (result?.token) {
                 localStorage.setItem('jwt_token', result.token);
-                showLoading();
-                installSidebarClickShield();
-    startup();
+                window.location.reload();
                 return;
             }
 
@@ -9375,7 +9395,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    installSidebarClickShield();
     startup();
 
     setupSidebarFormConfirmation();
@@ -9635,4 +9654,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 });
-

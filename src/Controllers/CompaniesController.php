@@ -16,6 +16,7 @@ class CompaniesController
 
     public function updateMemberLevel(?object $payload): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $companyId = (int)($input['companyId'] ?? 0);
         $targetUser = (int)($input['userId'] ?? 0);
@@ -31,6 +32,7 @@ class CompaniesController
 
     public function acceptMember(?object $payload): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $companyId = (int)($input['companyId'] ?? 0);
         $targetUser = (int)($input['userId'] ?? 0);
@@ -44,6 +46,7 @@ class CompaniesController
 
     public function rejectMember(?object $payload): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $companyId = (int)($input['companyId'] ?? 0);
         $targetUser = (int)($input['userId'] ?? 0);
@@ -55,4 +58,3 @@ class CompaniesController
         if ($ok) { echo json_encode(['status'=>'success']); } else { http_response_code(500); echo json_encode(['status'=>'error']); }
     }
 }
-

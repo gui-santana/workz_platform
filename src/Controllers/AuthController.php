@@ -51,6 +51,7 @@ class AuthController
 
     public function handleMicrosoftCallback(): void
     {
+        header("Content-Type: application/json");
         session_start();
 
         if (empty($_GET['state']) || (empty($_SESSION['oauth2state']) || $_GET['state'] !== $_SESSION['oauth2state'])) {
@@ -144,6 +145,7 @@ class AuthController
 
     public function handleGoogleCallback(): void
     {        
+        header("Content-Type: application/json");
         session_start();
 
         if (empty($_GET['state']) || (empty($_SESSION['oauth2state']) || $_GET['state'] !== $_SESSION['oauth2state'])) {
@@ -211,6 +213,7 @@ class AuthController
     
     public function login(): void
     {
+        header("Content-Type: application/json");
         $data = json_decode(file_get_contents('php://input'), true);
         
         if (empty($data['email']) || empty($data['password'])) {
@@ -274,11 +277,13 @@ class AuthController
 
         } else {
             // LÓGICA PARA LOGIN LOCAL (DO FORMULÁRIO)            
+            header("Content-Type: application/json");
             http_response_code(200);
             echo json_encode([
                 'message' => 'Login bem-sucedido!',
                 'token' => $jwt
             ]);
+            exit();
         }   
     }
 
@@ -288,6 +293,7 @@ class AuthController
 
     public function register(): void
     {
+        header("Content-Type: application/json");
         $data = json_decode(file_get_contents('php://input'), true);
 
         if (empty($data['name']) || empty($data['email']) || empty($data['password']) || empty($data['password-repeat'])){

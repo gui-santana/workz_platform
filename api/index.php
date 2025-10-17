@@ -16,18 +16,13 @@ $dotenv->load();
 // Importa todas as classes que vamos usar.
 use Workz\Platform\Core\Router;
 use Workz\Platform\Controllers\AuthController;
-use Workz\Platform\Controllers\TestController;
 use Workz\Platform\Controllers\UserController;
 use Workz\Platform\Controllers\GeneralController;
 use Workz\Platform\Controllers\TeamsController;
 use Workz\Platform\Controllers\PostsController;
 use Workz\Platform\Controllers\CompaniesController;
-use Workz\Platform\Controllers\AppsController;
 
 use Workz\Platform\Middleware\AuthMiddleware;
-
-// Define o cabeçalho de resposta padrão para JSON.
-header("Content-Type: application/json");
 
 // --- INÍCIO DO TRATADOR DE ERROS GLOBAL ---
 // Tratador de Erros Global
@@ -95,11 +90,8 @@ $router->add('POST', '/api/posts', [PostsController::class, 'create'], [AuthMidd
 $router->add('POST', '/api/posts/feed', [PostsController::class, 'feed'], [AuthMiddleware::class, 'handle']);
 // Upload de mídias para posts (imagens/vídeos, múltiplos arquivos)
 $router->add('POST', '/api/posts/media', [PostsController::class, 'uploadMedia'], [AuthMiddleware::class, 'handle']);
-
-// Apps (catálogo, entitlements e SSO)
-$router->add('GET',  '/api/apps/catalog', [AppsController::class, 'catalog']);
-$router->add('GET',  '/api/apps/entitlements', [AppsController::class, 'entitlements'], [AuthMiddleware::class, 'handle']);
-$router->add('POST', '/api/apps/sso', [AppsController::class, 'sso'], [AuthMiddleware::class, 'handle']);
+ 
+(require_once __DIR__ . '/routes/app_routes.php')($router); // Inclui as rotas de apps
 
 // ==================================================
 // DESPACHO DA REQUISIÇÃO
@@ -109,6 +101,3 @@ $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
 
 $router->dispatch($uri, $method);
-
-
-

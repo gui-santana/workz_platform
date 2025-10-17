@@ -16,6 +16,7 @@ class TeamsController
 
     public function delete(?object $payload): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $teamId = (int)($input['id'] ?? 0);
         if (!$payload || !$teamId) { http_response_code(400); echo json_encode(['status'=>'error','message'=>'Dados inválidos']); return; }
@@ -34,6 +35,7 @@ class TeamsController
 
     public function updateMemberLevel(?object $payload): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $teamId = (int)($input['teamId'] ?? 0);
         $targetUser = (int)($input['userId'] ?? 0);
@@ -51,6 +53,7 @@ class TeamsController
 
     public function acceptMember(?object $payload): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $teamId = (int)($input['teamId'] ?? 0);
         $targetUser = (int)($input['userId'] ?? 0);
@@ -65,6 +68,7 @@ class TeamsController
 
     public function rejectMember(?object $payload): void
     {
+        header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $teamId = (int)($input['teamId'] ?? 0);
         $targetUser = (int)($input['userId'] ?? 0);
@@ -77,4 +81,3 @@ class TeamsController
         if ($ok) { echo json_encode(['status'=>'success']); } else { http_response_code(500); echo json_encode(['status'=>'error']); }
     }
 }
-

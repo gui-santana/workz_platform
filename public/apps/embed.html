@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pt-br" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Pico.css é uma ótima escolha para apps simples, como no seu exemplo -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
+    <title>Workz! App</title>
+    <style>
+        :root {
+            --pico-primary: {{APP_COLOR}}; /* Cor injetada pelo backend */
+        }
+        body { padding: 1rem; }
+    </style>
+</head>
+<body>
+    <main id="app-root" class="container"></main>
+
+    <!-- SDK para comunicação com a plataforma Workz! -->
+    <script src="/js/core/workz-sdk.js" defer></script>
+
+    <!-- Configurações e código do app injetados pelo backend -->
+    <script>{{APP_SCRIPT}}</script>
+
+    <!-- Ponto de entrada unificado para o App -->
+    <script>
+      document.addEventListener('DOMContentLoaded', async () => {
+        if (typeof window.WorkzSDK === 'undefined') {
+          console.error('WorkzSDK não foi encontrado. O aplicativo não pode ser iniciado.');
+          return;
+        }
+
+        try {
+          // Inicializa o SDK. Como estamos em um iframe com token na URL, o modo 'standalone' funciona.
+          await window.WorkzSDK.init({ mode: 'standalone' });
+
+          // Agora que o SDK está pronto, podemos iniciar o aplicativo.
+          if (window.StoreApp && typeof window.StoreApp.bootstrap === 'function') {
+            window.StoreApp.bootstrap();
+          }
+        } catch (error) {
+          console.error('Falha ao inicializar o WorkzSDK ou o aplicativo:', error);
+        }
+      });
+    </script>
+</body>
+</html>

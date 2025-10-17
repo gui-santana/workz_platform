@@ -1,29 +1,31 @@
 // public/js/core/workz-sdk.js
 
 (function(global){
-  const DEFAULT_BASE = 'http://localhost:9090/api';
+  const DEFAULT_BASE = '/api'; // Usar caminho relativo para ser agnóstico ao domínio
 
   function parseQueryToken(){
     try {
       const url = new URL(window.location.href);
       const fromQuery = url.searchParams.get('token');
       if (fromQuery) {
-        url.searchParams.delete('token');
-        history.replaceState({}, document.title, url.toString());
+        // Não remover o token da URL interna do iframe, pois pode ser necessário em reloads.
+        // A URL visível para o usuário não contém o token.
         return fromQuery;
       }
       if (window.location.hash) {
         const h = new URLSearchParams(window.location.hash.slice(1));
         const t = h.get('token');
         if (t) {
-          h.delete('token');
-          const base = window.location.href.split('#')[0];
-          const nh = h.toString();
-          history.replaceState({}, document.title, nh ? base + '#' + nh : base);
+          // Não remover o token
           return t;
         }
       }
-    } catch(_) {}
+    } catch(e) {
+      // Em iframes com `src` sendo uma data URI ou similar, `new URL` pode falhar.
+      // Podemos tentar uma regex como fallback.
+      const match = window.location.search.match(/[?&]token=([^&]+)/);
+      if (match) return match[1];
+    }
     return null;
   }
 
@@ -37,12 +39,13 @@
 
     async init(cfg={}){
       this._cfg = Object.assign({ mode: 'standalone', baseUrl: DEFAULT_BASE }, cfg||{});
+      this._token = parseQueryToken();
 
       if (this._cfg.mode === 'standalone') {
-        // Try to load token from URL or localStorage
-        this._token = parseQueryToken() || localStorage.getItem('jwt_token') || null;
-        if (this._token) { localStorage.setItem('jwt_token', this._token); }
-        // If we have a token but no user, try to fetch /me
+        // No modo standalone, o token DEVE vir da URL.
+        // Se não vier, o app pode funcionar em modo público, mas não autenticado.
+        if (this._token) localStorage.setItem('jwt_token', this._token);
+        else this._token = localStorage.getItem('jwt_token'); // Fallback para token já salvo
         if (this._token && !this._user) {
           try { this._user = await this._fetchMe(); } catch(_) {}
         }
@@ -51,6 +54,10 @@
       }
 
       if (this._cfg.mode === 'embed') {
+        // No modo embed, o token pode vir da URL (nosso caso) ou do postMessage.
+        // Se já temos da URL, podemos prosseguir.
+        if (this._token) localStorage.setItem('jwt_token', this._token);
+
         return new Promise(resolve => {
           const onMsg = (ev) => {
             const data = ev?.data || {};
@@ -59,7 +66,10 @@
               this._token = data.jwt || null;
               this._user = data.user || null;
               this._context = data.context || null;
-              if (this._token) localStorage.setItem('jwt_token', this._token);
+              if (this._token) {
+                localStorage.setItem('jwt_token', this._token);
+              }
+
               const finish = async () => {
                 if (!this._user && this._token) {
                   try { this._user = await this._fetchMe(); } catch(_) {}
@@ -74,10 +84,20 @@
             }
           };
           window.addEventListener('message', onMsg, false);
+
+          // Se já temos o token da URL, não precisamos esperar pelo handshake.
+          if (this._token) {
+            const finish = async () => {
+              if (!this._user) { try { this._user = await this._fetchMe(); } catch(_) {} }
+              this._ready = true;
+              resolve(true);
+            };
+            finish();
+            return;
+          }
+
           // Initiate handshake
           try { window.parent.postMessage({ type: 'workz-sdk:init' }, '*'); } catch(_) {}
-          // Fallback timeout
-          setTimeout(() => { if (!this._ready) resolve(false); }, 3000);
         });
       }
 
@@ -116,7 +136,11 @@
     async _fetchMe(){
       const res = await fetch(this._url('/me'), { method: 'GET', headers: this._headers() });
       const data = await res.json();
-      return data?.data || data || null;
+      if (res.ok) {
+        return data; // A rota /me retorna o objeto do usuário diretamente
+      }
+      // Se o token for inválido, o erro será capturado pela chamada original.
+      return null;
     },
 
     _url(path){
