@@ -1,0 +1,82 @@
+980:         
+981:         return $totalSize > $threshold ? 'filesystem' : 'database';
+982:     }
+983: 
+984:     private function getMimeTypeForPlatform(string $platform): string
+985:     {
+986:         $mimeTypes = [
+987:             'web' => 'application/zip',
+988:             'android' => 'application/vnd.android.package-archive',
+989:             'ios' => 'application/octet-stream',
+990:             'windows' => 'application/zip',
+991:             'macos' => 'application/zip',
+992:             'linux' => 'application/zip'
+993:         ];
+994: 
+995:         return $mimeTypes[$platform] ?? 'application/octet-stream';
+996:     }
+997: 
+998:     private function sendBuildNotifications(string $appId, string $status, string $buildId): void
+999:     {
+1000:         // Implementation for sending notifications (email, webhooks, etc.)
+1001:         // This could be expanded based on requirements
+1002:         error_log("Build notification: App $appId, Status: $status, Build: $buildId");
+1003:     }
+1004: 
+1005:     /**
+1006:      * DELETE /api/apps/{id} (or POST /api/apps/{id}/delete)
+1007:      * Removes app from DB and deletes public directories.
+1008:      */
+1009:     public function deleteApp(object , string ): void
+1010:     {
+1011:         header('Content-Type: application/json');
+1012:         try {
+1013:              = (int)(->sub ?? 0);
+1014:             if ( <= 0) { http_response_code(401); echo json_encode(['success'=>false,'message'=>'Unauthorized']); return; }
+1015: 
+1016:              = ->getAppWithPermissionCheck(, );
+1017:             if (!) { http_response_code(404); echo json_encode(['success'=>false,'message'=>'App not found or access denied']); return; }
+1018: 
+1019:             // Remove public artifacts and repo
+1020:              = dirname(__DIR__, 2) . '/public';
+1021:              =  . '/apps/flutter/' . ;
+1022:              = !empty(['repository_path']) ? ( . ['repository_path']) : null;
+1023:              = !empty(['slug']) ? ( . '/apps/' . ['slug']) : null;
+1024:             ->safeRmDir();
+1025:             if () { ->safeRmDir(); }
+1026:             if () { ->safeRmDir(); }
+1027: 
+1028:             // Dependent rows
+1029:             try { ->generalModel->delete('workz_apps','build_queue', ['app_id' => (int)]); } catch (\Throwable ) {}
+1030:             try { ->generalModel->delete('workz_apps','flutter_builds', ['app_id' => (int)]); } catch (\Throwable ) {}
+1031:             try { ->generalModel->delete('workz_apps','gapp', ['ap' => (int)]); } catch (\Throwable ) {}
+1032: 
+1033:             // App row
+1034:              = ->generalModel->delete('workz_apps', 'apps', ['id' => (int)]);
+1035:             if (!) { http_response_code(500); echo json_encode(['success'=>false,'message'=>'Failed to delete app row']); return; }
+1036: 
+1037:             echo json_encode(['success'=>true,'message'=>'App deleted']);
+1038:         } catch (\Throwable ) {
+1039:             http_response_code(500);
+1040:             echo json_encode(['success'=>false,'message'=>'Internal error: '.->getMessage()]);
+1041:         }
+1042:     }
+1043: 
+1044:     private function safeRmDir(string ): void
+1045:     {
+1046:         if (!is_dir()) return;
+1047:          = new \RecursiveIteratorIterator(
+1048:             new \RecursiveDirectoryIterator(, \FilesystemIterator::SKIP_DOTS),
+1049:             \RecursiveIteratorIterator::CHILD_FIRST
+1050:         );
+1051:         foreach ( as ) {
+1052:             try { ->isDir() ? @rmdir(->getRealPath()) : @unlink(->getRealPath()); } catch (\Throwable ) {}
+1053:         }
+1054:         @rmdir();
+1055:     }}
+1056: 
+1057: 
+1058: 
+1059: 
+1060: 
+1061: 

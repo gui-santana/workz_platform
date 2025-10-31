@@ -2610,15 +2610,15 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         mainContent: `
-            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] border-4 border-gray shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
-                <div class="col-span-12 grid grid-cols-12 gap-4 h-full">
+            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] overflow-hidden border-4 border-gray shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
+                <div class="col-span-12 grid grid-cols-12 gap-4 h-full min-h-0">
                     <div id="dashboard-statusbar" class="col-span-12 absolute left-4 right-4 top-2 h-8 lg:left-5 lg:right-5 lg:top-2.5 lg:h-9 text-sm lg:text-base text-white font-bold text-shadow-lg flex items-center justify-between">
                         <div id="wClock" class="text-md text-shadow-lg/30">00:00</div>                                                
                         <button id="apps-menu-trigger" class="text-white" title="Configurações da Área de Trabalho" aria-label="Configurações da Área de Trabalho">
                             <i class="fas fa-cog"></i>
                         </button>
-                    </div>
-                <div id="app-library" class="col-span-12 h-full flex flex-col items-center justify-center space-y-4"></div>
+                    </div>                
+					<div id="app-library" class="col-span-12 flex flex-col items-center justify-center space-y-4 flex-1 min-h-0 overflow-hidden"></div>
                 </div>
             </div>
         `,
@@ -2871,11 +2871,11 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('');
 
         return `
-            <div id=\"app-grid-container\" hidden class=\"bg-white/20 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)] rounded-[2rem] p-3 mb-6 max-w-[400px] lg:max-w-[500px] mx-auto"\u003e
+            <div id=\"app-grid-container\" hidden class=\"bg-white/20 backdrop-blur-xl flex-1 min-h-0 max-h-full overflow-hidden backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)] rounded-[2rem] p-3 mb-6 max-w-[400px] lg:max-w-[500px] mx-auto"\u003e
                 <div class="mb-6">
                     <input type="text" id="app-search-input" placeholder="Buscar aplicativos..." class="w-full px-4 py-2 rounded-full border-0 bg-white/30 text-gray outline-none transition-all duration-200 ease-in-out placeholder:text-white/70 focus:bg-white/25 focus:shadow-[0_0_0_2px_rgba(251,146,60,0.5)]">
                 </div>
-                <div id="app-grid" class="grid grid-cols-4 lg:grid-cols-6 gap-4 lg:gap-5 h-auto overflow-y-auto scroll-snap-y-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                <div id="app-grid" class="grid grid-cols-4 lg:grid-cols-6 gap-4 lg:gap-5 overflow-y-auto max-h-full">
                     ${appItems}
                 </div>
             </div>

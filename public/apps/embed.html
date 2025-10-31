@@ -1,83 +1,521 @@
 <!DOCTYPE html>
-<html lang="pt-br" data-theme="light">
+<html lang="pt-br">
+<!--
+  Workz! Universal App Embed
+  
+  This embed handles both Flutter and JavaScript apps:
+  - Flutter apps: Redirects to dedicated Flutter web build (/apps/flutter/{id}/web/index.html)
+  - JavaScript apps: Injects and runs code directly in this embed container
+  
+  The behavior is determined by the APP_TYPE template variable.
+-->
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Pico.css é uma ótima escolha para apps simples, como no seu exemplo -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
-    <title>Workz! App</title>
-    <style>
-        :root {
-            --pico-primary: {{APP_COLOR}}; /* Cor injetada pelo backend */
-            --pico-card-background-color: #fff; /* Garantir fundo branco para o loader em tema escuro */
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Pico.css é uma ótima escolha para apps simples, como no seu exemplo -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
+  <title>{{APP_NAME}} - Workz!</title>
+  <style>
+    :root {
+      --pico-primary: {
+          {
+          APP_COLOR
         }
-        body { padding: 1rem; }
+      }
 
-        #app-loader {
-            position: fixed;
-            inset: 0; /* top, right, bottom, left */
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            gap: 1.5rem;
-            background-color: var(--pico-card-background-color);
-            z-index: 1000;
-            transition: opacity 0.3s ease-out, visibility 0.3s ease-out;
-            opacity: 1;
-            visibility: visible;
+      ;
+      /* Cor injetada pelo backend */
+      --pico-card-background-color: #fff;
+
+      /* Garantir fundo branco para o loader em tema escuro */
+      --workz-brand-color: {
+          {
+          APP_COLOR
         }
-        #app-loader.hidden {
-            opacity: 0;
-            visibility: hidden;
-        }
-        #app-loader img {
-            width: 72px;
-            height: 72px;
-            border-radius: var(--pico-border-radius);
-        }
-    </style>
+      }
+
+      ;
+    }
+
+    body {
+      padding: 1rem;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    /* Enhanced loader with platform detection */
+    #app-loader {
+      position: fixed;
+      inset: 0;
+      /* top, right, bottom, left */
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 1.5rem;
+      background-color: var(--pico-card-background-color);
+      z-index: 1000;
+      transition: opacity 0.3s ease-out, visibility 0.3s ease-out;
+      opacity: 1;
+      visibility: visible;
+    }
+
+    #app-loader.hidden {
+      opacity: 0;
+      visibility: hidden;
+    }
+
+    #app-loader img {
+      width: 72px;
+      height: 72px;
+      border-radius: var(--pico-border-radius);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    #app-loader .loader-text {
+      color: var(--pico-muted-color);
+      font-size: 0.875rem;
+      text-align: center;
+    }
+
+    #app-loader .platform-indicator {
+      background: var(--workz-brand-color);
+      color: white;
+      padding: 0.25rem 0.75rem;
+      border-radius: 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+
+    /* Flutter web specific styles */
+    .flutter-app {
+      width: 100%;
+      height: 100vh;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* JavaScript app container */
+    .js-app {
+      min-height: 100vh;
+    }
+
+    /* Error display */
+    .app-error {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #fff;
+      padding: 2rem;
+      text-align: center;
+      z-index: 1001;
+    }
+
+    .app-error.visible {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .app-error h2 {
+      color: #dc3545;
+      margin-bottom: 1rem;
+    }
+
+    .app-error p {
+      color: #6c757d;
+      margin-bottom: 1.5rem;
+    }
+
+    .app-error button {
+      background: var(--workz-brand-color);
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.375rem;
+      cursor: pointer;
+    }
+  </style>
+
+  <!-- Flutter Web Support -->
+  {{FLUTTER_WEB_SCRIPTS}}
 </head>
+
 <body>
-    <div id="app-loader" aria-label="Carregando aplicativo">
-        <img src="{{APP_ICON}}" alt="Ícone do App">
-        <div aria-busy="true"></div>
-    </div>
+  <!-- Enhanced loader with platform detection -->
+  <div id="app-loader" aria-label="Carregando aplicativo">
+    <img src="{{APP_ICON}}" alt="Ícone do App">
+    <div class="platform-indicator" id="platform-indicator">Detectando plataforma...</div>
+    <div aria-busy="true"></div>
+    <div class="loader-text" id="loader-text">Inicializando {{APP_NAME}}...</div>
+  </div>
 
-    <main id="app-root" class="container"></main>
+  <!-- Error display -->
+  <div id="app-error" class="app-error">
+    <h2>Erro ao carregar aplicativo</h2>
+    <p id="error-message">Ocorreu um erro inesperado.</p>
+    <button onclick="location.reload()">Tentar novamente</button>
+  </div>
 
-    <!-- SDK para comunicação com a plataforma Workz! -->
-    <script src="/js/core/workz-sdk.js" defer></script>
+  <!-- Unified app container -->
+  <main id="app-root" class="container"></main>
 
-    <!-- Configurações e código do app injetados pelo backend -->
-    <script>{{APP_SCRIPT}}</script>
+  <!-- Flutter web container (hidden by default) -->
+  <div id="flutter-container" class="flutter-app" style="display: none;"></div>
 
-    <!-- Ponto de entrada unificado para o App -->
-    <script>
-      document.addEventListener('DOMContentLoaded', async () => {
-        const loader = document.getElementById('app-loader');
+  <!-- SDK para comunicação com a plataforma Workz! -->
+  <script src="/js/core/workz-sdk-v2.js"></script>
+  <script src="/js/core/app-runner.js"></script>
 
-        if (typeof window.WorkzSDK === 'undefined') {
-          console.error('WorkzSDK não foi encontrado. O aplicativo não pode ser iniciado.');
-          return;
-        }
-
+  <!-- App configuration and metadata -->
+  <script>
+    window.WorkzAppConfig = {
+      id: parseInt('{{APP_ID}}') || 0,
+      name: '{{APP_NAME}}' || 'Workz App',
+      slug: '{{APP_SLUG}}' || 'workz-app',
+      type: '{{APP_TYPE}}' || 'javascript',
+      storageType: '{{STORAGE_TYPE}}' || 'database',
+      version: '{{APP_VERSION}}' || '1.0.0',
+      theme: {
+        primaryColor: '{{APP_COLOR}}' || '#007bff',
+        icon: '{{APP_ICON}}' || '/images/default-app-icon.png'
+      },
+      scopes: (function () {
         try {
-          // Inicializa o SDK. Como estamos em um iframe com token na URL, o modo 'standalone' funciona.
-          await window.WorkzSDK.init({ mode: 'standalone' });
+          return JSON.parse('{{APP_SCOPES}}' || '[]');
+        } catch (e) {
+          return [];
+        }
+      })(),
+      platform: '{{TARGET_PLATFORM}}' || 'web',
+      executionMode: '{{EXECUTION_MODE}}' || 'direct'
+    };
+  </script>
 
-          // Agora que o SDK está pronto, podemos iniciar o aplicativo.
-          if (window.StoreApp && typeof window.StoreApp.bootstrap === 'function') {
-            window.StoreApp.bootstrap();
-          } else {
-            console.error('Ponto de entrada do aplicativo (window.StoreApp.bootstrap) não encontrado.');
-          }
-        } catch (error) {
-          console.error('Falha ao inicializar o WorkzSDK ou o aplicativo:', error);
-        } finally {
-            loader.classList.add('hidden');
+  <!-- Configurações e código do app injetados pelo backend -->
+  {{APP_CONTENT}}
+
+  <!-- Enhanced unified app initialization -->
+  <script>
+    // Global variables and functions for app initialization
+    let loader, loaderText, platformIndicator, errorDisplay, errorMessage;
+
+    // Initialize DOM elements when DOM is ready
+    function initializeDOMElements() {
+      loader = document.getElementById('app-loader');
+      loaderText = document.getElementById('loader-text');
+      platformIndicator = document.getElementById('platform-indicator');
+      errorDisplay = document.getElementById('app-error');
+      errorMessage = document.getElementById('error-message');
+    }
+
+    function showError(message) {
+      console.error('App initialization error:', message);
+      if (!errorMessage || !loader || !errorDisplay) {
+        initializeDOMElements();
+      }
+      if (errorMessage) errorMessage.textContent = message;
+      if (loader) loader.classList.add('hidden');
+      if (errorDisplay) errorDisplay.classList.add('visible');
+    }
+
+    function updateLoader(text, platform = null) {
+      if (!loaderText || !platformIndicator) {
+        initializeDOMElements();
+      }
+      if (loaderText) loaderText.textContent = text;
+      if (platform && platformIndicator) {
+        platformIndicator.textContent = platform;
+      }
+    }
+
+    // Wait for DOM to be ready before initializing
+    function waitForDOM() {
+      return new Promise(resolve => {
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', resolve);
+        } else {
+          resolve();
         }
       });
-    </script>
+    }
+
+    (async function initializeWorkzApp() {
+      // Wait for DOM to be ready
+      await waitForDOM();
+
+      // Initialize DOM elements first
+      initializeDOMElements();
+
+      try {
+        // Check if WorkzSDK is available
+        if (typeof window.WorkzSDK === 'undefined') {
+          throw new Error('WorkzSDK não foi encontrado. Verifique se o SDK foi carregado corretamente.');
+        }
+
+        updateLoader('Detectando plataforma...', 'Analisando...');
+
+        // Detect platform and app type
+        const platform = window.WorkzSDK.getPlatform ? window.WorkzSDK.getPlatform() : { type: 'javascript' };
+        const appConfig = window.WorkzAppConfig || {};
+        const appType = appConfig.type || 'javascript';
+
+        updateLoader('Inicializando SDK...', `${appType.toUpperCase()} App`);
+
+        // Initialize SDK with appropriate mode
+        const isIframe = window !== window.top;
+        const mode = isIframe ? 'embed' : 'standalone';
+
+        const initSuccess = await window.WorkzSDK.init({
+          mode,
+          baseUrl: '/api',
+          appConfig: appConfig
+        });
+
+        if (!initSuccess) {
+          throw new Error('Falha na inicialização do WorkzSDK');
+        }
+
+        // Wait for SDK to be fully ready
+        if (!window.WorkzSDK.isReady()) {
+          updateLoader('Aguardando SDK...', `${appType.toUpperCase()} App`);
+          await new Promise(resolve => {
+            window.WorkzSDK.on('sdk:ready', resolve);
+            // Timeout after 10 seconds
+            setTimeout(() => resolve(), 10000);
+          });
+        }
+
+        updateLoader('Carregando aplicativo...', `${appType.toUpperCase()} App`);
+
+        // Initialize app based on type and execution mode
+        if (appType === 'flutter') {
+          // For Flutter apps, we redirect instead of initializing in place
+          await initializeFlutterApp(appConfig);
+          // If we reach here, redirection failed, so we don't hide the loader
+          return;
+        } else {
+          await initializeJavaScriptApp(appConfig);
+        }
+
+        // Emit app started event
+        window.WorkzSDK.emit('app:started', {
+          appId: appConfig.id,
+          platform: platform.type,
+          appType: appType,
+          timestamp: new Date().toISOString()
+        });
+
+        // Hide loader
+        setTimeout(() => {
+          loader.classList.add('hidden');
+        }, 500);
+
+      } catch (error) {
+        showError(error.message || 'Erro desconhecido durante a inicialização');
+      }
+    })();
+
+    async function initializeFlutterApp(config) {
+      // For Flutter apps, redirect to the dedicated Flutter app URL
+      const flutterAppUrl = `/apps/flutter/${config.id}/web/index.html`;
+
+      updateLoader('Verificando Flutter app...', 'FLUTTER App');
+
+      try {
+        // Check if Flutter app exists
+        const response = await fetch(flutterAppUrl, { method: 'HEAD' });
+        if (!response.ok) {
+          throw new Error(`Flutter app não encontrado (${response.status})`);
+        }
+
+        updateLoader('Redirecionando para Flutter app...', 'FLUTTER App');
+
+        // Check if we're in an iframe (embed mode)
+        const isIframe = window !== window.top;
+
+        if (isIframe) {
+          // If embedded, replace the iframe src or redirect the parent
+          try {
+            // Try to redirect the parent window
+            window.parent.location.href = flutterAppUrl;
+          } catch (e) {
+            // If cross-origin, redirect current window
+            window.location.href = flutterAppUrl;
+          }
+        } else {
+          // Direct navigation
+          window.location.href = flutterAppUrl;
+        }
+
+        console.log('Redirecting to Flutter app:', flutterAppUrl);
+      } catch (error) {
+        console.error('Flutter app redirection failed:', error);
+        throw new Error(`Falha ao acessar Flutter app: ${error.message}`);
+      }
+    }
+
+    async function initializeJavaScriptApp(config) {
+      const appRoot = document.getElementById('app-root');
+
+      // Apply JavaScript-specific body class
+      document.body.classList.add('js-app');
+
+      // For JavaScript apps, inject and run the code directly in the embed
+      updateLoader('Injetando código JavaScript...', 'JAVASCRIPT App');
+
+      try {
+        // Initialize JavaScript app
+        if (window.StoreApp && typeof window.StoreApp.bootstrap === 'function') {
+          await window.StoreApp.bootstrap();
+        } else if (typeof window.initApp === 'function') {
+          // Alternative initialization method
+          await window.initApp();
+        } else {
+          console.warn('Nenhum ponto de entrada encontrado para o aplicativo JavaScript');
+          // Try to execute any inline scripts
+          if (config.executionMode === 'direct' && window.WorkzAppCode) {
+            try {
+              eval(window.WorkzAppCode);
+            } catch (e) {
+              console.error('Erro ao executar código do aplicativo:', e);
+              throw new Error('Falha ao executar código JavaScript do aplicativo');
+            }
+          } else {
+            // Try to load and execute the app code from the injected content
+            const appContent = document.querySelector('script[data-app-code]');
+            if (appContent) {
+              try {
+                eval(appContent.textContent);
+              } catch (e) {
+                console.error('Erro ao executar código injetado:', e);
+                throw new Error('Falha ao executar código JavaScript injetado');
+              }
+            }
+          }
+        }
+
+        console.log('JavaScript app initialized successfully');
+      } catch (error) {
+        console.error('JavaScript app initialization failed:', error);
+        throw error;
+      }
+    }
+
+    async function loadFlutterArtifacts(config) {
+      // This would load Flutter web artifacts from the build directory
+      // Implementation depends on the specific Flutter build output structure
+      const artifactPath = `/apps/${config.slug}/build/web/`;
+
+      // Load main.dart.js
+      const script = document.createElement('script');
+      script.src = artifactPath + 'main.dart.js';
+      script.defer = true;
+
+      return new Promise((resolve, reject) => {
+        script.onload = resolve;
+        script.onerror = () => reject(new Error('Falha ao carregar artefatos Flutter'));
+        document.head.appendChild(script);
+      });
+    }
+
+    // Theme and branding injection
+    function applyTheme(config) {
+      if (config.theme) {
+        const root = document.documentElement;
+        if (config.theme.primaryColor) {
+          root.style.setProperty('--pico-primary', config.theme.primaryColor);
+          root.style.setProperty('--workz-brand-color', config.theme.primaryColor);
+        }
+      }
+    }
+
+    // Apply theme when config is available
+    if (window.WorkzAppConfig) {
+      applyTheme(window.WorkzAppConfig);
+    }
+
+    // Handle SDK events
+    if (window.WorkzSDK) {
+      window.WorkzSDK.on('app:error', function (data) {
+        console.error('App runtime error:', data);
+      });
+
+      window.WorkzSDK.on('theme:changed', function (theme) {
+        applyTheme({ theme });
+      });
+
+      // Update app access time for performance tracking
+      window.WorkzSDK.on('app:started', function (data) {
+        if (data.appId) {
+          updateAppAccess(data.appId);
+        }
+      });
+    }
+
+    // Performance optimization functions
+    function updateAppAccess(appId) {
+      if (!appId || !window.WorkzSDK) return;
+
+      // Use WorkzSDK to make authenticated request
+      window.WorkzSDK.api.post(`/performance/apps/${appId}/access`, {})
+        .catch(error => {
+          console.warn('Failed to update app access time:', error);
+        });
+    }
+
+    // Preload critical resources based on app configuration
+    function preloadCriticalResources(config) {
+      if (!config.preload_directives) return;
+
+      config.preload_directives.forEach(directive => {
+        if (directive.priority === 'high') {
+          const link = document.createElement('link');
+          link.rel = directive.rel;
+          link.href = directive.href;
+          link.as = directive.as;
+          if (directive.crossorigin) {
+            link.crossOrigin = directive.crossorigin;
+          }
+          document.head.appendChild(link);
+        }
+      });
+    }
+
+    // Apply performance optimizations
+    function applyPerformanceOptimizations() {
+      // Enable resource hints
+      const dnsPreconnect = document.createElement('link');
+      dnsPreconnect.rel = 'dns-prefetch';
+      dnsPreconnect.href = '//cdn.workz.com';
+      document.head.appendChild(dnsPreconnect);
+
+      // Preconnect to CDN
+      const preconnect = document.createElement('link');
+      preconnect.rel = 'preconnect';
+      preconnect.href = 'https://cdn.workz.com';
+      preconnect.crossOrigin = 'anonymous';
+      document.head.appendChild(preconnect);
+
+      // Add viewport meta for mobile optimization
+      if (!document.querySelector('meta[name="viewport"]')) {
+        const viewport = document.createElement('meta');
+        viewport.name = 'viewport';
+        viewport.content = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
+        document.head.appendChild(viewport);
+      }
+    }
+
+    // Initialize performance optimizations
+    applyPerformanceOptimizations();
+
+    // Preload resources if available
+    if (window.WorkzAppConfig && window.WorkzAppConfig.preload_directives) {
+      preloadCriticalResources(window.WorkzAppConfig);
+    }
+  </script>
 </body>
+
 </html>

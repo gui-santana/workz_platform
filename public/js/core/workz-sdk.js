@@ -1,4 +1,5 @@
 // public/js/core/workz-sdk.js
+// Updated: 2025-01-20 - Added PUT method support
 
 (function(global){
   const DEFAULT_BASE = '/api'; // Usar caminho relativo para ser agnóstico ao domínio
@@ -30,6 +31,7 @@
   }
 
   const WorkzSDK = {
+    _version: '1.0.1-20250120', // Version with PUT support
     _cfg: { mode: 'standalone', baseUrl: DEFAULT_BASE },
     _token: null,
     _user: null,
@@ -120,17 +122,185 @@
     async apiGet(path){
       const url = this._url(path);
       const resp = await fetch(url, { method: 'GET', headers: this._headers() });
-      return resp.json();
+      return await this._parseJsonSafe(resp);
     },
     async apiPost(path, body){
       const url = this._url(path);
       const resp = await fetch(url, { method: 'POST', headers: this._headers(true), body: JSON.stringify(body||{}) });
-      return resp.json();
+      return await this._parseJsonSafe(resp);
     },
-    // Alias de compatibilidade com contrato sugerido (WorkzSDK.api.get/post)
+    async apiPut(path, body){
+      const url = this._url(path);
+      const resp = await fetch(url, { method: 'PUT', headers: this._headers(true), body: JSON.stringify(body||{}) });
+      return await this._parseJsonSafe(resp);
+    },
+    // Alias de compatibilidade com contrato sugerido (WorkzSDK.api.get/post/put)
     api: {
       get: async function(path){ return await WorkzSDK.apiGet(path); },
-      post: async function(path, body){ return await WorkzSDK.apiPost(path, body); }
+      post: async function(path, body){ return await WorkzSDK.apiPost(path, body); },
+      put: async function(path, body){ return await WorkzSDK.apiPut(path, body); }
+    },
+
+    // Storage API
+    storage: {
+      kv: {
+        async set(data) {
+          // Usar a API existente /api/appdata/kv
+          return await WorkzSDK.apiPost('/appdata/kv', {
+            key: data.key,
+            value: data.value,
+            ttl: data.ttl,
+            scopeType: 'user', // Por padrão usar escopo do usuário
+            scopeId: WorkzSDK._user?.id || 0
+          });
+        },
+        async get(key) {
+          // GET /api/appdata/kv?key=...&scopeType=user&scopeId=...
+          const params = new URLSearchParams({
+            key: key,
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+          return await WorkzSDK.apiGet(`/appdata/kv?${params}`);
+        },
+        async delete(key) {
+          // DELETE /api/appdata/kv?key=...&scopeType=user&scopeId=...
+          const params = new URLSearchParams({
+            key: key,
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+          const url = WorkzSDK._url(`/appdata/kv?${params}`);
+          const resp = await fetch(url, {
+            method: 'DELETE',
+            headers: WorkzSDK._headers()
+          });
+          return resp.json();
+        },
+        async list() {
+          // GET /api/appdata/kv?scopeType=user&scopeId=... (sem key para listar)
+          const params = new URLSearchParams({
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+          return await WorkzSDK.apiGet(`/appdata/kv?${params}`);
+        }
+      },
+      docs: {
+        async save(id, document) {
+          // POST /api/appdata/docs/upsert
+          return await WorkzSDK.apiPost('/appdata/docs/upsert', {
+            docType: 'user_data',
+            docId: id,
+            document: document,
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+        },
+        async get(id) {
+          // Usar query para buscar documento específico
+          return await WorkzSDK.apiPost('/appdata/docs/query', {
+            docType: 'user_data',
+            filters: { docId: id },
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+        },
+        async delete(id) {
+          // DELETE /api/appdata/docs/{docType}/{docId}?scopeType=user&scopeId=...
+          const params = new URLSearchParams({
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+          const url = WorkzSDK._url(`/appdata/docs/user_data/${encodeURIComponent(id)}?${params}`);
+          const resp = await fetch(url, {
+            method: 'DELETE',
+            headers: WorkzSDK._headers()
+          });
+          return resp.json();
+        },
+        async list() {
+          // Query todos os documentos do usuário
+          return await WorkzSDK.apiPost('/appdata/docs/query', {
+            docType: 'user_data',
+            filters: {},
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+        },
+        async query(query) {
+          return await WorkzSDK.apiPost('/appdata/docs/query', {
+            docType: 'user_data',
+            filters: query,
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+        }
+      },
+      blobs: {
+        async upload(name, file) {
+          const formData = new FormData();
+          formData.append('name', name);
+          formData.append('file', file);
+          formData.append('scopeType', 'user');
+          formData.append('scopeId', WorkzSDK._user?.id || 0);
+          
+          const url = WorkzSDK._url('/appdata/blobs/upload');
+          const resp = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Authorization': WorkzSDK._token ? 'Bearer ' + WorkzSDK._token : undefined
+            },
+            body: formData
+          });
+          return resp.json();
+        },
+        async get(id) {
+          const params = new URLSearchParams({
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+          
+          // Só adicionar token se ele existir
+          if (WorkzSDK._token) {
+            params.set('token', WorkzSDK._token);
+          }
+          const url = WorkzSDK._url(`/appdata/blobs/get/${encodeURIComponent(id)}?${params}`);
+          
+          // Debug: log da URL gerada
+          console.log('Blob download URL:', url);
+          console.log('Token disponível:', !!WorkzSDK._token);
+          
+          // Para download, abrir em nova janela
+          window.open(url, '_blank');
+          
+          return {
+            success: true,
+            id: id,
+            url: url,
+            message: 'Download iniciado'
+          };
+        },
+        async delete(id) {
+          const params = new URLSearchParams({
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+          const url = WorkzSDK._url(`/appdata/blobs/delete/${encodeURIComponent(id)}?${params}`);
+          const resp = await fetch(url, {
+            method: 'DELETE',
+            headers: WorkzSDK._headers()
+          });
+          return resp.json();
+        },
+        async list() {
+          const params = new URLSearchParams({
+            scopeType: 'user',
+            scopeId: WorkzSDK._user?.id || 0
+          });
+          return await WorkzSDK.apiGet(`/appdata/blobs/list?${params}`);
+        }
+      }
     },
 
     async _fetchMe(){
@@ -153,6 +323,26 @@
       if (withJson) h['Content-Type'] = 'application/json';
       if (this._token) h['Authorization'] = 'Bearer ' + this._token;
       return h;
+    },
+    async _parseJsonSafe(resp){
+      try {
+        // Try JSON first
+        return await resp.json();
+      } catch (_) {
+        try {
+          const txt = await resp.text();
+          // Normalize whitespace and trim to avoid overly long messages
+          const preview = (txt || '').toString().slice(0, 1000);
+          return {
+            success: false,
+            status: resp.status,
+            message: preview || 'Non-JSON response from server',
+            raw: preview
+          };
+        } catch (e2) {
+          return { success: false, status: resp.status, message: 'Failed to parse response' };
+        }
+      }
     }
   };
 

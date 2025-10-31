@@ -25,6 +25,23 @@ services:
     networks:
       - workz-network
 
+  worker:
+    build:
+      context: .
+      dockerfile: .docker/worker/Dockerfile
+    container_name: workz_platform_worker
+    environment:
+      - WORKER_SECRET=${WORKER_SECRET}
+    volumes:
+      - ./:/app
+    working_dir: /app
+    ports:
+      - "9091:9091"
+    depends_on:
+      - php-fpm
+    networks:
+      - workz-network
+
   mysql:
     image: mysql:8.0
     container_name: workz_platform_mysql

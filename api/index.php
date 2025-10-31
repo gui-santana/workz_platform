@@ -2,9 +2,9 @@
 
 // api/index.php
 
-// Ativa a exibição de todos os erros para depuração
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+// Desativa a exibição de erros para evitar HTML inválido na API
+ini_set('display_errors', 0);
+ini_set('display_startup_errors', 0);
 error_reporting(E_ALL);
 
 require_once __DIR__ . '/../vendor/autoload.php';
@@ -22,11 +22,12 @@ use Workz\Platform\Controllers\TeamsController;
 use Workz\Platform\Controllers\PostsController;
 use Workz\Platform\Controllers\CompaniesController;
 
+use Workz\Platform\Controllers\PerformanceController;
 use Workz\Platform\Middleware\AuthMiddleware;
 
 // --- INÍCIO DO TRATADOR DE ERROS GLOBAL ---
 // Tratador de Erros Global
-set_exception_handler(function($exception) {
+set_exception_handler(function ($exception) {
     http_response_code(500);
     echo json_encode([
         'error' => 'Ocorreu um erro fatal no servidor.',
@@ -88,10 +89,17 @@ $router->add('POST', '/api/companies/members/reject', [CompaniesController::clas
 // Posts (criar e feed)
 $router->add('POST', '/api/posts', [PostsController::class, 'create'], [AuthMiddleware::class, 'handle']);
 $router->add('POST', '/api/posts/feed', [PostsController::class, 'feed'], [AuthMiddleware::class, 'handle']);
-// Upload de mídias para posts (imagens/vídeos, múltiplos arquivos)
 $router->add('POST', '/api/posts/media', [PostsController::class, 'uploadMedia'], [AuthMiddleware::class, 'handle']);
- 
+
+(require_once __DIR__ . '/routes/app_management_routes.php')($router); // Inclui as rotas de gerenciamento de apps
 (require_once __DIR__ . '/routes/app_routes.php')($router); // Inclui as rotas de apps
+(require_once __DIR__ . '/routes/app_builder_routes.php')($router); // Inclui as rotas do App Builder
+(require_once __DIR__ . '/routes/app_storage_routes.php')($router); // Inclui as rotas de storage de apps
+// Rotas da fila de build (worker)
+(require_once __DIR__ . '/routes/build_queue_routes.php')($router);
+// Rota para métricas de performance
+$router->add('POST', '/api/performance/apps/(\d+)/access', [PerformanceController::class, 'trackAppAccess'], [AuthMiddleware::class, 'handle']);
+
 
 // ==================================================
 // DESPACHO DA REQUISIÇÃO

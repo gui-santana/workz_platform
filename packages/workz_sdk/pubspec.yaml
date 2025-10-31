@@ -1,0 +1,27 @@
+name: workz_sdk
+description: The official SDK for building applications for the Workz! platform with Flutter.
+version: 2.0.0
+publish_to: 'none' # Prevent accidental publishing
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  dio: ^5.4.3+1
+  js: ^0.6.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.workz.workz_sdk
+        pluginClass: WorkzSdkPlugin
+      ios:
+        pluginClass: WorkzSdkPlugin

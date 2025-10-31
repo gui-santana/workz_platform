@@ -1,0 +1,29 @@
+{
+    "name": "Snake em Flutter",
+    "short_name": "Snake em Flutter",
+    "description": "Aplicativo Snake em Flutter desenvolvido em Flutter",
+    "start_url": "/apps/flutter/1012/web/index.html",
+    "display": "standalone",
+    "background_color": "#FFFFFF",
+    "theme_color": "#2196F3",
+    "orientation": "portrait",
+    "categories": [
+        "productivity",
+        "utilities"
+    ],
+    "lang": "pt-BR",
+    "icons": [
+        {
+            "src": "/images/flutter-icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/images/flutter-icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}

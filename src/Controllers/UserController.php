@@ -36,6 +36,47 @@ class UserController
         // Remove a senha do retorno por segurança
         unset($user['pw']);
 
+        // Buscar empresas do usuário
+        try {
+            $userCompanies = $this->generalModel->search(
+                'workz_companies',
+                'employees',
+                ['em', 'nv', 'st'],
+                ['us' => $userId, 'st' => 1], // Apenas vínculos ativos
+                true
+            );
+
+            $companies = [];
+            if ($userCompanies) {
+                foreach ($userCompanies as $employeeRecord) {
+                    // Buscar dados da empresa
+                    $company = $this->generalModel->search(
+                        'workz_companies',
+                        'companies',
+                        ['id', 'tt', 'national_id'], // tt = nome, national_id = CNPJ
+                        ['id' => $employeeRecord['em']],
+                        false
+                    );
+                    
+                    if ($company) {
+                        $companies[] = [
+                            'id' => $company['id'],
+                            'name' => $company['tt'], // tt é o nome da empresa
+                            'cnpj' => $company['national_id'] ?? '', // national_id é o CNPJ
+                            'nv' => $employeeRecord['nv'], // Nível do usuário na empresa
+                            'st' => $employeeRecord['st']  // Status do vínculo
+                        ];
+                    }
+                }
+            }
+
+            $user['companies'] = $companies;
+        } catch (\Throwable $e) {
+            // Em caso de erro, continua sem as empresas
+            error_log("Erro ao buscar empresas do usuário {$userId}: " . $e->getMessage());
+            $user['companies'] = [];
+        }
+
         http_response_code(200);
         echo json_encode($user);
     }

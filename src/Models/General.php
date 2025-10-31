@@ -58,11 +58,12 @@ class General
         unset($data['id']);
 
         //Pré-tratamento dos dados vazios
-        foreach ($data as $key => $value) {
-            if ($value === '') {
-                $data[$key] = null;
-            }
-        }
+        // NOTA: Removido para permitir strings vazias em campos que não aceitam NULL
+        // foreach ($data as $key => $value) {
+        //     if ($value === '') {
+        //         $data[$key] = null;
+        //     }
+        // }
 
         // Impede updates vazios / sem WHERE
         if (empty($data) || empty($conditions)) {
@@ -103,7 +104,10 @@ class General
             . " WHERE " . implode(' AND ', $whereClauses);
 
         $stmt = $this->db->prepare($sql);
-        return $stmt->execute($params);
+        if ($stmt->execute($params)) {
+            return $stmt->rowCount() > 0; // Retorna true apenas se afetou linhas
+        }
+        return false;
     }
 
 

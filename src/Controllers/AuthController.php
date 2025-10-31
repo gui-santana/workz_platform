@@ -255,7 +255,7 @@ class AuthController
     {
         $secretKey = $_ENV['JWT_SECRET'];
         $issuedAt = time();
-        $expire = $issuedAt + 3600; // 1 hora
+        $expire = $issuedAt + 86400; // 24 horas
 
         $payload = [
             'iat'  => $issuedAt,

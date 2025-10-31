@@ -1,0 +1,31 @@
+{
+  "name": "{{APP_NAME}}",
+  "short_name": "{{APP_SHORT_NAME}}",
+  "description": "{{APP_DESCRIPTION}}",
+  "version": "{{APP_VERSION}}",
+  "slug": "{{APP_SLUG}}",
+  "publisher": "{{APP_PUBLISHER}}",
+  "start_url": "/app/run/{{APP_SLUG}}",
+  "display": "standalone",
+  "background_color": "{{APP_COLOR}}",
+  "theme_color": "{{APP_COLOR}}",
+  "icons": [
+    {
+      "src": "{{APP_ICON}}",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "business"],
+  "lang": "pt-BR",
+  "scope": "/app/run/{{APP_SLUG}}/",
+  "permissions": {{APP_SCOPES}},
+  "workz": {
+    "access_level": {{APP_ACCESS_LEVEL}},
+    "entity_type": {{APP_ENTITY_TYPE}},
+    "price": {{APP_PRICE}},
+    "created_at": "{{APP_CREATED_AT}}",
+    "updated_at": "{{APP_UPDATED_AT}}"
+  }
+}
