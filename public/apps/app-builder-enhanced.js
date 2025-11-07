@@ -6,10 +6,20 @@ window.StoreApp = {
     editingAppId: null,
     appType: "javascript",
     // Modo simples: preferir sempre o editor de uma única textarea (inclusive para Flutter)
+    // NEW: Control the current view mode: 'list' (my apps) or 'form' (create/edit app)
+    viewMode: 'list', // Default to showing the list of apps
     useSimpleEditor: true,
     // Controle de polling do modal de build
     _buildWatchTimer: null,
     _buildWatchAppId: null,
+    // Preview (live) controls
+    _activePreviewToken: null,
+    _activePreviewBase: null,
+    _livePreviewMode: null, // 'js' | 'flutter'
+    _livePreviewDebounce: null,
+    _codeMirrorInstance: null,
+    _depsPromise: null, // Promise para rastrear o carregamento de dependências
+    companyFilterId: 'all', // NEW: To filter apps by company
     userCompanies: [],
     storageStats: null,
     appData: {
@@ -37,23 +47,46 @@ window.StoreApp = {
         try {
             // Prevent double bootstrap in case the script is loaded twice or app-runner also triggers it
             if (window.__storeAppBootstrapped) {
-                console.log('⏭️ App Builder bootstrap skipped (already bootstrapped)');
+                console.log('⏭️ App Studio bootstrap skipped (already bootstrapped)');
                 return;
             }
             window.__storeAppBootstrapped = true;
-            console.log('🚀 Starting App Builder bootstrap...');
+            console.log('🚀 Starting App Studio bootstrap...');
 
-            // Load CSS and JS dependencies
-            this.loadCSS("https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css");
-            this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css");
+            // Inicia o carregamento de dependências e armazena a promise
+            this._depsPromise = (async () => {
+                this.loadCSS("https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css");
+                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css");
 
-            await this.loadJS("https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js");
+                // Carregar dependências do CodeMirror
+                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css");
+                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/monokai.min.css");
+                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/dialog/dialog.min.css");
+                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/fold/foldgutter.min.css");
+                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/display/fullscreen.min.css");
+
+                await this.loadJS("https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js");
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js");
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js");
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/dart/dart.min.js");
+                // Addons do CodeMirror
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/dialog/dialog.min.js");
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/search/searchcursor.min.js");
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/search/search.min.js");
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/edit/matchbrackets.min.js");
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/fold/foldcode.min.js");
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/fold/foldgutter.min.js");
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/fold/brace-fold.min.js");
+                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/display/fullscreen.min.js");
+            })();
+
+            await this._depsPromise;
 
             console.log('📦 Dependencies loaded, rendering UI...');
             this.render();
 
             console.log('🎯 Setting up event listeners...');
-            this.setupEventListeners();
+            this.setupFormEventListeners();
 
             console.log('🏢 Loading user companies...');
             await this.loadUserCompanies();
@@ -67,13 +100,14 @@ window.StoreApp = {
             console.log('✅ Validating current step...');
             this.validateCurrentStep();
 
+            this.setupFormEventListeners();
             console.log('👁️ Setting up preview listener...');
             this.setupPreviewListener();
 
-            console.log('🎉 App Builder bootstrap completed successfully!');
+            console.log('🎉 App Studio bootstrap completed successfully!');
         } catch (e) {
-            console.error("❌ Erro ao inicializar App Builder:", e);
-            this.renderError("Erro ao carregar o App Builder: " + e.message);
+            console.error("❌ Erro ao inicializar App Studio:", e);
+            this.renderError("Erro ao carregar o App Studio: " + e.message);
         }
     },
 
@@ -108,6 +142,10 @@ window.StoreApp = {
             } else {
                 this.userCompanies = [];
             }
+            // Re-render the UI to populate the company filter dropdown
+            if (this.viewMode === 'list') {
+                this.render();
+            }
         } catch (e) {
             console.error("Erro ao carregar empresas:", e);
             this.userCompanies = [];
@@ -117,7 +155,23 @@ window.StoreApp = {
     async loadStorageStats() {
         try {
             const response = await WorkzSDK.api.get("/apps/storage/stats");
-            if (response && response.success) {
+            const httpOk = response && typeof response.status === 'number' && response.status >= 200 && response.status < 300;
+            let ok = !!(response && (response.success === true || httpOk || response.app_id || (response.data && (response.data.id || response.data.app_type || typeof response.data === 'object'))));
+            if (!ok && this.editMode && this.editingAppId) {
+                try {
+                    const verify = await this.apiGet(`/apps/${this.editingAppId}`);
+                    if (verify && verify.success && verify.data) {
+                        response = {
+                            success: true,
+                            app_id: this.editingAppId,
+                            app_type: verify.data.app_type || appData.app_type || this.appType,
+                            build_status: verify.data.build_status || null
+                        };
+                        ok = true;
+                    }
+                } catch (_) { /* ignore */ }
+            }
+            if (ok) {
                 this.storageStats = response.data;
             }
         } catch (e) {
@@ -141,13 +195,27 @@ window.StoreApp = {
     },
 
     render() {
-        document.getElementById("app-root").innerHTML = `
+        const appRoot = document.getElementById("app-root");
+        if (!appRoot) {
+            console.error("Element #app-root not found.");
+            return;
+        }
+
+        let contentHtml = '';
+        if (this.viewMode === 'list') {
+            contentHtml = this.renderAppListPage();
+        } else { // viewMode === 'form'
+            contentHtml = this.renderAppFormPage();
+        }
+
+        appRoot.innerHTML = `
             <style>
                 .app-builder-container {
-                    max-width: 1200px;
+                    max-width: 100%;
                     margin: 0 auto;
                     padding: 20px;
                 }
+                /* Existing styles */
                 .storage-indicator {
                     display: inline-flex;
                     align-items: center;
@@ -454,6 +522,21 @@ window.StoreApp = {
                     font-size: 11px;
                     padding: 4px 8px;
                 }
+
+                /* Estilo de editor de código simples */
+                .simple-code-editor {
+                    background-color: #272822; /* Fundo escuro (Monokai) */
+                    color: #F8F8F2;            /* Texto claro */
+                    font-family: 'Consolas', 'Monaco', 'Menlo', 'Courier New', monospace;
+                    font-size: 14px;
+                    line-height: 1.5;
+                    padding: 15px;
+                    border: 1px solid #444;
+                    border-radius: 4px;
+                    white-space: pre;          /* Desativa quebra de linha */
+                    overflow-wrap: normal;
+                    overflow-x: auto;          /* Adiciona scroll horizontal */
+                }
                 
                 /* Build Status Modal */
                 .build-log {
@@ -532,69 +615,110 @@ window.StoreApp = {
                     border: 1px solid #e9ecef;
                 }
             </style>
-            <div class="app-builder-container">
-                <div class="text-center mb-4">
-                    <h1><i class="fas fa-rocket"></i> App Builder</h1>
-                    <p class="text-muted">Crie seu aplicativo para a plataforma Workz</p>
-                    ${this.renderStorageStatsCard()}
-                </div>
-                
-                <!-- Step Indicator -->
-                <div class="step-indicator">
-                    <div class="step active" data-step="1">
-                        <div class="step-number">1</div>
-                        <span>Empresa</span>
-                    </div>
-                    <div class="step" data-step="2">
-                        <div class="step-number">2</div>
-                        <span>Tipo</span>
-                    </div>
-                    <div class="step" data-step="3">
-                        <div class="step-number">3</div>
-                        <span>Informações</span>
-                    </div>
-                    <div class="step" data-step="4">
-                        <div class="step-number">4</div>
-                        <span>Configuração</span>
-                    </div>
-                    <div class="step" data-step="5">
-                        <div class="step-number">5</div>
-                        <span>Código</span>
-                    </div>
-                    <div class="step" data-step="6">
-                        <div class="step-number">6</div>
-                        <span>Revisão</span>
-                    </div>
-                </div>
+            <div class="app-builder-container">                
+                ${contentHtml}
+            </div>
+        `;
 
-                ${this.renderStep1()}
-                ${this.renderStep2()}
-                ${this.renderStep3()}
-                ${this.renderStep4()}
-                ${this.renderStep5()}
-                ${this.renderStep6()}
-                
-                <!-- My Apps Section with Storage Management -->
-                <div class="mt-5 pt-4 border-top">
-                    <div class="d-flex justify-content-between align-items-center mb-4">
-                        <h3><i class="fas fa-mobile-alt"></i> Meus Apps</h3>
-                        <button type="button" class="btn btn-outline-primary" onclick="StoreApp.loadAndShowMyApps()">
+        // After rendering, perform specific actions based on viewMode
+        if (this.viewMode === 'list') {
+            this.loadAndShowMyApps();
+            this.removeFormEventListeners(); // Clean up form listeners
+        } else { // viewMode === 'form'
+            this.updateStepDisplay(); // Ensure correct step is shown
+            this.updateCompanySelect(); // Re-populate company select if needed
+            this.validateCurrentStep(); // Validate current step for button states
+            this.toggleTokenField(); // Ensure token field visibility is correct
+            // If on step 5, initialize editor
+            if (this.currentStep === 5) {
+                if (!this.useSimpleEditor && (this.appType === 'flutter' || this.appData.storage_type === 'filesystem')) {
+                    setTimeout(() => this.setupFilesystemEditor(), 100);
+                } else {
+                    setTimeout(() => this.initializeCodeMirror(), 100);
+                    setTimeout(() => this.setupDatabaseEditor(), 100);
+                }
+            }
+            this.setupFormEventListeners(); // Attach listeners to the newly rendered form
+        }
+    },
+
+    renderAppListPage() {
+        const companyFilterOptions = this.userCompanies.map(company =>
+            `<option value="${company.id}" ${this.companyFilterId == company.id ? 'selected' : ''}>${company.name}</option>`
+        ).join('');
+
+        return `
+            <div class="pt-4">
+                <div class="d-flex justify-content-between align-items-center mb-4">                    
+                    <div class="d-flex align-items-center">
+                        <div class="me-3">
+                            <label for="company-filter" class="form-label visually-hidden">Filtrar por empresa</label>
+                            <select id="company-filter" class="form-select form-select-sm" onchange="StoreApp.filterByCompany(this.value)">
+                                <option value="all" ${this.companyFilterId === 'all' ? 'selected' : ''}>Todas as Empresas</option>
+                                ${companyFilterOptions}
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-primary me-2" onclick="StoreApp.startNewApp()">
+                            <i class="fas fa-plus"></i> Novo App
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" onclick="StoreApp.loadAndShowMyApps()" title="Atualizar lista de apps">
                             <i class="fas fa-sync-alt"></i> Atualizar
                         </button>
                     </div>
-                    <div id="my-apps-container">
-                        <div class="text-center py-4">
-                            <i class="fas fa-spinner fa-spin fa-2x text-muted"></i>
-                            <p class="text-muted mt-2">Carregando seus apps...</p>
-                        </div>
+                </div>
+                <div id="my-apps-container">
+                    <div class="text-center py-4">
+                        <i class="fas fa-spinner fa-spin fa-2x text-muted"></i>
+                        <p class="text-muted mt-2">Carregando seus apps...</p>
                     </div>
                 </div>
             </div>
         `;
+    },
 
-        setTimeout(() => {
-            this.loadAndShowMyApps();
-        }, 1000);
+    renderAppFormPage() {
+        const backButton = `
+            <button type="button" class="btn btn-secondary mb-4" onclick="StoreApp.goBackToList()">
+                <i class="fas fa-arrow-left"></i> Voltar para Meus Apps
+            </button>
+        `;
+        return `
+            ${backButton}
+            <!-- Step Indicator -->
+            <div class="step-indicator">
+                <div class="step active" data-step="1">
+                    <div class="step-number">1</div>
+                    <span>Empresa</span>
+                </div>
+                <div class="step" data-step="2">
+                    <div class="step-number">2</div>
+                    <span>Tipo</span>
+                </div>
+                <div class="step" data-step="3">
+                    <div class="step-number">3</div>
+                    <span>Informações</span>
+                </div>
+                <div class="step" data-step="4">
+                    <div class="step-number">4</div>
+                    <span>Configuração</span>
+                </div>
+                <div class="step" data-step="5">
+                    <div class="step-number">5</div>
+                    <span>Código</span>
+                </div>
+                <div class="step" data-step="6">
+                    <div class="step-number">6</div>
+                    <span>Revisão</span>
+                </div>
+            </div>
+
+            ${this.renderStep1()}
+            ${this.renderStep2()}
+            ${this.renderStep3()}
+            ${this.renderStep4()}
+            ${this.renderStep5()}
+            ${this.renderStep6()}
+        `;
     },
 
     renderStorageStatsCard() {
@@ -788,7 +912,7 @@ window.StoreApp = {
                             <label for="app-slug" class="form-label">Slug (URL) *</label>
                             <div class="input-group">
                                 <span class="input-group-text">workz.app/</span>
-                                <input type="text" class="form-control" id="app-slug" required maxlength="60" pattern="^[a-z0-9-]+$">
+                                <input type="text" class="form-control" id="app-slug" required maxlength="60">
                             </div>
                             <div class="form-text">Apenas letras minúsculas, números e hífens. Será usado na URL do app.</div>
                         </div>
@@ -1036,8 +1160,8 @@ window.StoreApp = {
                                 <button type="button" class="btn btn-success w-100 mb-2" onclick="StoreApp.saveApp()">
                                     <i class="fas fa-save"></i> Salvar Aplicativo
                                 </button>
-                                <button type="button" class="btn btn-primary w-100" onclick="StoreApp.publishApp()">
-                                    <i class="fas fa-rocket"></i> Publicar na Loja
+                                <button type="button" class="btn w-100" id="publish-unpublish-btn">
+                                    <!-- Texto e ação definidos dinamicamente por updatePreview() -->
                                 </button>
                             </div>
                         </div>
@@ -1059,10 +1183,19 @@ window.StoreApp = {
     async loadAndShowMyApps() {
         try {
             const response = await WorkzSDK.api.get("/apps/my-apps");
-            const container = document.getElementById("my-apps-container");
+            const container = document.getElementById('my-apps-container');
+            if (!container) return;
 
-            if (response && response.data && response.data.length > 0) {
-                container.innerHTML = this.renderMyAppsGrid(response.data);
+            let apps = (response && response.data) ? response.data : [];
+
+            // Apply company filter
+            if (this.companyFilterId && this.companyFilterId !== 'all') {
+                const filterId = parseInt(this.companyFilterId, 10);
+                apps = apps.filter(app => parseInt(app.exclusive_to_entity_id, 10) === filterId);
+            }
+
+            if (apps.length > 0) {
+                container.innerHTML = this.renderMyAppsGrid(apps);
             } else {
                 container.innerHTML = `
                     <div class="text-center py-4">
@@ -1074,13 +1207,19 @@ window.StoreApp = {
             }
         } catch (e) {
             console.error("Erro ao carregar apps:", e);
-            document.getElementById("my-apps-container").innerHTML = `
+            document.getElementById('my-apps-container').innerHTML = `
                 <div class="alert alert-danger">
                     <i class="fas fa-exclamation-triangle"></i>
                     Erro ao carregar aplicativos: ${e.message}
                 </div>
             `;
         }
+    },
+
+    filterByCompany(companyId) {
+        this.companyFilterId = companyId;
+        // Re-render the list page to reflect the filter and trigger app loading
+        this.render();
     },
 
     renderMyAppsGrid(apps) {
@@ -1134,11 +1273,11 @@ window.StoreApp = {
                                 <button class="btn btn-outline-primary" onclick="StoreApp.editApp(${app.id})">
                                     <i class="fas fa-edit"></i> Editar
                                 </button>
-                                <button class="btn btn-outline-info" onclick="StoreApp.showStorageInfo(${app.id})">
-                                    <i class="fas fa-info-circle"></i> Storage
-                                </button>
                                 <button class="btn btn-outline-danger" onclick="StoreApp.deleteApp(${app.id}, '${app.slug || ''}')">
                                     <i class="fas fa-trash"></i> Excluir
+                                </button>
+                                <button class="btn ${app.st == 1 ? 'btn-outline-warning' : 'btn-outline-success'}" onclick="StoreApp.${app.st == 1 ? 'unpublishAppFromCard' : 'publishAppFromCard'}(${app.id})">
+                                    <i class="fas ${app.st == 1 ? 'fa-ban' : 'fa-rocket'}"></i> ${app.st == 1 ? 'Despublicar' : 'Publicar'}
                                 </button>
                             </div>
                             <span class="badge ${app.st == 1 ? 'bg-success' : 'bg-secondary'}">
@@ -1242,6 +1381,41 @@ window.StoreApp = {
         // Show modal
         const modal = new bootstrap.Modal(document.getElementById('storageModal'));
         modal.show();
+    },
+
+    async updateAppStatus(appId, status) {
+        try {
+            console.log(`Attempting to update app status for appId: ${appId}, new status: ${status ? 'published (1)' : 'unpublished (0)'}`);
+            const response = await WorkzSDK.api.post(`/apps/update/${appId}`, {
+                st: status ? 1 : 0 // 1 para publicado, 0 para rascunho
+            });
+            console.log(`API response for status update (appId: ${appId}):`, response);
+            if (response && response.success) {
+                this.showToast(`Aplicativo ${status ? 'publicado' : 'despublicado'} com sucesso!`, 'success');
+                this.loadAndShowMyApps(); // Recarrega a lista de apps
+            } else {
+                throw new Error(response.message || `Erro ao ${status ? 'publicar' : 'despublicar'} o app`);
+            }
+        } catch (e) {
+            console.error(`Erro ao ${status ? 'publicar' : 'despublicar'} app:`, e);
+            this.showToast(`Erro ao ${status ? 'publicar' : 'despublicar'} aplicativo: ` + e.message, 'error');
+        }
+    },
+
+    async publishAppFromCard(appId) {
+        if (!confirm('Tem certeza que deseja publicar este app na loja?')) return;
+        await this.updateAppStatus(appId, true);
+    },
+
+    async unpublishAppFromCard(appId) {
+        if (!confirm('Tem certeza que deseja despublicar este app da loja? Ele não estará mais visível para outros usuários.')) return;
+        await this.updateAppStatus(appId, false);
+    },
+
+    // ... (other functions remain largely unchanged)
+    async triggerBuildAndMonitor(appId) {
+        this.showToast('Iniciando build do app…', 'info');
+        const res = { success: true }; // queue-based flow: skip explicit rebuild
     },
 
     async deleteApp(appId, slug = '') {
@@ -1403,19 +1577,22 @@ window.StoreApp = {
                 <label for="app-code" class="form-label">${isFlutter ? "Código Dart *" : "Código JavaScript *"}</label>
                 <div class="code-editor-toolbar mb-2" title="Funcionalidade desativada. O editor CodeMirror não pôde ser carregado.">
                     <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-outline-secondary" onclick="StoreApp.formatCode()" title="Formatar Código">
-                            <i class="fas fa-magic"></i> Formatar
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" onclick="StoreApp.toggleFullscreen()" title="Tela Cheia">
+                        <button type="button" class="btn btn-outline-secondary" onclick="StoreApp.toggleCodeMirrorFullscreen()" title="Tela Cheia (F11)">
                             <i class="fas fa-expand"></i> Tela Cheia
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" onclick="StoreApp.toggleWordWrap()" title="Alternar Quebra de Linha">
+                            <i class="fas fa-align-left"></i> Quebra de Linha
                         </button>
                         <button type="button" class="btn btn-outline-secondary" onclick="StoreApp.insertTemplate()" title="Inserir Template">
                             <i class="fas fa-file-code"></i> Template
                         </button>
+                        <button type="button" class="btn btn-outline-primary" onclick="StoreApp.showCodePreview()" title="Preview ao vivo">
+                            <i class="fas fa-eye"></i> Preview
+                        </button>
                     </div>
                 </div>
                 <div id="code-editor-container">
-                    <textarea class="form-control" id="app-code" rows="15" required style="font-family: monospace;"></textarea>
+                    <textarea id="app-code" rows="15" required></textarea>
                 </div>
             </div>
         `;
@@ -1960,6 +2137,20 @@ window.StoreApp = {
                 try { clearTimeout(this._buildWatchTimer); } catch(_) {}
                 this._buildWatchTimer = null;
                 this._buildWatchAppId = null;
+            }
+            if (modalId === 'livePreviewModal') {
+                // Cleanup preview token on worker if needed
+                try {
+                    const token = this._activePreviewToken;
+                    this._activePreviewToken = null;
+                    this._livePreviewMode = null;
+                    const base = this._activePreviewBase || '';
+                    this._activePreviewBase = null;
+                    if (token) {
+                        const delUrl = (base ? base : '') + '/preview/' + token;
+                        fetch(delUrl, { method: 'DELETE' }).catch(() => {});
+                    }
+                } catch (_) {}
             }
         }, { once: true });
         modal.show();
@@ -2748,50 +2939,29 @@ if (document.readyState === 'loading') {
         try {
             const response = await WorkzSDK.api.get(`/apps/${appId}`);
             if (response && response.success) {
+                // 1. Configurar o estado de edição
                 this.editMode = true;
                 this.editingAppId = appId;
                 this.currentAppData = response.data;
+                this.viewMode = 'form'; // Switch to form view
+                this.currentStep = 5; // Ir direto para a etapa de código
 
-                // Populate form fields
-                // Se for filesystem, os arquivos vêm em um campo separado
-                if (response.data.storage_type === 'filesystem') {
-                    // O backend deve retornar os arquivos em um campo como `files`
-                    this.appData.appFiles = response.data.files || { 'main.dart': response.data.dart_code || '' };
-                    this.appData.activeFile = null;
-                    this.appData.unsavedChanges.clear();
-                } else {
-                    // Limpa o estado de arquivos para apps de database
-                    this.appData.appFiles = {};
-                    this.appData.activeFile = null;
-                    this.appData.unsavedChanges.clear();
-                }
+                // 2. Renderizar a página do formulário
+                this.render();
 
+                // 2.5 Preencher o estado appData com os dados do app.
+                // Isso é crucial para que initializeCodeMirror tenha o código correto.
                 this.populateFormFields(response.data);
-
-                // Show edit mode alert
-                const editAlert = document.getElementById('edit-mode-alert');
-                if (editAlert) {
-                    editAlert.style.display = 'block';
-                }
-
-                // Scroll to top
-                window.scrollTo(0, 0);
-
-                // Se for um app Flutter, inicializa o editor de arquivos (somente fora do modo simples)
-                if (this.appType === 'flutter' && !this.useSimpleEditor) {
-                    setTimeout(() => {
+                setTimeout(() => {
+                    // Se for app filesystem, inicializa o editor de arquivos (somente fora do modo simples)
+                    if (!this.useSimpleEditor && this.currentAppData.storage_type === 'filesystem') {
                         this.setupFilesystemEditor();
                         this.renderFileTree();
-                    }, 200);
-                }
+                    }
 
-                // Se for app filesystem, inicializa o editor de arquivos (somente fora do modo simples)
-                if (!this.useSimpleEditor && this.currentAppData.storage_type === 'filesystem') {
-                    setTimeout(() => {
-                        this.setupFilesystemEditor();
-                        this.renderFileTree();
-                    }, 200);
-                }
+                    window.scrollTo(0, 0);
+                }, 100);
+
             }
         } catch (e) {
             console.error('Error loading app for edit:', e);
@@ -2800,6 +2970,19 @@ if (document.readyState === 'loading') {
     },
 
     populateFormFields(appData) {
+        // Se for filesystem, os arquivos vêm em um campo separado
+        if (appData.storage_type === 'filesystem') {
+            // O backend deve retornar os arquivos em um campo como `files`
+            this.appData.appFiles = appData.files || { 'main.dart': appData.dart_code || '' };
+            this.appData.activeFile = null;
+            this.appData.unsavedChanges.clear();
+        } else {
+            // Limpa o estado de arquivos para apps de database
+            this.appData.appFiles = {};
+            this.appData.activeFile = null;
+            this.appData.unsavedChanges.clear();
+        }
+
         console.log('Populating form fields with:', appData);
 
         // Update internal data
@@ -2878,6 +3061,9 @@ if (document.readyState === 'loading') {
         const colorField = document.getElementById('app-color');
         if (colorField) colorField.value = this.appData.color;
 
+        const colorHexField = document.getElementById('app-color-hex');
+        if (colorHexField) colorHexField.value = this.appData.color;
+
         // Set app type
         this.appType = appData.app_type || 'javascript';
         this.selectAppType(this.appType);
@@ -2898,50 +3084,17 @@ if (document.readyState === 'loading') {
             codeField.value = this.appType === 'flutter' ? this.appData.dartCode : this.appData.code;
         }
 
-        // Show token field for Flutter apps
-        const tokenFieldContainer = document.getElementById('token-field-container');
-        const tokenField = document.getElementById('app-token');
-        if (this.appType === 'flutter') {
-            if (tokenFieldContainer) tokenFieldContainer.style.display = 'block';
-            if (tokenField && appData.token) {
-                tokenField.value = appData.token;
-                this.appData.token = appData.token;
-            }
-        } else {
-            if (tokenFieldContainer) tokenFieldContainer.style.display = 'none';
-        }
+        // Show/hide token field based on app type (and update its value if editing)
+        this.toggleTokenField(appData.token);
 
         // Populate scopes checkboxes
         document.querySelectorAll('input[type="checkbox"][value*="."]').forEach(checkbox => {
             checkbox.checked = this.appData.scopes.includes(checkbox.value);
         });
 
-        // Go to step 1 to start editing
-        this.currentStep = 1;
-        this.updateStepDisplay();
-        
-        // Se for um app Flutter, inicializa o editor de arquivos (somente fora do modo simples)
-        if (this.appType === 'flutter' && !this.useSimpleEditor) {
-            setTimeout(() => {
-                this.setupFilesystemEditor();
-                this.renderFileTree();
-            }, 200);
-        }
-    },
-
-    cancelEdit() {
-        this.editMode = false;
-        this.editingAppId = null;
-        this.currentAppData = null;
-
-        // Hide edit mode alert
-        const editAlert = document.getElementById('edit-mode-alert');
-        if (editAlert) {
-            editAlert.style.display = 'none';
-        }
-
-        // Reset form
-        this.resetForm();
+        // Go to step 5 to start editing code directly
+        // this.currentStep = 5; // Movido para a função editApp
+        // this.updateStepDisplay(); // Será chamado pelo render()
     },
 
     resetForm() {
@@ -2954,13 +3107,88 @@ if (document.readyState === 'loading') {
             }
         });
 
+        // Reset appData state
+        this.appData = {
+            company: null,
+            appFiles: {},
+            activeFile: null,
+            unsavedChanges: new Set(),
+            title: "",
+            slug: "",
+            description: "",
+            icon: null,
+            color: "#3b82f6",
+            accessLevel: 1,
+            version: "1.0.0",
+            entityType: 0,
+            price: 0,
+            scopes: [],
+            code: "",
+            dartCode: "",
+            token: null
+        };
+
         // Reset app type
         this.appType = 'javascript';
         this.selectAppType('javascript');
 
         // Go back to step 1
         this.currentStep = 1;
-        this.updateStepDisplay();
+        // No need to call updateStepDisplay here, render() will handle it
+    },
+
+    startNewApp() {
+        this.editMode = false;
+        this.editingAppId = null;
+        this.currentAppData = null;
+        this.viewMode = 'form';
+        this.resetForm();
+        this.currentStep = 1; // Start from step 1 for new app
+        this.render();
+    },
+
+    goBackToList() {
+        // Check for unsaved changes before leaving the form
+        let hasUnsavedChanges = false;
+        if (this.useSimpleEditor) { // Simple editor (textarea)
+            const codeField = document.getElementById('app-code');
+            const currentCode = codeField ? codeField.value : '';
+            const originalCode = this.appType === 'flutter' ? this.appData.dartCode : this.appData.code;
+            if (currentCode !== originalCode) {
+                hasUnsavedChanges = true;
+            }
+        } else { // Filesystem editor
+            hasUnsavedChanges = this.appData.unsavedChanges.size > 0;
+        }
+
+        if (hasUnsavedChanges && !confirm('Você tem alterações não salvas. Deseja descartá-las e voltar para a lista de apps?')) {
+            return; // User cancelled going back
+        }
+
+        this.editMode = false;
+        this.editingAppId = null;
+        this.currentAppData = null;
+        this.viewMode = 'list';
+        this.destroyCodeMirror(); // Garantir que o editor seja destruído ao voltar
+        this.resetForm(); // Clear form data
+        this.render();
+    },
+
+    // Modificado para aceitar um token opcional ao exibir/ocultar
+    toggleTokenField(tokenValue = null) {
+        const tokenContainer = document.getElementById('token-field-container');
+        const tokenInput = document.getElementById('app-token');
+        if (tokenContainer && tokenInput) {
+            if (this.appType === 'flutter') {
+                tokenContainer.style.display = 'block';
+                tokenInput.value = tokenValue || this.appData.token || '';
+                this.appData.token = tokenInput.value; // Garante que o estado interno reflita o que está no campo
+            } else {
+                tokenContainer.style.display = 'none';
+                tokenInput.value = '';
+                this.appData.token = null;
+            }
+        }
     },
 
     async saveApp() {
@@ -2976,7 +3204,7 @@ if (document.readyState === 'loading') {
             let response;
             if (this.editMode && this.editingAppId) {
                 console.log('📝 Atualizando app existente...');
-                // Tentar POST primeiro (mais estável)
+                // Tentar POST primeiro (mais estável para alguns backends)
                 response = await this.apiPost(`/apps/update/${this.editingAppId}`, appData);
                 // Se não retornou sucesso, tentar PUT como fallback
                 if (!response || response.success === false) {
@@ -2988,7 +3216,7 @@ if (document.readyState === 'loading') {
                 response = await this.apiPost('/apps/create', appData);
             }
 
-            console.log('📡 Resposta da API:', response);
+            console.log('📡 Resposta da API de salvamento:', response);
 
             // Fallback: alguns ambientes retornam HTML com status 200. Verificar via GET se o update realmente ocorreu.
             if ((!response || response.success === false) && this.editMode && this.editingAppId) {
@@ -3013,7 +3241,7 @@ if (document.readyState === 'loading') {
                     'success'
                 );
 
-                // Disparar build real para apps Flutter
+                // Disparar build real para apps Flutter (se aplicável)
                 try {
                     const savedAppId = response.app_id || (response.data && response.data.id) || this.editingAppId;
                     const savedAppType = ((response.app_type || (response.data && response.data.app_type) || appData.app_type || this.appType || 'javascript') + '').toLowerCase();
@@ -3042,11 +3270,12 @@ if (document.readyState === 'loading') {
                 this.loadAndShowMyApps();
 
                 if (!this.editMode) {
+                    // Se for um novo app, após salvar, ele deve permanecer em rascunho.
                     this.resetForm();
                 }
             } else {
-                const statusInfo = response?.status ? ` (status ${response.status})` : '';
-                throw new Error((response?.message || 'Erro desconhecido na resposta da API') + statusInfo);
+                const statusInfo = response?.status ? ` (status ${response.status})` : '';                
+                throw new Error((response?.message || response?.error || 'Erro desconhecido na resposta da API') + statusInfo);
             }
         } catch (e) {
             console.error(' Error saving app:', e);
@@ -3070,12 +3299,37 @@ if (document.readyState === 'loading') {
             } else if (e.message.includes('404')) {
                 errorMessage += 'App não encontrado. Tente recarregar a página.';
             } else {
+                if (e.message.toLowerCase().includes('filesystem storage')) {
+                    errorMessage = 'Erro no backend: Falha ao inicializar o storage para o app Flutter. Verifique se o serviço de criação de repositórios/diretórios está funcionando corretamente no servidor.';
+                }
                 errorMessage += e.message;
             }
 
             this.showToast(errorMessage, 'error');
         }
     },
+
+    async publishApp() { // Publicar da Etapa 6
+        if (!this.editingAppId) {
+            alert('Salve o aplicativo primeiro antes de publicar');
+            return;
+        }
+        await this.publishAppFromCard(this.editingAppId);
+        this.updatePreview(); // Atualiza o botão na Etapa 6
+    },
+
+    async unpublishApp() { // Despublicar da Etapa 6
+        if (!this.editingAppId) {
+            alert('Não é possível despublicar um aplicativo não salvo.');
+            return;
+        }
+        await this.unpublishAppFromCard(this.editingAppId);
+        this.updatePreview(); // Atualiza o botão na Etapa 6
+    },
+
+    // Removido: publishApp() não é mais chamado automaticamente após saveApp().
+    // A ação de publicar é agora explícita.
+    // O método publishApp() acima é o que será chamado pelo botão da Etapa 6.
 
     async triggerBuildAndMonitor(appId) {
         this.showToast('Iniciando build do app…', 'info');
@@ -3257,6 +3511,7 @@ if (document.readyState === 'loading') {
             }
         } catch (_) { /* noop */ }
     },
+    
     collectFormDataSafe() {
         console.log('Coletando dados do formulário (versão segura)...');
 
@@ -3267,7 +3522,7 @@ if (document.readyState === 'loading') {
         const slugField = document.getElementById('app-slug');
         const slug = slugField ? slugField.value.trim() : (this.appData.slug || '');
         if (!title) {
-            throw new Error('Título é obrigatório');
+            throw new Error('O campo "Nome do Aplicativo" é obrigatório.');
         }
         if (!slug || !/^[a-z0-9-]+$/.test(slug)) {
             throw new Error('Slug é obrigatório e deve conter apenas letras minúsculas, números e hífens');
@@ -3292,7 +3547,7 @@ if (document.readyState === 'loading') {
         const priceField = document.getElementById('app-price');
         // company_id é obrigatório para criação
         if (!this.editMode && !formData.company_id) {
-            throw new Error('Selecione uma empresa válida');
+            throw new Error('O campo "Empresa" é obrigatório. Selecione uma empresa válida.');
         }
         if (priceField && priceField.value) {
             formData.price = parseFloat(priceField.value) || 0;
@@ -3313,16 +3568,28 @@ if (document.readyState === 'loading') {
         document.querySelectorAll('input[type="checkbox"][value*="."]:checked').forEach(checkbox => {
             selectedScopes.push(checkbox.value);
         });
-        if (selectedScopes.length > 0) {
-            formData.scopes = selectedScopes;
+        
+        formData.scopes = selectedScopes; // Sempre incluir scopes, mesmo que vazio, para permitir limpar
+
+        // Adicionado: Tratamento de upload de ícone
+        if (this.appData.icon) { // this.appData.icon should hold the base64 string or the existing URL
+            formData.icon = this.appData.icon;
         }
+
 
         // Código (sempre via textarea; Mini‑IDE desativado)
         const isFilesystem = false; // Mini‑IDE desativado: não enviar arquivos
 
         // Sempre capturar o conteúdo do textarea quando existir
-        const inlineCodeField = document.getElementById('app-code');
-        const inlineCode = (inlineCodeField ? inlineCodeField.value : (this.appType === 'flutter' ? this.appData.dartCode : this.appData.code)) || '';
+        let inlineCode;
+        if (this._codeMirrorInstance) {
+            // Se o CodeMirror está ativo, pegue o valor diretamente dele.
+            inlineCode = this._codeMirrorInstance.getValue();
+        } else {
+            // Fallback para o textarea ou estado do app.
+            const inlineCodeField = document.getElementById('app-code');
+            inlineCode = (inlineCodeField ? inlineCodeField.value : (this.appType === 'flutter' ? this.appData.dartCode : this.appData.code)) || '';
+        }
 
         if (this.appType === 'flutter') {
             // Para Flutter, envie dart_code quando o usuário preenche o textarea
@@ -3395,34 +3662,11 @@ if (document.readyState === 'loading') {
         return formData;
     },
 
-    async publishApp() {
-        if (!this.editingAppId) {
-            alert('Salve o aplicativo primeiro antes de publicar');
-            return;
-        }
-
-        try {
-            const response = await WorkzSDK.api.post('/apps/publish', {
-                app_id: this.editingAppId
-            });
-
-            if (response && response.success) {
-                this.showToast('Aplicativo publicado com sucesso!', 'success');
-                this.loadAndShowMyApps();
-            } else {
-                throw new Error(response.message || 'Erro ao publicar');
-            }
-        } catch (e) {
-            console.error('Error publishing app:', e);
-            this.showToast('Erro ao publicar aplicativo: ' + e.message, 'error');
-        }
-    },
-
-    setupEventListeners() {
-        console.log('🎯 Setting up event listeners...');
-
+    setupFormEventListeners() {
         // Company select change handler
         const companySelect = document.getElementById("company-select");
+        if (!companySelect || companySelect.dataset.listenerAttached) return;
+
         if (companySelect) {
             companySelect.addEventListener("change", (e) => {
                 const selectedOption = e.target.selectedOptions[0];
@@ -3452,6 +3696,7 @@ if (document.readyState === 'loading') {
                 }
                 this.validateCurrentStep();
             });
+            companySelect.dataset.listenerAttached = 'true';
         }
 
         // App title change handler
@@ -3498,6 +3743,33 @@ if (document.readyState === 'loading') {
             });
         });
 
+        // App icon change handler
+        const appIconInput = document.getElementById("app-icon");
+        if (appIconInput && !appIconInput.dataset.listenerAttached) {
+            appIconInput.addEventListener("change", (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        this.appData.icon = reader.result; // Store base64 string
+                        const iconPreview = document.getElementById("icon-preview");
+                        if (iconPreview) {
+                            iconPreview.src = reader.result;
+                            iconPreview.style.display = "block";
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    this.appData.icon = null; // Clear icon if no file selected
+                    const iconPreview = document.getElementById("icon-preview");
+                    if (iconPreview) {
+                        iconPreview.src = "";
+                        iconPreview.style.display = "none";
+                    }
+                }
+            });
+            appIconInput.dataset.listenerAttached = 'true';
+        }
         // Other form fields
         const appVersion = document.getElementById("app-version");
         if (appVersion) {
@@ -3537,6 +3809,14 @@ if (document.readyState === 'loading') {
                     this.appData.code = e.target.value;
                 }
                 this.validateCurrentStep();
+                // If live JS preview is open, update it with debounce
+                try {
+                    const live = document.getElementById('livePreviewModal');
+                    if (live && live.classList.contains('show') && this._livePreviewMode === 'js') {
+                        clearTimeout(this._livePreviewDebounce);
+                        this._livePreviewDebounce = setTimeout(() => this._updateJsLivePreview(), 300);
+                    }
+                } catch (_) {}
             });
         }
 
@@ -3553,6 +3833,14 @@ if (document.readyState === 'loading') {
                 console.log('Scopes atualizados:', this.appData.scopes);
             });
         });
+    },
+
+    removeFormEventListeners() {
+        // This is a placeholder. For a more robust solution, you would
+        // store references to the handlers and remove them specifically.
+        // For now, the `dataset.listenerAttached` check prevents re-binding.
+        const companySelect = document.getElementById("company-select");
+        if (companySelect) delete companySelect.dataset.listenerAttached;
     },
 
     validateCurrentStep() {
@@ -3732,8 +4020,8 @@ if (document.readyState === 'loading') {
             // quando o tipo de app é selecionado ou carregado.
             if (!this.useSimpleEditor && (this.appType === 'flutter' || this.appData.storage_type === 'filesystem')) {
                 setTimeout(() => this.setupFilesystemEditor(), 100);
-            } else {
-                // Inicializa o editor de database
+            } else { // Modo simples (database editor)
+                setTimeout(() => this.initializeCodeMirror(), 50); // Adicionado timeout para garantir que o DOM está pronto
                 setTimeout(() => this.setupDatabaseEditor(), 100);
             }
         }
@@ -3816,21 +4104,137 @@ if (document.readyState === 'loading') {
         }
     },
 
+    async initializeCodeMirror() {
+        // Garante que o editor só seja inicializado quando o elemento estiver visível
+        const waitForEditor = () => {
+            return new Promise(resolve => {
+                const check = () => {
+                    const container = document.getElementById('code-editor-container');
+                    const section = document.getElementById('step-5');
+                    if (container && section && section.classList.contains('active')) {
+                        resolve(container);
+                    } else {
+                        setTimeout(check, 50); // Tenta novamente em 50ms
+                    }
+                };
+                check();
+            });
+        };
+
+        await waitForEditor();
+
+        // Garante que qualquer instância antiga seja destruída antes de criar uma nova.
+        this.destroyCodeMirror();
+
+        // Garante que todas as dependências, incluindo o modo Dart, estejam carregadas.
+        // Isso resolve a race condition de forma robusta.
+        await this._depsPromise;
+
+        const newMode = this.appType === 'flutter' ? 'dart' : 'javascript';
+
+        // Força a recriação do editor se o modo de linguagem mudou.
+        // Isso resolve o problema de syntax highlighting ao alternar entre tipos de app.
+        if (this._codeMirrorInstance && this._codeMirrorInstance.getOption('mode') !== newMode) {
+            this._codeMirrorInstance.toTextArea();
+            this._codeMirrorInstance = null;
+        }
+
+        if (this._codeMirrorInstance) {
+            // Se a instância já existe, apenas atualize o conteúdo e o modo
+            const code = this.appType === 'flutter' ? (this.appData.dartCode || '') : (this.appData.code || '');
+            if (this._codeMirrorInstance.getValue() !== code) {
+                this._codeMirrorInstance.setValue(code);
+            }
+            this._codeMirrorInstance.refresh();
+            return;
+        }
+
+        const codeField = document.getElementById('app-code');
+        if (codeField && typeof CodeMirror !== 'undefined') {
+            this._codeMirrorInstance = CodeMirror.fromTextArea(codeField, {
+                lineNumbers: true,
+                mode: newMode,
+                theme: 'monokai',
+                tabSize: 2,
+                gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
+                indentWithTabs: false,
+                lineWrapping: false,
+                autofocus: true,
+                matchBrackets: true,
+                foldGutter: true,
+                extraKeys: {
+                    "Ctrl-F": "findPersistent",
+                    "Cmd-F": "findPersistent",
+                    "Ctrl-H": "replace",
+                    "Cmd-Option-F": "replace",
+                    "F11": function(cm) { cm.setOption("fullScreen", !cm.getOption("fullScreen")); },
+                    "Esc": function(cm) { if (cm.getOption("fullScreen")) cm.setOption("fullScreen", false); }
+                }
+            });
+
+            const code = this.appType === 'flutter' ? (this.appData.dartCode || '') : (this.appData.code || '');
+            this._codeMirrorInstance.setValue(code);
+
+            this._codeMirrorInstance.on('change', (cm) => {
+                const value = cm.getValue();
+                if (this.appType === 'flutter') {
+                    this.appData.dartCode = value;
+                } else {
+                    this.appData.code = value;
+                }
+                this.validateCurrentStep();
+            });
+            
+            setTimeout(() => this._codeMirrorInstance.refresh(), 100);
+        }
+    },
+
+    destroyCodeMirror() {
+        if (this._codeMirrorInstance) {
+            try {
+                this._codeMirrorInstance.toTextArea();
+            } catch (e) {
+                console.warn("Falha ao destruir instância do CodeMirror:", e);
+            }
+            this._codeMirrorInstance = null;
+        }
+    },
+
     // Code editor methods
     formatCode() {
         console.log('Format code (disabled)');
         this.showToast('Funcionalidade de formatação desativada.', 'warning');
     },
 
-    toggleFullscreen() {
-        console.log('Toggle fullscreen (disabled)');
-        this.showToast('Funcionalidade de tela cheia desativada.', 'warning');
+    toggleCodeMirrorFullscreen() {
+        if (this._codeMirrorInstance) {
+            // Usa a API do CodeMirror para alternar o modo de tela cheia
+            this._codeMirrorInstance.setOption("fullScreen", !this._codeMirrorInstance.getOption("fullScreen"));
+        } else {
+            this.showToast('Editor não inicializado.', 'warning');
+        }
+    },
+
+    toggleWordWrap() {
+        if (this._codeMirrorInstance) {
+            const currentStatus = this._codeMirrorInstance.getOption("lineWrapping");
+            this._codeMirrorInstance.setOption("lineWrapping", !currentStatus);
+            this.showToast(`Quebra de linha ${!currentStatus ? 'ativada' : 'desativada'}.`, 'info');
+        } else {
+            this.showToast('Editor não inicializado.', 'warning');
+        }
     },
 
     insertTemplate() {
-        console.log('Insert template');
-        const editor = document.getElementById('app-code');
-        if (editor) editor.value = this.getJavaScriptTemplate();
+        const template = this.appType === 'flutter' ? this.getFlutterTemplate() : this.getJavaScriptTemplate();
+        
+        if (this._codeMirrorInstance) {
+            this._codeMirrorInstance.setValue(template);
+            this._codeMirrorInstance.focus();
+        } else {
+            const editor = document.getElementById('app-code');
+            if (editor) editor.value = template;
+        }
         this.showToast('Template inserido!', 'info');
     },
 
@@ -3838,11 +4242,181 @@ if (document.readyState === 'loading') {
         console.log('Toggle line numbers');
     },
 
-    toggleWordWrap() {
-        console.log('Toggle word wrap');
+    // Build management methods
+    async showCodePreview() {
+        try { // Ensure there is code
+            let code;
+            if (this._codeMirrorInstance) {
+                // Se o CodeMirror está ativo, pegue o valor diretamente dele.
+                code = this._codeMirrorInstance.getValue();
+            } else {
+                // Fallback para o textarea ou estado do app.
+                const codeField = document.getElementById('app-code');
+                code = codeField ? codeField.value : (this.appType === 'flutter' ? (this.appData.dartCode || '') : (this.appData.code || ''));
+            }
+
+            if (!code || code.trim() === '') {
+                this.showToast('Escreva algum código para visualizar o preview.', 'info');
+                return;
+            }
+
+            if (this.appType === 'javascript') {
+                this._livePreviewMode = 'js';
+                const html = this._buildJsPreviewHtml(code);
+                const modalHtml = `
+                    <div class="modal fade" id="livePreviewModal" tabindex="-1">
+                        <div class="modal-dialog modal-xl">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title"><i class="fas fa-eye"></i> Preview (JavaScript)</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body p-0">
+                                    <iframe id="live-preview-frame" style="width:100%; height:70vh; border:0; background:#fff"></iframe>
+                                </div>
+                                <div class="modal-footer">
+                                    <small class="text-muted me-auto">Atualiza automaticamente enquanto você digita</small>
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                this.showModal(modalHtml, 'livePreviewModal');
+                // Set srcdoc after modal is in DOM
+                setTimeout(() => {
+                    const iframe = document.getElementById('live-preview-frame');
+                    if (iframe) iframe.srcdoc = html;
+                }, 50);
+                return;
+            }
+
+            // Flutter quick preview via build worker
+            this._livePreviewMode = 'flutter';
+            const modalHtml = `
+                <div class="modal fade" id="livePreviewModal" tabindex="-1">
+                    <div class="modal-dialog modal-xl">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="fas fa-eye"></i> Preview (Flutter Web)</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body p-0" id="live-preview-body">
+                                <div class="p-3"><i class="fas fa-spinner fa-spin me-2"></i>Gerando preview...</div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-outline-primary" id="btn-refresh-preview"><i class="fas fa-redo"></i> Atualizar Preview</button>
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            this.showModal(modalHtml, 'livePreviewModal');
+            // Hook refresh button
+            setTimeout(() => {
+                const btn = document.getElementById('btn-refresh-preview');
+                if (btn) btn.addEventListener('click', () => this._generateFlutterPreview());
+                this._generateFlutterPreview();
+            }, 50);
+
+        } catch (e) {
+            console.error('Preview error:', e);
+            this.showToast('Falha ao abrir preview: ' + (e?.message || e), 'error');
+        }
     },
 
-    // Build management methods
+    _buildJsPreviewHtml(code) {
+        const safeCode = String(code || '');
+        return `<!doctype html><html><head><meta charset="utf-8"/>
+            <meta name="viewport" content="width=device-width, initial-scale=1"/>
+            <style>html,body{height:100%} body{margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;} #app{min-height:100vh;}</style>
+        </head><body>
+            <div id="app"></div>
+            <script>
+            // Minimal WorkzSDK stub for preview
+            window.WorkzSDK = {
+                init: async () => ({ ok:true }),
+                getUser: () => ({ id: 1, name: 'Preview User' }),
+                getContext: () => ({ type: 'user', id: 1 }),
+                api: { get: async()=>({}), post: async()=>({}), put: async()=>({}), delete: async()=>({}) }
+            };
+            </script>
+            <script>
+            try {
+                (function(){\n${safeCode.replace(/<\/(script)/gi, '<\\/$1')}\n})();
+                if (window.StoreApp && typeof window.StoreApp.bootstrap === 'function') {
+                    Promise.resolve(window.StoreApp.bootstrap()).catch(e => console.error('bootstrap error', e));
+                }
+            } catch (e) {
+                console.error(e);
+                document.body.innerHTML = '<pre style="padding:16px; color:#b91c1c; background:#fee2e2">'+ String(e && (e.stack||e.message)||e) +'</pre>';
+            }
+            </script>
+        </body></html>`;
+    },
+
+    _updateJsLivePreview() {
+        try {
+            const codeField = document.getElementById('app-code');
+            const code = codeField ? codeField.value : this.appData.code || '';
+            const html = this._buildJsPreviewHtml(code);
+            const iframe = document.getElementById('live-preview-frame');
+            if (iframe) iframe.srcdoc = html;
+        } catch (e) { /* ignore */ }
+    },
+
+    async _generateFlutterPreview() {
+        const slug = this.appData.slug || ('preview-' + Date.now());
+        const codeField = document.getElementById('app-code');
+        const dartCode = codeField ? codeField.value : (this.appData.dartCode || '');
+
+        // Prefer same-origin proxy (/preview -> nginx -> worker), with fallbacks
+        const bases = [];
+        bases.push(''); // same-origin
+        try {
+            if (typeof window !== 'undefined' && window.WORKZ_WORKER_BASE) {
+                bases.push(String(window.WORKZ_WORKER_BASE).replace(/\/$/, ''));
+            }
+        } catch (_) {}
+        bases.push('http://localhost:9091');
+
+        let lastError = null;
+        for (const base of bases) {
+            const baseNorm = String(base || '');
+            const urlBase = baseNorm; // '' means same-origin
+            // Important: use trailing slash to match nginx location ^~ /preview/
+            const postUrl = (urlBase ? urlBase : '') + '/preview/';
+            try {
+                const resp = await fetch(postUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ slug, dart_code: dartCode })
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data || !data.success) {
+                    throw new Error(data?.message || (`Falha ao gerar preview em ${postUrl}`));
+                }
+                // Success
+                this._activePreviewBase = urlBase; // track for cleanup and iframe src
+                this._activePreviewToken = data.data?.token || null;
+                const url = data.data?.url || null; // like /preview/<token>/
+                const body = document.getElementById('live-preview-body');
+                if (url && body) {
+                    body.innerHTML = '<iframe id="live-preview-frame" style="width:100%; height:70vh; border:0; background:#fff"></iframe>';
+                    const iframe = document.getElementById('live-preview-frame');
+                    iframe.src = (urlBase || '') + url;
+                } else if (body) {
+                    body.innerHTML = '<div class="p-3 text-danger">Pré-visualização indisponível.</div>';
+                }
+                return; // stop after first success
+            } catch (e) {
+                lastError = e;
+                // try next base
+            }
+        }
+        console.error('Flutter preview failed:', lastError);
+        const body = document.getElementById('live-preview-body');
+        if (body) body.innerHTML = `<div class="p-3 text-danger">Erro: ${this.escapeHtml(lastError?.message || String(lastError))}<br/><small>Tente iniciar o build-worker ou acessar via /preview (proxy nginx).</small></div>`;
+    },
     async showBuildStatus(appId) {
         try {
             const response = await this.getBuildStatusCompat(appId);
@@ -4169,8 +4743,8 @@ if (document.readyState === 'loading') {
         `;
     },
 
-    async showBuildHistory(appId) {
-        const modalHtml = `
+    async showBuildHistory(appId) { // Corrigido para buscar dados reais
+        this.showModal(`
             <div class="modal fade" id="buildHistoryModal" tabindex="-1">
                 <div class="modal-dialog modal-lg">
                     <div class="modal-content">
@@ -4181,7 +4755,9 @@ if (document.readyState === 'loading') {
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body">
-                            ${this.renderBuildHistoryContent(appId)}
+                            <div id="build-history-content" class="text-center p-4">
+                                <i class="fas fa-spinner fa-spin fa-2x text-muted"></i>
+                            </div>
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
@@ -4192,47 +4768,27 @@ if (document.readyState === 'loading') {
                     </div>
                 </div>
             </div>
-        `;
+        `, 'buildHistoryModal');
 
-        this.showModal(modalHtml, 'buildHistoryModal');
+        try {
+            // Simula uma chamada de API para buscar o histórico real
+            const response = await this.apiGet(`/apps/${appId}/build-history`); // Endpoint hipotético
+            const historyContentEl = document.getElementById('build-history-content');
+            if (response && response.success) {
+                historyContentEl.innerHTML = this.renderBuildHistoryContent(response.data);
+            } else {
+                historyContentEl.innerHTML = '<div class="alert alert-warning">Não foi possível carregar o histórico de builds.</div>';
+            }
+        } catch (e) {
+            const historyContentEl = document.getElementById('build-history-content');
+            historyContentEl.innerHTML = `<div class="alert alert-danger">Erro ao carregar histórico: ${e.message}</div>`;
+        }
     },
 
-    renderBuildHistoryContent(appId) {
-        // Simulated build history data
-        const buildHistory = [
-            {
-                id: 1,
-                version: '1.2.0',
-                status: 'success',
-                created_at: '2025-01-15T10:30:00Z',
-                duration: '3m 45s',
-                platforms: ['web', 'android', 'ios'],
-                commit_hash: 'a1b2c3d',
-                commit_message: 'Adicionar validação de formulário'
-            },
-            {
-                id: 2,
-                version: '1.1.0',
-                status: 'success',
-                created_at: '2025-01-14T15:20:00Z',
-                duration: '4m 12s',
-                platforms: ['web', 'android'],
-                commit_hash: 'x9y8z7w',
-                commit_message: 'Implementar componente de botão'
-            },
-            {
-                id: 3,
-                version: '1.0.1',
-                status: 'failed',
-                created_at: '2025-01-13T09:15:00Z',
-                duration: '1m 23s',
-                platforms: ['web'],
-                commit_hash: 'p5q6r7s',
-                commit_message: 'Correção de bug na navegação',
-                error: 'Erro de compilação no módulo de navegação'
-            }
-        ];
-
+    renderBuildHistoryContent(buildHistory) { // Corrigido para receber dados
+        if (!buildHistory || buildHistory.length === 0) {
+            return '<div class="text-center p-4 text-muted">Nenhum histórico de build encontrado.</div>';
+        }
         return `
             <div class="build-history-list">
                 ${buildHistory.map(build => this.renderBuildHistoryItem(build)).join('')}

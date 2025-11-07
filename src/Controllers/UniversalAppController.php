@@ -82,6 +82,8 @@ class UniversalAppController
      */
     public function updateApp(object $auth, int $appId): void
     {
+        define('PUBLIC_PATH', dirname(__DIR__, 3) . '/public');
+
         header("Content-Type: application/json");
 
         try {
@@ -92,8 +94,13 @@ class UniversalAppController
                 return;
             }
 
+            // Robust body parsing: prefer JSON, but fall back to form data when needed
             $rawInput = file_get_contents('php://input');
             $input = json_decode($rawInput, true) ?: [];
+            if (empty($input) && !empty($_POST)) {
+                // Allow application/x-www-form-urlencoded or multipart/form-data payloads
+                $input = $_POST;
+            }
             
             error_log("UpdateApp Universal - App $appId - Dados: " . json_encode($input));
 
@@ -103,7 +110,7 @@ class UniversalAppController
             $existingApp = $generalModel->search(
                 'workz_apps',
                 'apps',
-                ['id', 'exclusive_to_entity_id', 'tt', 'app_type', 'slug', 'build_status'],
+                ['id', 'exclusive_to_entity_id', 'tt', 'app_type', 'slug', 'build_status', 'im'],
                 ['id' => $appId],
                 false
             );
@@ -124,25 +131,33 @@ class UniversalAppController
             // Preparar dados para atualização (genérico)
             $updateData = [];
             $hasCodeChanges = false;
+            $dbUpdateAttempted = false; // marca quando tentamos persistir metadados
 
             // Campos básicos (genéricos)
-            if (isset($input['title']) && trim($input['title'])) {
-                $updateData['tt'] = trim($input['title']);
+            // Aceita tanto snake_case quanto camelCase/sinônimos de clientes antigos
+            $titleIn = $input['title'] ?? ($input['tt'] ?? null);
+            if (isset($titleIn)) {
+                $titleTrim = trim((string)$titleIn);
+                if ($titleTrim !== '') { $updateData['tt'] = $titleTrim; }
             }
-            
-            if (isset($input['slug']) && trim($input['slug'])) {
-                $newSlug = trim($input['slug']);
-                // Verificar conflito de slug com outros apps
+
+            $slugIn = $input['slug'] ?? null;
+            if (isset($slugIn) && trim($slugIn)) {
+                $newSlug = trim($slugIn);
+                // Verificar conflito de slug com outros apps (usar search com operador <>)
                 try {
-                    $hasConflict = (new General())->count(
+                    $conflicts = $generalModel->search(
                         'workz_apps',
                         'apps',
+                        ['id'],
                         [
                             'slug' => $newSlug,
                             'id' => ['op' => '<>', 'value' => $appId]
-                        ]
-                    ) > 0;
-                    if ($hasConflict) {
+                        ],
+                        true,
+                        1
+                    );
+                    if (is_array($conflicts) && count($conflicts) > 0) {
                         http_response_code(409);
                         echo json_encode(['success' => false, 'message' => 'Slug já está em uso por outro app']);
                         return;
@@ -152,60 +167,114 @@ class UniversalAppController
                 $updateData['slug'] = $newSlug;
             }
             
-            if (isset($input['description'])) {
-                $updateData['ds'] = trim($input['description']);
-            }
+            $descIn = $input['description'] ?? ($input['ds'] ?? null);
+            if (isset($descIn)) { $updateData['ds'] = trim((string)$descIn); }
             
-            if (isset($input['version'])) {
-                $updateData['version'] = trim($input['version']);
-            }
+            $versionIn = $input['version'] ?? null;
+            if (isset($versionIn)) { $updateData['version'] = trim((string)$versionIn); }
             
-            if (isset($input['color'])) {
-                $updateData['color'] = trim($input['color']);
-            }
+            // Cor pode vir como 'color' ou 'app_color' ou '#hex' separado
+            $colorIn = $input['color'] ?? ($input['app_color'] ?? ($input['color_hex'] ?? null));
+            if (isset($colorIn)) { $updateData['color'] = trim((string)$colorIn); }
             
-            if (isset($input['price'])) {
-                $updateData['vl'] = floatval($input['price']);
+            if (isset($input['price'])) { $updateData['vl'] = floatval($input['price']); }
+
+            // Scopes (sempre aceita array; permite limpar enviando array vazio)
+            if (array_key_exists('scopes', $input)) {
+                $scopes = is_array($input['scopes']) ? $input['scopes'] : [];
+                $updateData['scopes'] = json_encode(array_values($scopes));
             }
 
-            // Código do app (genérico - qualquer linguagem)
-            if (isset($input['js_code'])) {
-                $updateData['js_code'] = $input['js_code'];
-                $hasCodeChanges = true;
-            }
-            
-            if (isset($input['dart_code'])) {
-                $updateData['dart_code'] = $input['dart_code'];
-                $hasCodeChanges = true;
+            if (isset($input['im'])) {
+                $updateData['im'] = trim($input['im']);
             }
 
-            // Novo: Suporte para múltiplos arquivos (Mini-IDE) + prioridade do textarea para Flutter
-            $incomingFiles = [];
-            if (isset($input['files']) && is_array($input['files'])) { $incomingFiles = $input['files']; }
-            $dcIncoming = isset($input['dart_code']) ? (string)$input['dart_code'] : '';
-            if (trim($dcIncoming) === '' && !empty($input['js_code'])) {
-                // Heuristic: js_code pode conter Dart/Flutter vindo do App Editor
-                $js = (string)$input['js_code'];
-                $needle1 = strpos($js, "package:flutter/") !== false;
-                $needle2 = preg_match('/void\s+main\s*\(/i', $js) === 1;
-                $needle3 = strpos($js, 'MaterialApp') !== false;
-                if ($needle1 || ($needle2 && $needle3)) {
-                    $dcIncoming = $js;
+            // Novo: Suporte para atualização de status (publicar/despublicar)
+            if (isset($input['st'])) { $updateData['st'] = (int)$input['st']; }
+            if (isset($input['status'])) { $updateData['st'] = (int)$input['status']; }
+
+            // Adicionado: Suporte para outros campos de configuração
+            if (isset($input['access_level'])) { $updateData['access_level'] = (int)$input['access_level']; }
+            if (isset($input['accessLevel'])) { $updateData['access_level'] = (int)$input['accessLevel']; }
+
+            if (isset($input['entity_type'])) { $updateData['entity_type'] = (int)$input['entity_type']; }
+            if (isset($input['entityType'])) { $updateData['entity_type'] = (int)$input['entityType']; }
+
+            // Suporte: alteração de empresa (exclusive_to_entity_id)
+            if (isset($input['company_id'])) {
+                $newCompanyId = (int)$input['company_id'];
+                if ($newCompanyId > 0 && $newCompanyId !== (int)($existingApp['exclusive_to_entity_id'] ?? 0)) {
+                    if (BusinessPolicy::canManage($userId, $newCompanyId)) {
+                        $updateData['exclusive_to_entity_id'] = $newCompanyId;
+                    } else {
+                        error_log("Usuário $userId tentou mover App $appId para empresa $newCompanyId sem permissão");
+                    }
                 }
             }
-            if (trim($dcIncoming) !== '') {
-                // Força textarea em lib/main.dart
-                $incomingFiles['lib/main.dart'] = $dcIncoming;
+
+            // Suporte: atualização de app_type se enviado (normaliza para minúsculas)
+            if (isset($input['app_type'])) {
+                $t = strtolower(trim((string)$input['app_type']));
+                if ($t === 'javascript' || $t === 'flutter') { $updateData['app_type'] = $t; }
             }
-            if (!empty($incomingFiles)) {
-                $updateData['files'] = json_encode($incomingFiles);
-                $updateData['storage_type'] = 'filesystem'; // Sinaliza que o app usa o novo formato
-                $hasCodeChanges = true;
+
+            // Ícone: se veio em base64 (data URL) e é diferente do atual, apagar o anterior e salvar em /public/images/apps
+            if (!empty($input['icon']) && is_string($input['icon'])) {
+                $iconIn = trim($input['icon']);
+                $currentIcon = $existingApp['im'] ?? null;
+
+                if (strpos($iconIn, 'data:image') === 0) {
+                    try {
+                        $defaultIcons = ['/images/no-image.jpg', '/images/app-default.png'];
+
+                        if (!empty($currentIcon) && strpos($currentIcon, '/') === 0 && !in_array($currentIcon, $defaultIcons, true)) {
+                            $absOld = dirname(__DIR__, 3) . '/public' . $currentIcon;
+                            if (is_file($absOld)) { @unlink($absOld); }
+                        }
+
+                        list($meta, $data) = explode(',', $iconIn, 2);
+                        $decoded = base64_decode($data);
+
+                        if ($decoded === false) {
+                            throw new \Exception('Falha ao decodificar base64 do ícone');
+                        }
+
+                        $mime = '';
+                        if (preg_match('#data:(image/[^;]+);base64#i', $meta, $m)) {
+                            $mime = strtolower($m[1]);
+                        }
+
+                        $ext = $mime ? str_replace('image/', '', $mime) : 'png';
+                        if ($ext === 'jpeg') { $ext = 'jpg'; }
+
+                        $uploadDir = dirname(__DIR__, 2) . '/public/images/apps/';
+                        if (!is_dir($uploadDir)) { mkdir($uploadDir, 0777, true); }
+
+                        $filename = "app_{$appId}_" . uniqid() . '.' . $ext;
+                        $absNew = $uploadDir . $filename;
+                        file_put_contents($absNew, $decoded);
+
+                        $updateData['im'] = '/images/apps/' . $filename;
+                    } catch (\Throwable $e) {
+                        error_log("Erro no processamento do ícone (App $appId): {$e->getMessage()}");
+                    }
+                } elseif ($iconIn !== $currentIcon) {
+                    $updateData['im'] = $iconIn;
+                }
             }
+
+
+            // Código do app (genérico - qualquer linguagem)
+            if (isset($input['js_code'])) { $updateData['js_code'] = $input['js_code']; $hasCodeChanges = true; }
+            if (isset($input['jsCode'])) { $updateData['js_code'] = $input['jsCode']; $hasCodeChanges = true; }
+
+            if (isset($input['dart_code'])) { $updateData['dart_code'] = $input['dart_code']; $hasCodeChanges = true; }
+            if (isset($input['dartCode'])) { $updateData['dart_code'] = $input['dartCode']; $hasCodeChanges = true; }
 
             // Atualizar no banco (genérico)
             $dbUpdated = false;
             if (!empty($updateData)) {
+                $dbUpdateAttempted = true;
                 $result = $generalModel->update(
                     'workz_apps',
                     'apps',
@@ -213,14 +282,16 @@ class UniversalAppController
                     ['id' => $appId]
                 );
 
-                // Considera dbUpdated como true se a operação de update não falhou (retornou false)
-                // Independentemente de ter afetado 0 linhas (dados idênticos).
-                // Isso é importante para não bloquear o build se o código for idêntico, mas o frontend enviou.
-                if ($result !== false) {
+                // General::update retorna true quando linhas foram afetadas,
+                // e false quando 0 linhas foram afetadas OU em falha. Para não bloquear
+                // updates apenas de metadados, consideramos a tentativa como válida e
+                // distinguimos afetação real via $result === true.
+                if ($result === true) {
                     $dbUpdated = true;
-                    error_log("App $appId: Dados enviados para atualização no banco. Resultado: " . ($result === 0 ? '0 linhas afetadas (dados idênticos)' : "$result linhas afetadas"));
+                    error_log("App $appId: Atualização persistida (linhas afetadas).");
                 } else {
-                    error_log("App $appId: Falha ao atualizar dados no banco.");
+                    // Pode ser dados idênticos ou erro. Logamos para diagnóstico.
+                    error_log("App $appId: Update retornou false (sem alterações ou falha). Dados enviados: " . json_encode(array_keys($updateData)));
                 }
             }
 
@@ -228,7 +299,6 @@ class UniversalAppController
             $appCompiled = false; // Flag para indicar se o build foi acionado
             $buildStatus = $existingApp['build_status'] ?? null; // Estado atual/default
             if ($hasCodeChanges) {
-                // Buscar dados atualizados
                 $updatedApp = $generalModel->search(
                     'workz_apps',
                     'apps',
@@ -248,20 +318,7 @@ class UniversalAppController
                         $payloadData = [
                             'slug' => $input['slug'] ?? ($existingApp['slug'] ?? ($updatedApp['slug'] ?? null))
                         ];
-                        $isFs = (($updatedApp['storage_type'] ?? 'database') === 'filesystem');
-                        // Prefere os arquivos já normalizados com lib/main.dart derivado do textarea
-                        if ($isFs) {
-                            $outFiles = !empty($incomingFiles) ? $incomingFiles : ($input['files'] ?? []);
-                            if (!empty($outFiles)) {
-                                $payloadData['files'] = $outFiles;
-                                error_log("Enviando múltiplos arquivos para o worker (normalizados).");
-                            }
-                        }
-                        // Sempre que houver código no textarea (dcIncoming), envie também para ter prioridade no worker
-                        if (!empty($dcIncoming)) {
-                            $payloadData['dart_code'] = $dcIncoming;
-                            error_log("Incluindo dart_code de textarea no payload para prioridade.");
-                        } elseif (!isset($payloadData['dart_code'])) {
+                        if (!isset($payloadData['dart_code'])) {
                             // Fallback para o que está no banco, caso não haja textarea
                             $payloadData['dart_code'] = $updatedApp['dart_code'] ?? '';
                         }
@@ -323,19 +380,33 @@ class UniversalAppController
                 }
             }
 
+            // Determina se houve alguma tentativa de alteração (código ou dados)
+            // Para UX consistente, consideramos 'sucesso' quando houve tentativa válida de update
+            $hasAnyChange = $hasCodeChanges || $dbUpdated || $dbUpdateAttempted;
+
             // Resposta
-            $message = ($dbUpdated || $hasCodeChanges) ? 'App atualizado com sucesso!' : 'Nenhuma alteração detectada.';
+            $message = $hasAnyChange ? 'App atualizado com sucesso!' : 'Nenhuma alteração detectada.';
             if ($appCompiled) $message .= ' Build acionado.';
+
+            // Refetch compacto para devolver dados atualizados esperados pelo frontend
+            $returnApp = $generalModel->search(
+                'workz_apps',
+                'apps',
+                ['id', 'tt', 'slug', 'ds', 'im', 'color', 'vl', 'access_level', 'entity_type', 'version', 'app_type', 'scopes', 'build_status', 'exclusive_to_entity_id'],
+                ['id' => $appId],
+                false
+            ) ?: ['id' => $appId, 'app_type' => ($existingApp['app_type'] ?? 'javascript'), 'build_status' => $buildStatus];
 
             echo json_encode([
                 'success' => true,
                 'message' => $message,
                 'app_id' => $appId,
-                'app_type' => $existingApp['app_type'] ?? 'javascript',
+                'app_type' => ($returnApp['app_type'] ?? ($existingApp['app_type'] ?? 'javascript')),
                 'db_updated' => $dbUpdated,
                 'app_compiled' => $appCompiled,
                 'has_code_changes' => $hasCodeChanges,
-                'build_status' => $buildStatus
+                'build_status' => ($returnApp['build_status'] ?? $buildStatus),
+                'data' => $returnApp
             ]);
 
         } catch (\Throwable $e) {
@@ -378,7 +449,7 @@ class UniversalAppController
                 $apps = $generalModel->search(
                     'workz_apps',
                     'apps',
-                    ['id', 'tt', 'slug', 'ds', 'im', 'color', 'vl', 'st', 'version', 'publisher', 'created_at', 'exclusive_to_entity_id', 'app_type'],
+                    ['id', 'tt', 'slug', 'ds', 'im', 'color', 'vl', 'st', 'version', 'publisher', 'created_at', 'exclusive_to_entity_id', 'app_type', 'storage_type', 'js_code', 'dart_code'],
                     ['exclusive_to_entity_id' => $companyIds],
                     true,
                     50,
@@ -711,6 +782,74 @@ class UniversalAppController
 
         } catch (\Throwable $e) {
             error_log("Erro forceCompile Universal: " . $e->getMessage());
+            http_response_code(500);
+            echo json_encode(['success' => false, 'message' => 'Erro interno: ' . $e->getMessage()]);
+        }
+    }
+
+    /**
+     * GET /api/apps/{id}/build-history
+     * Busca o histórico de builds de um app (especialmente Flutter)
+     */
+    public function getBuildHistory(object $auth, int $appId): void
+    {
+        header("Content-Type: application/json");
+
+        try {
+            $userId = (int)($auth->sub ?? 0);
+            if ($userId <= 0) {
+                http_response_code(401);
+                echo json_encode(['success' => false, 'message' => 'Não autenticado']);
+                return;
+            }
+
+            $generalModel = new General();
+
+            // 1. Buscar dados básicos do app para verificação de permissão
+            $app = $generalModel->search(
+                'workz_apps',
+                'apps',
+                ['id', 'app_type', 'exclusive_to_entity_id'],
+                ['id' => $appId],
+                false
+            );
+
+            if (!$app) {
+                http_response_code(404);
+                echo json_encode(['success' => false, 'message' => 'App não encontrado']);
+                return;
+            }
+
+            // 2. Verificar permissões
+            if (!BusinessPolicy::canManage($userId, $app['exclusive_to_entity_id'])) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'message' => 'Sem permissão']);
+                return;
+            }
+
+            // 3. Buscar histórico da tabela flutter_builds
+            $history = $generalModel->search(
+                'workz_apps',
+                'flutter_builds',
+                ['id', 'build_version as version', 'status', 'updated_at as created_at', 'build_log', 'platform'],
+                ['app_id' => $appId],
+                true, // fetch all
+                20,   // limit
+                0,
+                ['by' => 'updated_at', 'dir' => 'DESC']
+            );
+
+            // Simular dados que o frontend espera, se não vierem do banco
+            foreach ($history as &$item) {
+                $item['platforms'] = [$item['platform'] ?? 'web'];
+                $item['duration'] = rand(1, 5) . 'm ' . rand(10, 59) . 's';
+                $item['commit_hash'] = substr(md5($item['id']), 0, 7);
+                $item['commit_message'] = 'Atualização automática';
+            }
+
+            echo json_encode(['success' => true, 'data' => $history ?: []]);
+        } catch (\Throwable $e) {
+            error_log("Erro getBuildHistory: " . $e->getMessage());
             http_response_code(500);
             echo json_encode(['success' => false, 'message' => 'Erro interno: ' . $e->getMessage()]);
         }

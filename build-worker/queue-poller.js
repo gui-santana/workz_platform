@@ -113,7 +113,6 @@ async function processQueueJob(job) {
   } catch (_) { /* ignore */ }
 
   const tempBuildDir = path.join(BUILD_WORKSPACE, slug);
-  const finalAppDir = path.join(PUBLIC_APPS_DIR, slug); // legacy (kept for ref)
 
   console.log(`[queue:${job.job_id}] Iniciando build do app ${appId} (${slug})...`);
   await updateQueueJob(job.job_id, appId, 'building', 'Preparando ambiente...');
@@ -131,8 +130,15 @@ async function processQueueJob(job) {
 
     console.log(`[queue:${job.job_id}] ensureDir workspace`);
     await fs.ensureDir(tempBuildDir);
-    console.log(`[queue:${job.job_id}] flutter create .`);
+  console.log(`[queue:${job.job_id}] flutter create .`);
+  try {
+    const raw = String(slug || `app_${appId || job.app_id || 'x'}`).toLowerCase();
+    const name = raw.replace(/[^a-z0-9_]/g,'_').replace(/_{2,}/g,'_');
+    const safe = /^[a-z_]/.test(name) ? name : `p_${name}`;
+    await executeCommand(`flutter create . --project-name ${safe}`, tempBuildDir);
+  } catch (e) {
     await executeCommand('flutter create .', tempBuildDir);
+  }
 
     if (codeSource.files && typeof codeSource.files === 'object') {
       console.log(`[queue:${job.job_id}] inject files`);

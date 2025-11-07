@@ -8,6 +8,19 @@ const crypto = require('crypto');
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
+// Lightweight CORS to allow direct access from different origins (e.g., 9090 -> 9091)
+app.use((req, res, next) => {
+  try {
+    const origin = req.headers.origin || '*';
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary', 'Origin');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Requested-With');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    if (req.method === 'OPTIONS') { return res.sendStatus(204); }
+  } catch (_) { /* ignore */ }
+  next();
+});
 
 const PORT = 9091; // Rodando em uma porta diferente da sua API principal
 
@@ -22,6 +35,20 @@ const PREVIEW_ROOT = path.join(BUILD_WORKSPACE, 'preview');
 
 // Minimal default entrypoint to avoid empty main.dart builds
 const DEFAULT_MAIN_DART = "import 'package:flutter/material.dart';\nvoid main()=>runApp(const MaterialApp(home: Scaffold(body: Center(child: Text('Hello')))));\n";
+
+// Ensure Flutter Web toolchain is ready (run once, best-effort)
+let __flutterReady = false;
+async function ensureFlutterWebReady() {
+  if (__flutterReady) return;
+  try {
+    await executeCommand('flutter --version', process.cwd());
+    await executeCommand('flutter config --enable-web', process.cwd());
+    await executeCommand('flutter precache --web', process.cwd());
+  } catch (e) {
+    console.warn('[worker] Flutter preflight warning:', e && e.message ? e.message : String(e));
+  }
+  __flutterReady = true;
+}
 
 /**
  * Endpoint para iniciar o processo de build de um app Flutter.
@@ -43,12 +70,23 @@ app.post('/build/:appId', (req, res) => {
     runBuildProcess(appId, slug, { dart_code, files });
 });
 
+// Valid Dart package name helper (lowercase, digits, underscores; must start with letter or underscore)
+function toDartPackageName(input, fallbackPrefix = 'p') {
+    try {
+        let s = String(input || '').toLowerCase();
+        s = s.replace(/[^a-z0-9_]/g, '_');
+        s = s.replace(/_{2,}/g, '_');
+        if (!/^[a-z_]/.test(s) || s.length === 0) s = `${fallbackPrefix}_${s}`;
+        return s;
+    } catch(_) { return `${fallbackPrefix}_app`; }
+}
+
 /**
  * Função principal que orquestra o processo de build.
  */
 async function runBuildProcess(appId, slug, codeSource) {
+    await ensureFlutterWebReady();
     const tempBuildDir = path.join(BUILD_WORKSPACE, slug);
-    const finalAppDir = path.join(PUBLIC_APPS_DIR, slug);
 
     console.log(`[${slug}] Iniciando build...`);
     try {
@@ -63,7 +101,8 @@ async function runBuildProcess(appId, slug, codeSource) {
     try {
         // 1. Preparar o ambiente de build
         await fs.ensureDir(tempBuildDir);
-        await executeCommand('flutter create .', tempBuildDir);
+        const projectName = toDartPackageName(slug || `app_${appId}`);
+        await executeCommand(`flutter create . --project-name ${projectName}`, tempBuildDir);
         
         // 2. Injetar o código do usuário (lógica nova)
         if (codeSource.files && typeof codeSource.files === 'object') {
@@ -190,7 +229,7 @@ dependencies:
         await fs.copy(sourceArtifacts, destArtifacts);
         // Build stamp to confirm update times regardless of FS timestamp quirks
         try {
-            const stamp = { app_id: appId, slug, completed_at: new Date().toISOString(), worker_pid: process.pid };
+        const stamp = { app_id: appId, slug, completed_at: new Date().toISOString(), worker_pid: process.pid };
             await fs.writeFile(path.join(destArtifacts, 'workz-build.json'), JSON.stringify(stamp, null, 2));
         } catch(_) {}
         console.log(`[${slug}] Artefatos copiados para ${destArtifacts}.`);
@@ -268,14 +307,16 @@ async function ensurePubspecDeps(projectDir, slug) {
  * Constrói uma pré-visualização rápida em modo debug e serve em /preview/<token>/
  */
 async function createPreview(slug, codeSource) {
+    await ensureFlutterWebReady();
     const token = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
     const previewDir = path.join(PREVIEW_ROOT, token);
     const tempBuildDir = path.join(BUILD_WORKSPACE, `preview-src-${token}`);
     await fs.ensureDir(tempBuildDir);
 
     try {
-        // Scaffold + inject
-        await executeCommand('flutter create .', tempBuildDir);
+        // Scaffold + inject (use valid package name)
+        const projectName = toDartPackageName(`preview_src_${token}`);
+        await executeCommand(`flutter create . --project-name ${projectName}`, tempBuildDir);
 
         if (codeSource.files && typeof codeSource.files === 'object') {
             const provided = Object.keys(codeSource.files);

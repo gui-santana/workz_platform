@@ -17,6 +17,5 @@ ENV WORKER_SECRET=seu-segredo-super-secreto
 
 EXPOSE 9091
 
-# Default command runs the queue poller
-CMD ["node","build-worker/queue-poller.js"]
-
+# Default command starts the HTTP server (preview endpoints) and also the queue poller inside it
+CMD ["node","build-worker/index.js"]

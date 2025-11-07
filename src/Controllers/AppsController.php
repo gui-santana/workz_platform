@@ -293,15 +293,12 @@ class AppsController
         $storageType = $app['storage_type'] ?? 'database';
         
         if ($appType === 'flutter') {
-            // Canonical artifact path preferred
+            // Canonical artifact path only (no slug fallback)
             $canonicalPath = "/apps/flutter/{$app['id']}/web/index.html";
             $canonicalFull = dirname(__DIR__, 2) . '/public' . $canonicalPath;
 
-            // Legacy slug-based path (older builds)
-            $legacyPath = "/apps/{$slug}/build/web/index.html";
-            $legacyFull = dirname(__DIR__, 2) . '/public' . $legacyPath;
-
-            $chosenFull = file_exists($canonicalFull) ? $canonicalFull : (file_exists($legacyFull) ? $legacyFull : null);
+            // No legacy slug-based path fallback
+            $chosenFull = file_exists($canonicalFull) ? $canonicalFull : null;
             if ($chosenFull) {
                 header('Content-Type: text/html; charset=utf-8');
                 echo file_get_contents($chosenFull);
@@ -356,7 +353,7 @@ class AppsController
             '{{APP_SCOPES}}' => htmlspecialchars($appScopes),
             '{{TARGET_PLATFORM}}' => 'web',
             '{{EXECUTION_MODE}}' => $storageType === 'filesystem' ? 'artifact' : 'direct',
-            '{{FLUTTER_WEB_SCRIPTS}}' => $appType === 'flutter' ? $this->generateFlutterWebScripts($slug) : '',
+            '{{FLUTTER_WEB_SCRIPTS}}' => $appType === 'flutter' ? $this->generateFlutterWebScripts((int)$app['id']) : '',
             '{{APP_CONTENT}}' => $this->generateAppContent($jsCode, $appType, $storageType)
         ];
 
@@ -370,7 +367,7 @@ class AppsController
     /**
      * Gera scripts necessários para Flutter Web
      */
-    private function generateFlutterWebScripts(string $slug): string
+    private function generateFlutterWebScripts(int $appId): string
     {
         return <<<HTML
     <script>
@@ -388,7 +385,7 @@ class AppsController
             });
         });
     </script>
-    <script src="/apps/{$slug}/build/web/flutter.js" defer></script>
+    <script src="/apps/flutter/{$appId}/web/flutter.js" defer></script>
 HTML;
     }
 
@@ -664,12 +661,8 @@ HTML;
                         $build['store_url'] = null;
                         if ($build['status'] === 'success') {
                             if ($build['platform'] === 'web') {
-                                // Prefer recorded file_path; fallback to canonical paths
+                                // Prefer recorded file_path; fallback only to canonical ID path
                                 $path = $build['file_path'] ?: "/apps/flutter/{$appId}/web/";
-                                if (!$build['file_path']) {
-                                    $slugPath = "/apps/{$app['slug']}/build/web/"; // legacy
-                                    $path = $path ?: $slugPath;
-                                }
                                 $build['download_url'] = $path;
                             } else {
                                 $build['download_url'] = "/api/apps/{$appId}/artifacts/{$build['platform']}";

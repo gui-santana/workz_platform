@@ -20,4 +20,6 @@ return function(Router $router) {
     
     // Storage management endpoints (Genéricos)
     $router->add('GET', '/api/apps/storage/stats', [UniversalAppController::class, 'getStorageStats'], [AuthMiddleware::class, 'handle']);
+
+    $router->add('GET', '/api/apps/(\d+)/build-history', [UniversalAppController::class, 'getBuildHistory'], [AuthMiddleware::class, 'handle']);
 };
