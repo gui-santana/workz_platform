@@ -20268,30 +20268,30 @@ n[r]=q}return n},
 aaK(a,b){var s=A.Q(a,b)
 B.b.pG(s,$.a90())
 return s},
-apt(a1){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d,c,b=t.t,a=A.d([0,1,2,3,4,5,6,7,8],b),a0=A.d([0,1,2,3,4,5,6,7,8],b)
+apt(a0){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d,c=t.t,b=A.d([0,1,2,3,4,5,6,7,8],c),a=A.d([0,1,2,3,4,5,6,7,8],c)
 for(s=t.S,r=0;r<3;++r){q=r*3
 p=q+1
 o=q+2
-n=A.Q(A.d([q,p,o],b),s)
+n=A.Q(A.d([q,p,o],c),s)
 m=$.a90()
+B.b.pG(n,m)
+b[q]=n[0]
+b[p]=n[1]
+b[o]=n[2]
+n=A.Q(A.d([q,p,o],c),s)
 B.b.pG(n,m)
 a[q]=n[0]
 a[p]=n[1]
-a[o]=n[2]
-n=A.Q(A.d([q,p,o],b),s)
-B.b.pG(n,m)
-a0[q]=n[0]
-a0[p]=n[1]
-a0[o]=n[2]}l=A.aaK(A.d([0,1,2],b),s)
-k=A.aaK(A.d([0,1,2],b),s)
-j=A.d([],b)
+a[o]=n[2]}l=A.aaK(A.d([0,1,2],c),s)
+k=A.aaK(A.d([0,1,2],c),s)
+j=A.d([],c)
 for(q=l.length,i=0;i<l.length;l.length===q||(0,A.z)(l),++i){p=l[i]*3
-B.b.K(j,A.d([a[p],a[p+1],a[p+2]],b))}h=A.d([],b)
+B.b.K(j,A.d([b[p],b[p+1],b[p+2]],c))}h=A.d([],c)
 for(q=k.length,i=0;i<k.length;k.length===q||(0,A.z)(k),++i){p=k[i]*3
-B.b.K(h,A.d([a0[p],a0[p+1],a0[p+2]],b))}g=A.aaK(A.d([1,2,3,4,5,6,7,8,9],b),s)
+B.b.K(h,A.d([a[p],a[p+1],a[p+2]],c))}g=A.aaK(A.d([1,2,3,4,5,6,7,8,9],c),s)
 f=J.BX(9,t.Cm)
-for(e=0;e<9;++e)f[e]=A.b4(9,0,!1,s)
-for(d=0;d<9;++d)for(c=0;c<9;++c)f[d][c]=g[a1[j[d]][h[c]]-1]
+for(i=0;i<9;++i)f[i]=A.b4(9,0,!1,s)
+for(e=0;e<9;++e)for(d=0;d<9;++d)f[e][d]=g[a0[j[e]][h[d]]-1]
 return f},
 aps(a,b){var s,r,q,p,o,n,m,l,k=A.d([],t.t)
 for(s=0;s<9;++s)for(r=s*9,q=0;q<9;++q)k.push(r+q)

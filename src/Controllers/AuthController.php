@@ -43,6 +43,9 @@ class AuthController
     public function redirectToMicrosoft(): void
     {
         session_start();
+        // Preserve return URL (where to go after OAuth)
+        $returnTo = isset($_GET['return_to']) && is_string($_GET['return_to']) ? $_GET['return_to'] : null;
+        if ($returnTo) { $_SESSION['oauth_return_to'] = $returnTo; }
         $authUrl = $this->microsoftProvider->getAuthorizationUrl();
         $_SESSION['oauth2state'] = $this->microsoftProvider->getState();
         header('Location: ' . $authUrl);
@@ -135,7 +138,8 @@ class AuthController
     public function redirectToGoogle(): void
     {        
         session_start();
-
+        $returnTo = isset($_GET['return_to']) && is_string($_GET['return_to']) ? $_GET['return_to'] : null;
+        if ($returnTo) { $_SESSION['oauth_return_to'] = $returnTo; }
         $authUrl = $this->googleProvider->getAuthorizationUrl();
         $_SESSION['oauth2state'] = $this->googleProvider->getState();
         
@@ -270,9 +274,30 @@ class AuthController
         $isSocialLogin = ($type === 'social' && ($user['provider'] === 'google' || $user['provider'] === 'microsoft'));
 
         if ($isSocialLogin) {
-            // LÓGICA PARA LOGIN SOCIAL            
+            // LÓGICA PARA LOGIN SOCIAL: redirecionar para a origem do fluxo
+            if (session_status() !== PHP_SESSION_ACTIVE) { @session_start(); }
+            $returnTo = $_SESSION['oauth_return_to'] ?? null;
+            unset($_SESSION['oauth_return_to']);
+
+            // Fallback seguro
             $frontendUrl = 'http://localhost:9090';
-            header('Location: ' . $frontendUrl . '?token=' . $jwt);
+
+            // Sanitiza e valida return_to para evitar open redirect
+            if (is_string($returnTo)) {
+                $parsed = parse_url($returnTo);
+                $host = $parsed['host'] ?? '';
+                $scheme = $parsed['scheme'] ?? 'http';
+                if (in_array($scheme, ['http','https'], true) && ($host === 'localhost' || preg_match('/^[a-z0-9-]+\.localhost$/i', $host))) {
+                    $frontendUrl = $returnTo;
+                }
+            }
+
+            // Seta cookie no domínio base (quando possível)
+            @setcookie('jwt_token', $jwt, [ 'expires' => time()+86400*30, 'path' => '/', 'domain' => '.localhost', 'secure' => false, 'httponly' => false, 'samesite' => 'Lax' ]);
+
+            // Anexa token na URL de retorno
+            $sep = (strpos($frontendUrl, '?') === false) ? '?' : '&';
+            header('Location: ' . $frontendUrl . $sep . 'token=' . urlencode($jwt));
             exit();
 
         } else {

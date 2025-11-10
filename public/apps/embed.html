@@ -173,18 +173,19 @@
   <script src="/js/core/app-runner.js"></script>
 
   <!-- App configuration and metadata -->
-  <script>
-    window.WorkzAppConfig = {
-      id: parseInt('{{APP_ID}}') || 0,
-      name: '{{APP_NAME}}' || 'Workz App',
-      slug: '{{APP_SLUG}}' || 'workz-app',
-      type: '{{APP_TYPE}}' || 'javascript',
-      storageType: '{{STORAGE_TYPE}}' || 'database',
-      version: '{{APP_VERSION}}' || '1.0.0',
-      theme: {
-        primaryColor: '{{APP_COLOR}}' || '#007bff',
-        icon: '{{APP_ICON}}' || '/images/default-app-icon.png'
-      },
+    <script>
+      window.WorkzAppConfig = {
+        id: parseInt('{{APP_ID}}') || 0,
+        name: '{{APP_NAME}}' || 'Workz App',
+        slug: '{{APP_SLUG}}' || 'workz-app',
+        type: '{{APP_TYPE}}' || 'javascript',
+        storageType: '{{STORAGE_TYPE}}' || 'database',
+        version: '{{APP_VERSION}}' || '1.0.0',
+        requiresLogin: '{{REQUIRES_LOGIN}}',
+        theme: {
+          primaryColor: '{{APP_COLOR}}' || '#007bff',
+          icon: '{{APP_ICON}}' || '/images/default-app-icon.png'
+        },
       scopes: (function () {
         try {
           return JSON.parse('{{APP_SCOPES}}' || '[]');
@@ -462,10 +463,18 @@
     function updateAppAccess(appId) {
       if (!appId || !window.WorkzSDK) return;
 
+      // Skip for public apps that don't require login
+      try {
+        const cfg = window.WorkzAppConfig || {};
+        const needsLogin = !!cfg.requiresLogin;
+        const hasToken = !!(window.WorkzSDK.auth && window.WorkzSDK.auth.getToken && window.WorkzSDK.auth.getToken());
+        if (!needsLogin || !hasToken) return;
+      } catch (_) {}
+
       // Use WorkzSDK to make authenticated request
       window.WorkzSDK.api.post(`/performance/apps/${appId}/access`, {})
         .catch(error => {
-          console.warn('Failed to update app access time:', error);
+          // Silencia erros de telemetria
         });
     }
 

@@ -105,7 +105,7 @@ $router->add('POST', '/api/performance/apps/(\d+)/access', [PerformanceControlle
 // DESPACHO DA REQUISIÇÃO
 // ==================================================
 
-$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$uri = $_SERVER['WORKZ_REQUEST_URI'] ?? parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
 
 $router->dispatch($uri, $method);

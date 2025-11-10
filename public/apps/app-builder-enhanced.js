@@ -957,12 +957,21 @@ window.StoreApp = {
                 <div class="row">
                     <div class="col-md-6">
                         <div class="mb-3">
-                            <label for="access-level" class="form-label">Nível de Acesso *</label>
-                            <select class="form-select" id="access-level" required>
-                                <option value="1">Público - Qualquer usuário pode usar</option>
-                                <option value="2">Instalação - Requer instalação/assinatura</option>
-                                <option value="3">Privado - Apenas usuários específicos</option>
+                            <label for="access-level" class="form-label">Nível de Acesso *</label>                            
+                            <select class="form-select" id="access-level" required aria-describedby="access-level-help">
+                                <option value="0">Toda a Internet - Acessível por qualquer pessoa, sem login.</option>
+                                <option value="1">Usuários Logados - Qualquer usuário autenticado na plataforma pode usar.</option>
+                                <option value="2">Restrito (Instalação) - Requer que o usuário instale ou assine o app.</option>
+                                <option value="3">Privado - Apenas para usuários ou empresas com permissão explícita.</option>
                             </select>
+                            <div id="access-level-help" class="form-text">
+                                <ul class="list-unstyled mb-0 small mt-2">
+                                    <li><i class="fas fa-globe text-info"></i> <strong>Toda a Internet:</strong> Ideal para apps que não precisam de dados do usuário (landing pages, ferramentas abertas).</li>
+                                    <li><i class="fas fa-users text-primary"></i> <strong>Usuários Logados:</strong> Visível para todos os usuários da plataforma Workz.</li>
+                                    <li><i class="fas fa-store text-warning"></i> <strong>Restrito (Instalação):</strong> O app aparece no catálogo, mas requer uma ação de "instalar".</li>
+                                    <li><i class="fas fa-lock text-secondary"></i> <strong>Privado:</strong> O app não é listado publicamente e o acesso é controlado manualmente.</li>
+                                </ul>
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label for="app-version" class="form-label">Versão *</label>

@@ -50,8 +50,20 @@ function newWindow(target, id, icon, title) {
   // Depois, se uma janela com esse "name" já existir, apenas traga para frente
   var existingWin = document.querySelector('.window[name="' + id + '"]');
   if (existingWin) {
-    try { existingWin.style.display = existingWin.classList.contains('resizable') ? 'grid' : 'block'; } catch (_) {}
-    try { existingWin.onmousedown && existingWin.onmousedown.call(existingWin); } catch (_) {}
+    try {
+      // If this window is already wrapped by the resizable parent, we must
+      // toggle display on the wrapper — not on the inner .window. Toggling
+      // the inner element to grid was breaking the visual style and blur.
+      const container = existingWin.closest('.parentResize') || existingWin;
+      const showAs = existingWin.classList.contains('resizable') ? 'grid' : 'block';
+      container.style.display = showAs;
+      // Clear possible transient animation styles from minimize/maximize
+      container.style.opacity = '';
+      container.style.transform = '';
+
+      // Bring to front using the element's handler
+      existingWin.onmousedown && existingWin.onmousedown.call(existingWin);
+    } catch (_) {}
     desktop();
     return;
   }
@@ -62,7 +74,16 @@ function newWindow(target, id, icon, title) {
   var windowEl = document.createElement("div");
   windowEl.setAttribute("name", id);
   windowEl.id = "window_" + (n + 1);
-  windowEl.classList.add("window", "bg-white/30", "backdrop-blur-xl", "rounded-lg");
+  windowEl.classList.add(
+    "window",
+    "bg-white/30",
+    "backdrop-blur-xl",
+    "rounded-lg",
+    // Make layout robust: header + fill content without manual height math
+    "flex",
+    "flex-col",
+    "overflow-hidden"
+  );
   document.getElementById("desktop").appendChild(windowEl);
   interactive(windowEl.id, {
     resize: true,
@@ -76,21 +97,8 @@ function newWindow(target, id, icon, title) {
   desktop();
   if (target !== null) {
     var root = document.createElement("div");
-    
-    // Após a chamada de interactive(), o dragPoint (cabeçalho) já deve existir.
-    // Precisamos obter sua altura real para ajustar a área de conteúdo.
-    let headerHeight = 0;
-    const dragPoint = windowEl.querySelector('.dragPoint');
-    if (dragPoint) {
-      // offsetHeight fornece a altura total do elemento, incluindo padding e borda.
-      headerHeight = dragPoint.offsetHeight + 10;
-    }
-
-    root.classList.add(
-      "w-full",            
-    );
-    // Ajusta a altura do conteúdo com base na altura real do cabeçalho
-    root.style.height = `calc(100% - ${headerHeight}px)`;
+    // Fill remaining height under the header without calc()
+    root.classList.add("w-full", "flex-1", "min-h-0", "overflow-hidden");
     windowEl.appendChild(root);
 
     var iframe = document.createElement("iframe");
@@ -99,8 +107,12 @@ function newWindow(target, id, icon, title) {
       "rounded-b-lg",
       "border-none",
       "w-full",
-      "h-full"
+      "h-full",
+      "block" // avoid baseline gap at the bottom
     );
+    // Also ensure no default margins/paddings create gaps
+    iframe.style.display = 'block';
+    iframe.style.margin = '0';
     root.appendChild(iframe);
   }
 }
@@ -251,7 +263,16 @@ function initialResizeCssProperties(element, parent) {
   parent.style.gridTemplateRows = "5px " + h + " 5px";
   parent.style.gridTemplateColumns = "4px " + w + " 4px";
   parent.style.backgroundColor = computed.getPropertyValue("background-color");
-  parent.style.backdropFilter = computed.getPropertyValue("backdrop-filter");
+  // Mirror backdrop filter from the window into the wrapper. In some flows,
+  // computedStyle may return empty/none; ensure a sensible fallback so the
+  // frosted-glass look is preserved consistently.
+  let backdrop = computed.getPropertyValue("backdrop-filter") || computed.getPropertyValue("-webkit-backdrop-filter");
+  if (!backdrop || backdrop === 'none') {
+    // Matches Tailwind's backdrop-blur-xl-ish intensity
+    backdrop = 'blur(20px)';
+  }
+  parent.style.backdropFilter = backdrop;
+  parent.style.webkitBackdropFilter = backdrop;
 
 
   element.style.top = "0px";

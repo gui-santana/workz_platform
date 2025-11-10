@@ -512,6 +512,173 @@ HTML;
     }
 
     /**
+     * GET /api/app/public/{slug}
+     * Entry point for standalone/direct access (apps.localhost). If no valid token is
+     * provided, renders a lightweight login page (public/apps/app-login.html).
+     * If authenticated (via ?token= or Authorization header), enforces access rules
+     * and renders the same output as run(), without requiring the middleware.
+     */
+    public function publicRun(string $slug): void
+    {
+        // 1) Fetch basic app metadata for branding/login screen
+        $app = $this->generalModel->search(
+            'workz_apps',
+            'apps',
+            ['id', 'tt', 'im', 'st', 'access_level', 'js_code', 'dart_code', 'app_type', 'color', 'storage_type', 'repository_path', 'scopes', 'version'],
+            ['slug' => $slug],
+            false
+        );
+
+        if (!$app || (int)$app['st'] !== 1) {
+            http_response_code(404);
+            echo 'Aplicativo não encontrado ou inativo.';
+            return;
+        }
+
+        // 2) Try to decode JWT if provided (optional auth)
+        $auth = null;
+        $token = null;
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? null;
+        if ($authHeader && preg_match('/Bearer\s(\S+)/i', $authHeader, $m)) {
+            $token = $m[1];
+        }
+        if (!$token && isset($_GET['token'])) {
+            $token = $_GET['token'];
+        }
+        if (!$token && isset($_COOKIE['jwt_token']) && is_string($_COOKIE['jwt_token'])) {
+            $token = $_COOKIE['jwt_token'];
+        }
+        if ($token) {
+            try {
+                $secretKey = $_ENV['JWT_SECRET'] ?? '';
+                if ($secretKey) {
+                    $auth = JWT::decode($token, new \Firebase\JWT\Key($secretKey, 'HS256'));
+                }
+            } catch (\Throwable $e) {
+                // Treat as not authenticated
+                $auth = null;
+            }
+        }
+
+        $userId = (int)($auth->sub ?? 0);
+
+        // 3) Define se o app exige login: access_level > 0 OU necessita do SDK
+        $accessLevel = (int)($app['access_level'] ?? 1);
+        $appType = $app['app_type'] ?? 'javascript';
+        $scopesArr = json_decode($app['scopes'] ?? '[]', true);
+        $requiresSdk = ($appType === 'flutter') ? false : (is_array($scopesArr) && count($scopesArr) > 0);
+        $requiresLogin = ($accessLevel > 0) || $requiresSdk;
+
+        if ($requiresLogin && $userId <= 0) {
+            $this->renderLoginPage($app, $slug); // Redireciona para login
+            return;
+        }
+
+        // 4) If authenticated and app requires entitlement, enforce it
+        if ($requiresLogin && $accessLevel > 1) {
+            $hasAccess = $this->generalModel->count(
+                'workz_apps',
+                'gapp',
+                ['us' => $userId, 'ap' => $app['id'], 'st' => 1]
+            ) > 0;
+            if (!$hasAccess) {
+                http_response_code(403);
+                echo 'Você não tem permissão para acessar este aplicativo.';
+                return;
+            }
+        }
+
+        // 5) Render according to app type (mirror logic from run())
+        $storageType = $app['storage_type'] ?? 'database';
+
+        if ($appType === 'flutter') {
+            $canonicalPath = "/apps/flutter/{$app['id']}/web/index.html";
+            $canonicalFull = dirname(__DIR__, 2) . '/public' . $canonicalPath;
+            $chosenFull = file_exists($canonicalFull) ? $canonicalFull : null;
+            if ($chosenFull) {
+                header('Content-Type: text/html; charset=utf-8');
+                echo file_get_contents($chosenFull);
+                return;
+            }
+            http_response_code(404);
+            echo 'App Flutter ainda não foi compilado. Aguarde o processo de build.';
+            return;
+        }
+
+        // JavaScript path: use embed.html template with the same placeholders
+        $templatePath = dirname(__DIR__, 2) . '/public/apps/embed.html';
+        if (!file_exists($templatePath)) {
+            http_response_code(500);
+            echo 'Erro interno: Template do aplicativo não encontrado.';
+            return;
+        }
+        $template = file_get_contents($templatePath);
+
+        $jsCode = $app['js_code'] ?? 'console.error("Nenhum código de aplicativo encontrado.");';
+        if ($storageType === 'filesystem' && !empty($app['repository_path'])) {
+            try {
+                $storageManager = new StorageManager();
+                $codeData = $storageManager->getAppCode($app['id']);
+                $jsCode = $codeData['js_code'] ?? $jsCode;
+            } catch (\Throwable $e) {
+                // fallback silently
+            }
+        }
+
+        $appColor = $app['color'] ?? '#3b82f6';
+        $appIcon = $app['im'] ?? '/images/no-image.jpg';
+        $appName = $app['tt'] ?? 'Workz App';
+        $appScopes = json_encode(is_array($scopesArr) ? $scopesArr : []);
+
+        $replacements = [
+            '{{APP_ID}}' => $app['id'],
+            '{{APP_NAME}}' => htmlspecialchars($appName),
+            '{{APP_SLUG}}' => htmlspecialchars($slug),
+            '{{APP_TYPE}}' => htmlspecialchars($appType),
+            '{{STORAGE_TYPE}}' => htmlspecialchars($storageType),
+            '{{APP_VERSION}}' => htmlspecialchars($app['version'] ?? '1.0.0'),
+            '{{APP_COLOR}}' => htmlspecialchars($appColor),
+            '{{APP_ICON}}' => htmlspecialchars($appIcon),
+            '{{APP_SCOPES}}' => htmlspecialchars($appScopes),
+            '{{TARGET_PLATFORM}}' => 'web',
+            '{{EXECUTION_MODE}}' => $storageType === 'filesystem' ? 'artifact' : 'direct',
+            '{{FLUTTER_WEB_SCRIPTS}}' => $appType === 'flutter' ? $this->generateFlutterWebScripts((int)$app['id']) : '',
+            '{{APP_CONTENT}}' => $this->generateAppContent($jsCode, $appType, $storageType),
+            '{{REQUIRES_LOGIN}}' => $requiresLogin ? 'true' : 'false'
+        ];
+
+        $output = str_replace(array_keys($replacements), array_values($replacements), $template);
+
+        header('Content-Type: text/html; charset=utf-8');
+        echo $output;
+    }
+
+    private function renderLoginPage(array $app, string $slug): void
+    {
+        $templatePath = dirname(__DIR__, 2) . '/public/apps/app-login.html';
+        if (!file_exists($templatePath)) {
+            http_response_code(500);
+            echo 'Erro interno: Template de login não encontrado.';
+            return;
+        }
+        $template = file_get_contents($templatePath);
+
+        $appColor = $app['color'] ?? '#3b82f6';
+        $appIcon = $app['im'] ?? '/images/no-image.jpg';
+        $appName = $app['tt'] ?? 'Workz App';
+
+        $replacements = [
+            '{{APP_NAME}}' => htmlspecialchars($appName),
+            '{{APP_COLOR}}' => htmlspecialchars($appColor),
+            '{{APP_ICON}}' => htmlspecialchars($appIcon),
+        ];
+
+        $output = str_replace(array_keys($replacements), array_values($replacements), $template);
+        header('Content-Type: text/html; charset=utf-8');
+        echo $output;
+    }
+
+    /**
      * POST /api/apps/{id}/build-status
      * Endpoint for the build worker to post status updates.
      * Should be protected by an internal secret/token.
@@ -692,7 +859,6 @@ HTML;
         } catch (\Throwable $e) {
             error_log("Erro AppsController::getBuildStatus: " . $e->getMessage());
             http_response_code(500);
-            echo json_encode(['success' => false, 'message' => 'Erro interno: ' . $e->getMessage()]);
         }
     }
 }

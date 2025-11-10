@@ -1,8 +1,6 @@
 {
-  "job_id": 52,
-  "app_id": 1034,
+  "app_id": "1034",
   "slug": "sudoku",
-  "completed_at": "2025-10-31T20:30:45.830Z",
-  "api_base": "http://nginx",
+  "completed_at": "2025-11-10T19:44:44.613Z",
   "worker_pid": 1
 }

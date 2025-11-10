@@ -60,8 +60,13 @@ class Router
                 $controllerMethod = $route['action'][1];
                 $controller = new $controllerClass();
 
-                // Passa o payload e os parâmetros da URL para o método do controller
-                $controller->$controllerMethod($payload, ...$params);
+                // Passa o payload apenas quando houver middleware; caso contrário,
+                // chama o método apenas com os parâmetros capturados.
+                if ($route['middleware']) {
+                    $controller->$controllerMethod($payload, ...$params);
+                } else {
+                    $controller->$controllerMethod(...$params);
+                }
                 return;
             }
         }

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - {{APP_NAME}}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+    <style>
+        :root {
+            --app-color: {{APP_COLOR}};
+        }
+        .bg-app-color { background-color: var(--app-color); }
+        .text-app-color { color: var(--app-color); }
+        .border-app-color { border-color: var(--app-color); }
+        .hover\:bg-app-color-dark:hover { filter: brightness(0.9); }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+
+    <div class="w-full max-w-md bg-white rounded-xl shadow-lg p-8 m-4">
+        <div class="flex flex-col items-center mb-6">
+            <img src="{{APP_ICON}}" alt="Ícone do App" class="w-20 h-20 rounded-2xl object-cover mb-4 shadow-md">
+            <h1 class="text-2xl font-bold text-gray-800">Acessar {{APP_NAME}}</h1>
+            <p class="text-gray-500 mt-1">Faça login para continuar</p>
+        </div>
+
+        <!-- Formulário de Login -->
+        <form id="login-form" class="space-y-4">
+            <div>
+                <label for="email" class="text-sm font-medium text-gray-700">Email</label>
+                <input type="email" id="email" name="email" required
+                    class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-app-color">
+            </div>
+            <div>
+                <label for="password" class="text-sm font-medium text-gray-700">Senha</label>
+                <input type="password" id="password" name="password" required
+                    class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-app-color">
+            </div>
+            <div id="error-message" class="text-red-500 text-sm hidden"></div>
+            <div>
+                <button type="submit"
+                    class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-app-color hover:bg-app-color-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-app-color transition-all">
+                    Entrar
+                </button>
+            </div>
+        </form>
+
+        <!-- Divisor -->
+        <div class="my-6 flex items-center">
+            <div class="flex-grow border-t border-gray-300"></div>
+            <span class="flex-shrink mx-4 text-gray-400 text-sm">ou</span>
+            <div class="flex-grow border-t border-gray-300"></div>
+        </div>
+
+        <!-- Login Social -->
+        <div class="space-y-3">
+            <a id="login-google" href="#" class="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+                <i class="fab fa-google mr-2"></i>
+                Continuar com Google
+            </a>
+            <a id="login-microsoft" href="#" class="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">
+                <i class="fab fa-microsoft mr-2"></i>
+                Continuar com Microsoft
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // Configura os links de login social para usar o host central (localhost)
+        (function setupSocialLinks() {
+            const params = new URLSearchParams();
+            try { params.set('return_to', window.location.href); } catch (_) {}
+            const base = `http://localhost:${window.location.port || 9090}`;
+
+            const g = document.getElementById('login-google');
+            const m = document.getElementById('login-microsoft');
+            if (g) g.href = `${base}/api/auth/google/redirect?${params.toString()}`;
+            if (m) m.href = `${base}/api/auth/microsoft/redirect?${params.toString()}`;
+        })();
+
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || !data.token) {
+                    throw new Error(data.error || 'Credenciais inválidas');
+                }
+
+                // Sucesso! Persiste o token e redireciona de volta ao app
+                try {
+                    // 1) Salva em cookie para o servidor poder ler (quando URL não tem ?token)
+                    // Tentar setar domínio compartilhado entre subdomínios de .localhost
+                    const expires = 60*60*24*30;
+                    document.cookie = `jwt_token=${data.token}; Domain=.localhost; Path=/; Max-Age=${expires}; SameSite=Lax`;
+                    // Fallback sem Domain caso o navegador rejeite
+                    if (!document.cookie.includes('jwt_token=')) {
+                        document.cookie = `jwt_token=${data.token}; Path=/; Max-Age=${expires}; SameSite=Lax`;
+                    }
+                } catch (_) {}
+
+                try {
+                    // 2) Também salva no localStorage para o SDK usar no cliente
+                    localStorage.setItem('jwt_token', data.token);
+                } catch (_) {}
+
+                // 3) Redireciona para a mesma URL com ?token (primeiro acesso)
+                const currentUrl = new URL(window.location.href);
+                currentUrl.searchParams.set('token', data.token);
+                window.location.href = currentUrl.toString();
+
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.classList.remove('hidden');
+            }
+        });
+    </script>
+
+</body>
+</html>
