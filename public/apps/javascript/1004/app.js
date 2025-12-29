@@ -1,5 +1,5 @@
 // JavaScript otimizado
-// Compilado em: 2025-11-07 20:11:02
+// Compilado em: 2025-11-14 14:31:45
 // Compilador Universal - Genérico
 
 console.log('🚀 App JavaScript iniciado (Compilador Universal)');

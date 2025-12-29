@@ -31,7 +31,7 @@ class UniversalAppController
             $app = $generalModel->search(
                 'workz_apps',
                 'apps',
-                ['id', 'tt', 'app_type', 'exclusive_to_entity_id'],
+                ['id', 'tt', 'app_type', 'publisher'],
                 ['id' => $appId],
                 false
             );
@@ -43,7 +43,7 @@ class UniversalAppController
             }
 
             // Verificar permissões
-            if (!BusinessPolicy::canManage($userId, $app['exclusive_to_entity_id'])) {
+            if (!BusinessPolicy::canManage($userId, $app['publisher'])) {
                 http_response_code(403);
                 echo json_encode(['success' => false, 'message' => 'Sem permissão']);
                 return;
@@ -110,7 +110,7 @@ class UniversalAppController
             $existingApp = $generalModel->search(
                 'workz_apps',
                 'apps',
-                ['id', 'exclusive_to_entity_id', 'tt', 'app_type', 'slug', 'build_status', 'im'],
+                ['id', 'publisher', 'tt', 'app_type', 'slug', 'build_status', 'im'],
                 ['id' => $appId],
                 false
             );
@@ -122,7 +122,7 @@ class UniversalAppController
             }
 
             // Verificar permissões
-            if (!BusinessPolicy::canManage($userId, $existingApp['exclusive_to_entity_id'])) {
+            if (!BusinessPolicy::canManage($userId, $existingApp['publisher'])) {
                 http_response_code(403);
                 echo json_encode(['success' => false, 'message' => 'Sem permissão']);
                 return;
@@ -183,6 +183,26 @@ class UniversalAppController
             if (array_key_exists('scopes', $input)) {
                 $scopes = is_array($input['scopes']) ? $input['scopes'] : [];
                 $updateData['scopes'] = json_encode(array_values($scopes));
+                // Se houver scopes, garantir que access_level >= 1
+                if (count($scopes) > 0) {
+                    if (!isset($input['access_level']) || (int)$input['access_level'] === 0) {
+                        $updateData['access_level'] = 1;
+                    }
+                }
+            }
+
+            // Provisionamento de app privado: criar vínculo empresa-app (gapp em nível de empresa)
+            if (isset($input['private_company_id'])) {
+                $targetCompany = (int)$input['private_company_id'];
+                $finalAccess = $updateData['access_level'] ?? (int)($existingApp['access_level'] ?? 0);
+                if ($finalAccess === 2 && $targetCompany > 0) {
+                    try {
+                        $exists = $generalModel->count('workz_apps', 'gapp', [ 'em' => $targetCompany, 'ap' => $appId, 'st' => 1 ]) > 0;
+                        if (!$exists) {
+                            $generalModel->insert('workz_apps', 'gapp', [ 'em' => $targetCompany, 'ap' => $appId, 'st' => 1 ]);
+                        }
+                    } catch (\Throwable $e) { /* ignore non-critical */ }
+                }
             }
 
             if (isset($input['im'])) {
@@ -194,18 +214,29 @@ class UniversalAppController
             if (isset($input['status'])) { $updateData['st'] = (int)$input['status']; }
 
             // Adicionado: Suporte para outros campos de configuração
-            if (isset($input['access_level'])) { $updateData['access_level'] = (int)$input['access_level']; }
-            if (isset($input['accessLevel'])) { $updateData['access_level'] = (int)$input['accessLevel']; }
+            $incomingAccess = null;
+            if (isset($input['access_level'])) { $incomingAccess = (int)$input['access_level']; $updateData['access_level'] = $incomingAccess; }
+            if (isset($input['accessLevel'])) { $incomingAccess = (int)$input['accessLevel']; $updateData['access_level'] = $incomingAccess; }
 
-            if (isset($input['entity_type'])) { $updateData['entity_type'] = (int)$input['entity_type']; }
-            if (isset($input['entityType'])) { $updateData['entity_type'] = (int)$input['entityType']; }
+            $incomingEntity = null;
+            if (isset($input['entity_type'])) { $incomingEntity = (int)$input['entity_type']; $updateData['entity_type'] = $incomingEntity; }
+            if (isset($input['entityType'])) { $incomingEntity = (int)$input['entityType']; $updateData['entity_type'] = $incomingEntity; }
+
+            // Regras de consistência:
+            // 1) Se access_level = 2 (Privado), força entity_type = 2 (Negócios)
+            if ($incomingAccess === 2) { $updateData['entity_type'] = 2; }
+            // 2) Se entity_type = 1 (Usuários) e o access_level final for 2, rebaixa para 1
+            if ($incomingEntity === 1) {
+                $finalAccess = $incomingAccess !== null ? $incomingAccess : (int)($existingApp['access_level'] ?? 0);
+                if ($finalAccess === 2) { $updateData['access_level'] = 1; }
+            }
 
             // Suporte: alteração de empresa (exclusive_to_entity_id)
             if (isset($input['company_id'])) {
                 $newCompanyId = (int)$input['company_id'];
-                if ($newCompanyId > 0 && $newCompanyId !== (int)($existingApp['exclusive_to_entity_id'] ?? 0)) {
+                if ($newCompanyId > 0 && $newCompanyId !== (int)($existingApp['publisher'] ?? 0)) {
                     if (BusinessPolicy::canManage($userId, $newCompanyId)) {
-                        $updateData['exclusive_to_entity_id'] = $newCompanyId;
+                        $updateData['publisher'] = $newCompanyId;
                     } else {
                         error_log("Usuário $userId tentou mover App $appId para empresa $newCompanyId sem permissão");
                     }
@@ -218,7 +249,7 @@ class UniversalAppController
                 if ($t === 'javascript' || $t === 'flutter') { $updateData['app_type'] = $t; }
             }
 
-            // Ícone: se veio em base64 (data URL) e é diferente do atual, apagar o anterior e salvar em /public/images/apps
+            // Ícone: se veio em base64 (data URL) e é diferente do atual, normaliza para 512x512 PNG e salva em /public/images/apps
             if (!empty($input['icon']) && is_string($input['icon'])) {
                 $iconIn = trim($input['icon']);
                 $currentIcon = $existingApp['im'] ?? null;
@@ -239,20 +270,47 @@ class UniversalAppController
                             throw new \Exception('Falha ao decodificar base64 do ícone');
                         }
 
-                        $mime = '';
-                        if (preg_match('#data:(image/[^;]+);base64#i', $meta, $m)) {
-                            $mime = strtolower($m[1]);
+                        $uploadDir = dirname(__DIR__, 2) . '/public/images/apps/';
+                        if (!is_dir($uploadDir)) { @mkdir($uploadDir, 0777, true); }
+
+                        $filename = "app_{$appId}_" . uniqid() . '.png';
+                        $absNew = $uploadDir . $filename;
+
+                        // Tenta normalizar via GD para 512x512 PNG
+                        $saved = false;
+                        if (function_exists('imagecreatefromstring')) {
+                            $src = @imagecreatefromstring($decoded);
+                            if ($src !== false) {
+                                $w = imagesx($src); $h = imagesy($src);
+                                $side = min($w, $h);
+                                $srcX = (int)max(0, ($w - $side) / 2);
+                                $srcY = (int)max(0, ($h - $side) / 2);
+                                $crop = imagecreatetruecolor($side, $side);
+                                // Preserva transparência
+                                imagealphablending($crop, false);
+                                imagesavealpha($crop, true);
+                                $transparent = imagecolorallocatealpha($crop, 0, 0, 0, 127);
+                                imagefilledrectangle($crop, 0, 0, $side, $side, $transparent);
+                                imagecopyresampled($crop, $src, 0, 0, $srcX, $srcY, $side, $side, $side, $side);
+
+                                $dst = imagecreatetruecolor(512, 512);
+                                imagealphablending($dst, false);
+                                imagesavealpha($dst, true);
+                                $transparent2 = imagecolorallocatealpha($dst, 0, 0, 0, 127);
+                                imagefilledrectangle($dst, 0, 0, 512, 512, $transparent2);
+                                imagecopyresampled($dst, $crop, 0, 0, 0, 0, 512, 512, $side, $side);
+
+                                $saved = @imagepng($dst, $absNew, 6);
+                                @imagedestroy($dst);
+                                @imagedestroy($crop);
+                                @imagedestroy($src);
+                            }
                         }
 
-                        $ext = $mime ? str_replace('image/', '', $mime) : 'png';
-                        if ($ext === 'jpeg') { $ext = 'jpg'; }
-
-                        $uploadDir = dirname(__DIR__, 2) . '/public/images/apps/';
-                        if (!is_dir($uploadDir)) { mkdir($uploadDir, 0777, true); }
-
-                        $filename = "app_{$appId}_" . uniqid() . '.' . $ext;
-                        $absNew = $uploadDir . $filename;
-                        file_put_contents($absNew, $decoded);
+                        if (!$saved) {
+                            // Fallback: salva como veio (pode não estar normalizado)
+                            @file_put_contents($absNew, $decoded);
+                        }
 
                         $updateData['im'] = '/images/apps/' . $filename;
                     } catch (\Throwable $e) {
@@ -270,6 +328,18 @@ class UniversalAppController
 
             if (isset($input['dart_code'])) { $updateData['dart_code'] = $input['dart_code']; $hasCodeChanges = true; }
             if (isset($input['dartCode'])) { $updateData['dart_code'] = $input['dartCode']; $hasCodeChanges = true; }
+
+            // Layout metadata (aspect ratio & orientation)
+            if (array_key_exists('aspect_ratio', $input)) {
+                $ar = trim((string)$input['aspect_ratio']);
+                $updateData['aspect_ratio'] = $ar !== '' ? $ar : '4:3';
+            }
+            if (array_key_exists('supports_portrait', $input)) {
+                $updateData['supports_portrait'] = (int)((bool)$input['supports_portrait']);
+            }
+            if (array_key_exists('supports_landscape', $input)) {
+                $updateData['supports_landscape'] = (int)((bool)$input['supports_landscape']);
+            }
 
             // Atualizar no banco (genérico)
             $dbUpdated = false;
@@ -308,50 +378,17 @@ class UniversalAppController
                 );
 
                 if ($updatedApp) {
-                    // Se for Flutter, delegar para o Build Worker
+                    // Para apps Flutter, o fluxo de build agora é exclusivamente via fila,
+                    // acionado pelo endpoint /api/apps/{id}/build (AppManagementController::triggerBuild),
+                    // usando as plataformas enviadas pelo cliente (App Studio).
                     if (($updatedApp['app_type'] ?? 'javascript') === 'flutter') {
-                        error_log("App Flutter detectado. Acionando Build Worker para App ID: $appId");
-                        // Use Docker network host for the worker service (container name: worker)
-                        $workerUrl = 'http://worker:9091/build/' . $appId;
-                        
-                        // Envia código para o worker priorizando o que veio do formulário (textarea) e os arquivos normalizados
-                        $payloadData = [
-                            'slug' => $input['slug'] ?? ($existingApp['slug'] ?? ($updatedApp['slug'] ?? null))
-                        ];
-                        if (!isset($payloadData['dart_code'])) {
-                            // Fallback para o que está no banco, caso não haja textarea
-                            $payloadData['dart_code'] = $updatedApp['dart_code'] ?? '';
-                        }
-
-                        $payload = json_encode($payloadData);
-                        $ch = curl_init($workerUrl);
-                        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload, CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_TIMEOUT => 5]);
-                        $workerResponse = curl_exec($ch);
-                        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                        $curlError = curl_error($ch);
-                        curl_close($ch);
-
-                        if ($curlError) {
-                            error_log("cURL Error ao contatar Build Worker: " . $curlError);
-                        }
-
-                        if ($httpCode === 202) {
-                            $appCompiled = true; // Sinaliza que o build foi acionado
-                            $buildStatus = 'building';
-                            try { $generalModel->update('workz_apps', 'apps', ['build_status' => $buildStatus], ['id' => $appId]); } catch (\Throwable $e) { /* ignore */ }
-                            error_log("App Flutter $appId enviado para o Build Worker");
-                        } else {
-                            $buildStatus = 'pending';
-                            // Fallback: enfileira job na build_queue para o worker via polling
+                        error_log("App Flutter detectado (ID: $appId). Build NÃO será acionado diretamente em UniversalAppController::updateApp; fluxo agora via /api/apps/{$appId}/build.");
+                        // Mantém build_status coerente quando houver alterações de código, mas sem disparar build direto.
+                        if ($hasCodeChanges) {
+                            $buildStatus = $existingApp['build_status'] ?? 'pending';
                             try {
-                                $generalModel->insert('workz_apps', 'build_queue', [
-                                    'app_id' => $appId,
-                                    'build_type' => 'flutter_web',
-                                    'status' => 'pending',
-                                    'created_at' => date('Y-m-d H:i:s')
-                                ]);
-                            } catch (\Throwable $e) { /* ignore enqueue failure */ }
-                            error_log("Erro ao contatar Build Worker para o app $appId. HTTP Code: $httpCode. Response: " . ($workerResponse ?: 'N/A'));
+                                $generalModel->update('workz_apps', 'apps', ['build_status' => $buildStatus], ['id' => $appId]);
+                            } catch (\Throwable $e) { /* ignore */ }
                         }
                     } else {
                         error_log("App JavaScript detectado (ou não Flutter). Usando Runtime Universal para App ID: $appId");
@@ -392,10 +429,15 @@ class UniversalAppController
             $returnApp = $generalModel->search(
                 'workz_apps',
                 'apps',
-                ['id', 'tt', 'slug', 'ds', 'im', 'color', 'vl', 'access_level', 'entity_type', 'version', 'app_type', 'scopes', 'build_status', 'exclusive_to_entity_id'],
+                ['id', 'tt', 'slug', 'ds', 'im', 'color', 'vl', 'access_level', 'entity_type', 'version', 'app_type', 'scopes', 'build_status', 'publisher'],
                 ['id' => $appId],
                 false
             ) ?: ['id' => $appId, 'app_type' => ($existingApp['app_type'] ?? 'javascript'), 'build_status' => $buildStatus];
+
+            // Compat: expõe preço também como "price" para consumo do frontend
+            if (isset($returnApp['vl'])) {
+                $returnApp['price'] = (float)$returnApp['vl'];
+            }
 
             echo json_encode([
                 'success' => true,
@@ -445,12 +487,29 @@ class UniversalAppController
             if (!empty($userCompanies)) {
                 $companyIds = array_column($userCompanies, 'em');
 
-                // Buscar apps (genérico - qualquer tipo)
+                // Buscar apps onde a empresa é a publisher (dona do app)
                 $apps = $generalModel->search(
                     'workz_apps',
                     'apps',
-                    ['id', 'tt', 'slug', 'ds', 'im', 'color', 'vl', 'st', 'version', 'publisher', 'created_at', 'exclusive_to_entity_id', 'app_type', 'storage_type', 'js_code', 'dart_code'],
-                    ['exclusive_to_entity_id' => $companyIds],
+                    [
+                        'id',
+                        'tt',
+                        'slug',
+                        'ds',
+                        'im',
+                        'color',
+                        'vl',
+                        'st',
+                        'version',
+                        'publisher',
+                        'created_at',
+                        'publisher',
+                        'app_type',
+                        'storage_type',
+                        'js_code',
+                        'dart_code'
+                    ],
+                    ['publisher' => $companyIds],
                     true,
                     50,
                     0,
@@ -460,6 +519,8 @@ class UniversalAppController
                 if (!empty($apps)) {
                     // Adicionar informações de build para cada app (genérico)
                     foreach ($apps as &$app) {
+                        // Compat: duplicar vl como price para o App Builder
+                        $app['price'] = isset($app['vl']) ? (float)$app['vl'] : 0;
                         $buildInfo = UniversalRuntime::getBuildInfo($app['id'], $app['app_type'] ?? 'javascript');
                         $app['is_compiled'] = $buildInfo['is_compiled'];
                         $app['url'] = $buildInfo['url'];
@@ -501,18 +562,41 @@ class UniversalAppController
             $app = $generalModel->search(
                 'workz_apps',
                 'apps',
-                ['id', 'tt', 'slug', 'ds', 'im', 'color', 'vl', 'access_level', 'entity_type', 'version', 'js_code', 'dart_code', 'app_type', 'scopes', 'exclusive_to_entity_id', 'build_status'],
+                [
+                    'id',
+                    'tt',
+                    'slug',
+                    'ds',
+                    'im',
+                    'color',
+                    'vl',
+                    'access_level',
+                    'entity_type',
+                    'version',
+                    'js_code',
+                    'dart_code',
+                    'app_type',
+                    'scopes',
+                    'publisher',
+                    'build_status',
+                    'aspect_ratio',
+                    'supports_portrait',
+                    'supports_landscape'
+                ],
                 ['id' => $appId],
                 false
             );
 
             if ($app) {
                 // Verificar permissões
-                if (!BusinessPolicy::canManage($userId, $app['exclusive_to_entity_id'])) {
+                if (!BusinessPolicy::canManage($userId, $app['publisher'])) {
                     http_response_code(403);
                     echo json_encode(['success' => false, 'message' => 'Sem permissão']);
                     return;
                 }
+
+                // Compatibilidade: expõe preço também como "price" para o App Builder
+                $app['price'] = isset($app['vl']) ? (float)$app['vl'] : 0;
 
                 // Adicionar informações extras (genérico)
                 $app['token'] = 'app_' . $appId . '_' . md5($app['slug'] ?? '');
@@ -599,7 +683,7 @@ class UniversalAppController
             $app = $generalModel->search(
                 'workz_apps',
                 'apps',
-                ['id', 'tt', 'dart_code', 'js_code', 'app_type', 'exclusive_to_entity_id'],
+                ['id', 'tt', 'dart_code', 'js_code', 'app_type', 'publisher'],
                 ['id' => $appId],
                 false
             );
@@ -611,7 +695,7 @@ class UniversalAppController
             }
 
             // Verificar permissões
-            if (!BusinessPolicy::canManage($userId, $app['exclusive_to_entity_id'])) {
+            if (!BusinessPolicy::canManage($userId, $app['publisher'])) {
                 http_response_code(403);
                 echo json_encode(['success' => false, 'message' => 'Sem permissão']);
                 return;
@@ -670,7 +754,7 @@ class UniversalAppController
             $app = $generalModel->search(
                 'workz_apps',
                 'apps',
-                ['id', 'tt', 'dart_code', 'js_code', 'app_type', 'exclusive_to_entity_id'],
+                ['id', 'tt', 'dart_code', 'js_code', 'app_type', 'publisher'],
                 ['id' => $appId],
                 false
             );
@@ -682,7 +766,7 @@ class UniversalAppController
             }
 
             // Verificar permissões
-            if (!BusinessPolicy::canManage($userId, $app['exclusive_to_entity_id'])) {
+            if (!BusinessPolicy::canManage($userId, $app['publisher'])) {
                 http_response_code(403);
                 echo json_encode(['success' => false, 'message' => 'Sem permissão']);
                 return;
@@ -738,7 +822,7 @@ class UniversalAppController
             $app = $generalModel->search(
                 'workz_apps',
                 'apps',
-                ['id', 'tt', 'dart_code', 'js_code', 'app_type', 'exclusive_to_entity_id'],
+                ['id', 'tt', 'dart_code', 'js_code', 'app_type', 'publisher'],
                 ['id' => $appId],
                 false
             );
@@ -750,7 +834,7 @@ class UniversalAppController
             }
 
             // Verificar permissões
-            if (!BusinessPolicy::canManage($userId, $app['exclusive_to_entity_id'])) {
+            if (!BusinessPolicy::canManage($userId, $app['publisher'])) {
                 http_response_code(403);
                 echo json_encode(['success' => false, 'message' => 'Sem permissão']);
                 return;
@@ -809,7 +893,7 @@ class UniversalAppController
             $app = $generalModel->search(
                 'workz_apps',
                 'apps',
-                ['id', 'app_type', 'exclusive_to_entity_id'],
+                ['id', 'app_type', 'publisher'],
                 ['id' => $appId],
                 false
             );
@@ -821,7 +905,7 @@ class UniversalAppController
             }
 
             // 2. Verificar permissões
-            if (!BusinessPolicy::canManage($userId, $app['exclusive_to_entity_id'])) {
+            if (!BusinessPolicy::canManage($userId, $app['publisher'])) {
                 http_response_code(403);
                 echo json_encode(['success' => false, 'message' => 'Sem permissão']);
                 return;

@@ -43,6 +43,7 @@ const init = () => {
     const editor = document.getElementById('editor');
     const gridCanvas = document.getElementById('gridCanvas');
     const gctx = gridCanvas.getContext('2d');
+    if (gridCanvas) gridCanvas.style.zIndex = '5';
     const guideX = document.getElementById('guideX');
     const guideY = document.getElementById('guideY');
   
@@ -76,22 +77,45 @@ const init = () => {
     const outCanvas = document.getElementById('outCanvas');
     const octx = outCanvas.getContext('2d');
   
-  const btnEnviar = document.getElementById('btnEnviar');
+    const btnEnviar = document.getElementById('btnEnviar');
     const exportSettings = document.getElementById('exportSettings');
     const vidDur = document.getElementById('vidDur');
     const vidFPS = document.getElementById('vidFPS');
     const bgColorPicker = document.getElementById('bgColorPicker');
-    let bgSolidColor = '#ffffff';
-    try { bgSolidColor = localStorage.getItem('editor.bgColor') || '#ffffff'; } catch(_) {}
+    const DEFAULT_BG_COLOR = '#222222';
+    const GRID_LINE_COLOR = 'rgba(255,255,255,0.1)';
+    const STALE_DEFAULTS = ['#ffffff', '#787878']; // antigos padrões que deixam o fundo claro
+    let bgSolidColor = DEFAULT_BG_COLOR;
+    try {
+      const storedBg = (localStorage.getItem('editor.bgColor') || '').toLowerCase();
+      if (storedBg && !STALE_DEFAULTS.includes(storedBg)) {
+        bgSolidColor = storedBg;
+      } else {
+        localStorage.setItem('editor.bgColor', DEFAULT_BG_COLOR);
+      }
+    } catch(_) {}
+    const applyBgColor = (color)=>{
+      bgSolidColor = color || DEFAULT_BG_COLOR;
+      if (editor) {
+        editor.style.setProperty('background-color', bgSolidColor);
+        editor.style.setProperty('--editor-bg', bgSolidColor);
+      }
+      if (bgColorPicker && bgColorPicker.value !== bgSolidColor) {
+        bgColorPicker.value = bgSolidColor;
+      }
+      try { localStorage.setItem('editor.bgColor', bgSolidColor); } catch(_) {}
+    };
     if (bgColorPicker) {
-      try { if (!bgColorPicker.value) bgColorPicker.value = bgSolidColor; else bgSolidColor = bgColorPicker.value; } catch(_) {}
+      try { bgColorPicker.value = bgSolidColor; } catch(_) {}
       const onBgColor = (e)=>{
-        bgSolidColor = (e && e.target && e.target.value) ? e.target.value : '#ffffff';
-        try { localStorage.setItem('editor.bgColor', bgSolidColor); } catch(_) {}
-      };
+        const chosen = (e && e.target && e.target.value) ? e.target.value : DEFAULT_BG_COLOR;
+        applyBgColor(chosen);
+        console.log(chosen);
+      };      
       bgColorPicker.addEventListener('input', onBgColor);
       bgColorPicker.addEventListener('change', onBgColor);
     }
+    applyBgColor(bgSolidColor);
     
     // Listener para atualizar informações quando duração for alterada manualmente
     vidDur.addEventListener('input', updateVideoExportInfo);
@@ -132,11 +156,28 @@ const init = () => {
     // Inicializar estado do botão Enviar
     updateEnviarButton();
 
+    // ---------- ItemBar (accordion)
+    if (itemBar) {
+      itemBar.style.display = 'block'; // evitar inline display:none para animar
+      itemBar.classList.remove('is-open');
+    }
+    function openItemBar(){
+      if (!itemBar) return;
+      itemBar.style.display = 'block';
+      requestAnimationFrame(()=> itemBar.classList.add('is-open'));
+    }
+    function closeItemBar(){
+      if (!itemBar) return;
+      itemBar.classList.remove('is-open');
+    }
+
     // ---------- Editor Scaling
     function scaleEditor() {
       const { width } = editorViewport.getBoundingClientRect();
       currentScale = width / BASE_W;
       editor.style.setProperty('--editor-scale', currentScale);
+      editor.style.setProperty('background-color', bgSolidColor || DEFAULT_BG_COLOR);
+      editor.style.setProperty('border-radius', '50px');
       editorViewport.style.setProperty('--editor-scale', currentScale);
       // Reposicionar overlay ao escalar
       if (selected) positionHandlesFor(selected);
@@ -152,8 +193,8 @@ const init = () => {
     drawGrid();
     function drawGrid(){
       gctx.clearRect(0,0,gridCanvas.width, gridCanvas.height);
-      gctx.globalAlpha = 0.15; 
-      gctx.strokeStyle = '#999999';
+      gctx.globalAlpha = 1;
+      gctx.strokeStyle = GRID_LINE_COLOR;
       gctx.lineWidth = 1;
       
       // Desenhar linhas verticais
@@ -277,7 +318,7 @@ const init = () => {
       
       // Atualizar visual para desktop
       const icon = captureButton.querySelector('.capture-icon');
-      icon.className = 'fas fa-upload capture-icon';
+      //icon.className = 'fas fa-upload capture-icon';
       
       const hint = document.querySelector('.capture-hint');
       if (hint) {
@@ -315,7 +356,7 @@ const init = () => {
         
         // Atualizar visual
         const icon = captureButton.querySelector('.capture-icon');
-        icon.className = 'fas fa-camera capture-icon';
+        //icon.className = 'fas fa-camera capture-icon';
         
         captureButton.title = 'Clique para foto, segure para iniciar vídeo, clique novamente para parar';
         
@@ -427,7 +468,7 @@ const init = () => {
       
       // Alterar ícone para indicar modo de vídeo em potencial
       const icon = captureButton.querySelector('.capture-icon');
-      icon.className = 'fas fa-video capture-icon';
+      //icon.className = 'fas fa-video capture-icon';
       
       // Timer para detectar pressão longa
       pressTimer = setTimeout(() => {
@@ -460,7 +501,7 @@ const init = () => {
       
       // Restaurar ícone da câmera
       const icon = captureButton.querySelector('.capture-icon');
-      icon.className = 'fas fa-camera capture-icon';
+      //icon.className = 'fas fa-camera capture-icon';
       
       // Se não foi pressão longa, tirar foto
       if (!isLongPress && pressDuration < LONG_PRESS_DURATION) {
@@ -536,7 +577,7 @@ const init = () => {
       
       // Alterar ícone para indicar que pode reativar câmera
       const icon = captureButton.querySelector('.capture-icon');
-      icon.className = 'fas fa-camera capture-icon';
+      //icon.className = 'fas fa-camera capture-icon';
       
       // Atualizar tooltip
       captureButton.title = 'Clique para reativar câmera';
@@ -572,7 +613,7 @@ const init = () => {
       
       // Alterar ícone para indicar que pode reativar câmera
       const icon = captureButton.querySelector('.capture-icon');
-      icon.className = 'fas fa-camera capture-icon';
+      //icon.className = 'fas fa-camera capture-icon';
       
       // Atualizar tooltip
       captureButton.title = 'Clique para reativar câmera';
@@ -884,7 +925,7 @@ const init = () => {
         
         // Restaurar ícone da câmera
         const icon = captureButton.querySelector('.capture-icon');
-        icon.className = 'fas fa-camera capture-icon';
+        //icon.className = 'fas fa-camera capture-icon';
       } else {
       }
     }
@@ -981,10 +1022,11 @@ const init = () => {
   
     function createTextBox(text=''){
       const box = document.createElement('div');
+      const prop = editor.style.getPropertyValue('--editor-scale').trim();
       box.className = 'item draggable text-box';
       box.contentEditable = 'false';
       box.dataset.type='text';
-      box.dataset.fontSize='28';
+      box.dataset.fontSize='40';
       box.dataset.fontWeight='600';
       box.dataset.fontColor='#111827';
       box.dataset.align='left';         // left | center | right
@@ -995,12 +1037,12 @@ const init = () => {
       
       // Forçar posicionamento absoluto independente
       box.style.position = 'absolute';
-      box.style.left = '60px';
-      box.style.top = '60px';
       box.style.width = '360px';
+      box.style.minHeight = '90px';
+      box.style.left = ((gridCanvas.width / 2) - (parseFloat(box.style.width) / 2)) + 'px';
+      box.style.top = ((gridCanvas.height / 2) - (parseFloat(box.style.minHeight) / 2)) + 'px';      
       box.style.zIndex = getMaxZ() + 1;
-      
-      box.innerText = text || 'Digite seu texto';
+      box.innerText = text || '';
       applyTextStyle(box); applyTextBg(box);
       attachDrag(box);
       editor.appendChild(box); selectItem(box); startEditingText(box);
@@ -1262,11 +1304,11 @@ const init = () => {
         selected.classList.add('selected');
         ensureHandlesOverlay();
         positionHandlesFor(selected);
-        itemBar.style.display='';
+        openItemBar();
         const isText = selected.dataset.type==='text';
         textControls.style.display = isText ? 'flex' : 'none';
-        btnEditText.style.display = isText ? '' : 'none';
-        animControls.style.display = 'flex';
+        btnEditText.style.display = isText ? '' : 'none';        
+        //animControls.style.display = 'flex';
         // Definir o valor correto baseado no z-index atual
         const currentZ = +getComputedStyle(selected).zIndex || 0;
         const maxZ = getMaxZ();
@@ -1279,8 +1321,7 @@ const init = () => {
           bgTextColor.value = selected.dataset.bgColor || '#ffffff';
           bgNone.checked = selected.dataset.bgNone === 'true';
           // alinhar UI visual
-          setTextAlignButtons(selected.dataset.align||'left');
-          btnEditText.textContent = editingText === selected ? 'Concluir' : 'Editar';
+          setTextAlignButtons(selected.dataset.align||'left');          
         }
         animType.value = selected.dataset.anim || 'none';
         animDelay.value = selected.dataset.delay || '0';
@@ -1289,10 +1330,10 @@ const init = () => {
         // Atualizar botão Enviar quando animação mudar
         setTimeout(updateEnviarButton, 100);
       } else {
-        itemBar.style.display='none';
-        textControls.style.display = 'none';
-        btnEditText.style.display = 'none';
-        btnEditText.textContent = 'Editar';
+        closeItemBar();
+        //textControls.style.display = 'none';
+        //animControls.style.display = 'none';
+        //btnEditText.style.display = 'none';        
         hideHandlesOverlay();
       }
     }
@@ -1357,10 +1398,7 @@ const init = () => {
       el.contentEditable = 'true';
       el.style.cursor = 'text';
       el.focus({ preventScroll: true });
-      placeCaretAtEnd(el);
-      if (btnEditText) {
-        btnEditText.textContent = 'Concluir';
-      }
+      placeCaretAtEnd(el);      
     }
 
     function stopEditingText(){
@@ -1370,20 +1408,22 @@ const init = () => {
       if (document.activeElement === editingText) {
         editingText.blur();
       }
-      editingText = null;
-      if (btnEditText) {
-        btnEditText.textContent = 'Editar';
-      }
+      editingText = null;      
     }
 
     function placeCaretAtEnd(el){
+      if (!el || !el.isConnected) return;
       const selection = window.getSelection();
       if (!selection) return;
       const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
+      try {
+        range.selectNodeContents(el);
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      } catch (_) {
+        // Evita warnings quando o elemento foi removido do DOM antes do caret ser posicionado.
+      }
     }
 
     fontSize.addEventListener('input', ()=>{ if(selected?.dataset.type!=='text')return; selected.dataset.fontSize=fontSize.value; applyTextStyle(selected); });
@@ -1590,11 +1630,11 @@ const init = () => {
       const text = btnEnviar.querySelector('.enviar-text');
       
       if (contentType === 'video') {
-        icon.className = 'fas fa-video enviar-icon';
+        //icon.className = 'fas fa-video enviar-icon';
         text.textContent = 'Enviar Vídeo';
         exportSettings.classList.remove('hidden');
       } else {
-        icon.className = 'fas fa-image enviar-icon';
+        //icon.className = 'fas fa-image enviar-icon';
         text.textContent = 'Enviar Imagem';
         exportSettings.classList.add('hidden');
       }
@@ -1818,8 +1858,9 @@ const init = () => {
     async function exportVideoToBlob() {
       return new Promise(async (resolve, reject) => {
         try {
-          // FPS reduzido por padrão para tamanho menor, mas respeita o valor escolhido
-          const fps = Math.max(10, Math.min(24, Number(vidFPS.value)||20));
+          // FPS um pouco mais alto por padrão para reduzir travamentos na timeline
+          const userFps = Number(vidFPS.value);
+          const fps = Math.max(18, Math.min(30, Number.isFinite(userFps) ? userFps : 24));
           // Duração: respeita controle do usuário ou duração do vídeo de fundo (até 60s)
           let targetDur = Number(vidDur?.value);
           if (!Number.isFinite(targetDur) || targetDur <= 0) {
@@ -1831,10 +1872,12 @@ const init = () => {
       
           // Para vídeos de fundo, configurar reprodução
           let wasOriginallyMuted = null;
+          let originalVolume = null;
           if (bgEl && bgEl.tagName === 'VIDEO') {
             bgEl.currentTime = 0;
             bgEl.playbackRate = 1.0;
             wasOriginallyMuted = bgEl.muted;
+            originalVolume = bgEl.volume;
             bgEl.muted = false;
             bgEl.volume = 1.0;
             try { await bgEl.play(); } catch(_) {}
@@ -1854,28 +1897,43 @@ const init = () => {
           const canvasStream = (typeof recordCanvas.captureStream === 'function')
             ? recordCanvas.captureStream(fps)
             : recordCanvas.captureStream();
+          const canvasTrack = canvasStream.getVideoTracks()[0] || null;
+          if (canvasTrack?.applyConstraints) {
+            try { canvasTrack.applyConstraints({ frameRate: fps, width: rw, height: rh }); } catch (_) {}
+          }
           
-          // Criar stream combinado com áudio se houver vídeo de fundo
-          let finalStream = canvasStream;
-          
-          if (bgEl && bgEl.tagName === 'VIDEO' && !bgEl.muted) {
+          // Criar stream combinado com áudio se houver vídeo de fundo (preferindo captura direta do elemento)
+          let audioTrack = null;
+          if (bgEl && bgEl.tagName === 'VIDEO') {
             try {
-              const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-              const source = audioContext.createMediaElementSource(bgEl);
-              const destination = audioContext.createMediaStreamDestination();
-              source.connect(destination);
-              // Opcional: tocar durante a gravação (comentar se não desejar ouvir)
-              // source.connect(audioContext.destination);
-              try { await audioContext.resume(); } catch(_) {}
-              
-              const videoTrack = canvasStream.getVideoTracks()[0];
-              const audioTrack = destination.stream.getAudioTracks()[0];
-              
-              finalStream = new MediaStream([videoTrack, audioTrack]);
-            } catch (error) {
-              finalStream = canvasStream;
+              if (typeof bgEl.captureStream === 'function') {
+                const bgStream = bgEl.captureStream();
+                audioTrack = bgStream.getAudioTracks()[0] || null;
+              }
+            } catch (_) {}
+
+            if (!audioTrack) {
+              try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtx) {
+                  const audioContext = bgEl._workzAudioCtx || new AudioCtx();
+                  const source = bgEl._workzAudioSource || audioContext.createMediaElementSource(bgEl);
+                  bgEl._workzAudioCtx = audioContext;
+                  bgEl._workzAudioSource = source;
+                  const destination = audioContext.createMediaStreamDestination();
+                  try { source.connect(destination); } catch (_) {}
+                  try { audioContext.resume?.(); } catch (_) {}
+                  audioTrack = destination.stream.getAudioTracks()[0] || null;
+                }
+              } catch (error) {
+                console.warn('Audio mix fallback failed, using video-only stream', error);
+              }
             }
           }
+
+          const finalStream = audioTrack
+            ? new MediaStream([canvasTrack, audioTrack].filter(Boolean))
+            : (canvasTrack ? new MediaStream([canvasTrack]) : canvasStream);
           
           // Configurar MediaRecorder
           let selectedFormat = null;
@@ -1897,8 +1955,8 @@ const init = () => {
           
           const rec = new MediaRecorder(finalStream, { 
             mimeType: selectedFormat || 'video/webm',
-            videoBitsPerSecond: 500000, // 0.5 Mbps
-            audioBitsPerSecond: 64000    // 64 kbps
+            videoBitsPerSecond: 1500000, // bitrate maior para reduzir travamentos
+            audioBitsPerSecond: 128000   // áudio em qualidade melhor
           });
           
           const chunks = [];
@@ -1918,6 +1976,9 @@ const init = () => {
               bgEl.playbackRate = 1.0;
               if (wasOriginallyMuted !== null) {
                 bgEl.muted = wasOriginallyMuted;
+              }
+              if (originalVolume != null) {
+                bgEl.volume = originalVolume;
               }
             }
             
@@ -1963,6 +2024,12 @@ const init = () => {
           console.error('Erro durante exportação do blob:', error);
           if (bgEl && bgEl.tagName === 'VIDEO') {
             bgEl.playbackRate = 1.0;
+            if (originalVolume != null) {
+              bgEl.volume = originalVolume;
+            }
+            if (wasOriginallyMuted !== null) {
+              bgEl.muted = wasOriginallyMuted;
+            }
           }
           reject(error);
         }
@@ -2174,7 +2241,11 @@ const init = () => {
           // Sempre usar o vídeo original - sem seeks, sem complicações
           drawCoverVideo(bgEl, 0, 0, outCanvas.width, outCanvas.height);
         }
-      } else { octx.fillStyle = (typeof bgSolidColor !== 'undefined' && bgSolidColor) ? bgSolidColor : '#ffffff'; octx.fillRect(0,0,outCanvas.width,outCanvas.height); }
+      } else {
+        const fallbackBg = (typeof bgSolidColor !== 'undefined' && bgSolidColor) ? bgSolidColor : DEFAULT_BG_COLOR;
+        octx.fillStyle = fallbackBg;
+        octx.fillRect(0,0,outCanvas.width,outCanvas.height);
+      }
   
       const items = [...editor.querySelectorAll('.item')].sort((a,b)=> {
         const aZ = +getComputedStyle(a).zIndex || 0;

@@ -194,7 +194,12 @@
         }
       })(),
       platform: '{{TARGET_PLATFORM}}' || 'web',
-      executionMode: '{{EXECUTION_MODE}}' || 'direct'
+      executionMode: '{{EXECUTION_MODE}}' || 'direct',
+      layout: {
+        aspect_ratio: '{{ASPECT_RATIO}}' || '4:3',
+        supports_portrait: '{{SUPPORTS_PORTRAIT}}',
+        supports_landscape: '{{SUPPORTS_LANDSCAPE}}'
+      }
     };
   </script>
 

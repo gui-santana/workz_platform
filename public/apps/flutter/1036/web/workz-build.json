@@ -1,6 +1,11 @@
 {
-  "app_id": "1036",
+  "job_id": 77,
+  "app_id": 1036,
   "slug": "calculadora",
-  "completed_at": "2025-11-10T19:42:31.699Z",
-  "worker_pid": 1
+  "completed_at": "2025-12-02T19:08:26.202Z",
+  "api_base": "http://nginx",
+  "worker_pid": 1,
+  "platforms": [
+    "web"
+  ]
 }

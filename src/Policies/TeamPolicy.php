@@ -31,5 +31,38 @@ class TeamPolicy
         // Mesma regra de gestão para exclusão da equipe
         return self::canManage($userId, $team);
     }
-}
 
+    /**
+     * Avalia autorização para ações team.* usando nv do vínculo e regras de owner/moderador.
+     * @param array $teamMembership Array do vínculo em teams_users (pode estar vazio).
+     * @param array $teamRow Row completo de teams (para owner/moderadores).
+     */
+    public function allows(string $action, array $teamMembership, array $teamRow = []): bool
+    {
+        $role = strtoupper((string)($teamMembership['role'] ?? 'GUEST'));
+
+        // Owner (LEAD) ou LEAD explícito: pode tudo no time
+        if ($role === 'LEAD') {
+            return true;
+        }
+
+        if ($role === 'OPERATOR') {
+            $allowed = [
+                'team.manage_settings',
+                'team.approve_member',
+            ];
+            return in_array($action, $allowed, true);
+        }
+
+        if ($role === 'MEMBER') {
+            // Não concedemos ações administrativas por padrão
+            return false;
+        }
+
+        if ($role === 'VIEWER' || $role === 'GUEST') {
+            return false;
+        }
+
+        return false;
+    }
+}

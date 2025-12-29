@@ -20,13 +20,20 @@ window.StoreApp = {
     _codeMirrorInstance: null,
     _depsPromise: null, // Promise para rastrear o carregamento de dependências
     companyFilterId: 'all', // NEW: To filter apps by company
+
+    goToStep(stepNumber) {
+        this.currentStep = stepNumber;
+        this.updateStepDisplay();
+    },
+
     userCompanies: [],
     storageStats: null,
-    appData: {
+        appData: {
         company: null,
         // Novo estado para o editor de arquivos
         appFiles: {}, // Ex: { 'main.dart': '...', 'pubspec.yaml': '...' }
         activeFile: null,
+        buildPlatforms: ['web'], // plataformas alvo padrão para build Flutter
         unsavedChanges: new Set(),
         title: "",
         slug: "",
@@ -35,12 +42,17 @@ window.StoreApp = {
         color: "#3b82f6",
         accessLevel: 1,
         version: "1.0.0",
-        entityType: 0,
+        entityType: 1,
+        termsAccepted: false,
         price: 0,
         scopes: [],
+        privateCompanies: [], // Changed to array for multi-select
         code: "",
         dartCode: "",
-        token: null
+        token: null,
+        aspectRatio: '4:3',
+        supportsPortrait: true,
+        supportsLandscape: true
     },
 
     async bootstrap() {
@@ -147,7 +159,7 @@ window.StoreApp = {
                 this.render();
             }
         } catch (e) {
-            console.error("Erro ao carregar empresas:", e);
+            console.error("Erro ao carregar negócios:", e);
             this.userCompanies = [];
         }
     },
@@ -184,12 +196,12 @@ window.StoreApp = {
         const select = document.getElementById("company-select");
         if (select) {
             if (this.userCompanies && this.userCompanies.length > 0) {
-                select.innerHTML = '<option value="">Selecione uma empresa</option>' +
+                select.innerHTML = '<option value="">Selecione um negócio</option>' +
                     this.userCompanies.map(company =>
                         `<option value="${company.id}" data-cnpj="${company.cnpj || ""}">${company.name}</option>`
                     ).join("");
             } else {
-                select.innerHTML = '<option value="">Você não tem permissão de moderador em nenhuma empresa</option>';
+                select.innerHTML = '<option value="">Você não tem permissão de moderador em nenhum negócio</option>';
             }
         }
     },
@@ -614,6 +626,30 @@ window.StoreApp = {
                     padding: 16px;
                     border: 1px solid #e9ecef;
                 }
+                
+                /* Summary panel */
+                .summary-panel {
+                    position: sticky;
+                    top: 12px;
+                }
+                .summary-card {
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+                    border: 1px solid #e9ecef;
+                }
+                .summary-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    padding: 4px 10px;
+                    border-radius: 999px;
+                    font-size: 12px;
+                    background: #f8f9fa;
+                    border: 1px solid #e9ecef;
+                    margin-right: 6px;
+                    margin-bottom: 6px;
+                }
+                .summary-chip i { font-size: 13px; }
+                .summary-actions .btn { width: 100%; }
             </style>
             <div class="app-builder-container">                
                 ${contentHtml}
@@ -639,6 +675,7 @@ window.StoreApp = {
                 }
             }
             this.setupFormEventListeners(); // Attach listeners to the newly rendered form
+            this.updateSummaryPanel();
         }
     },
 
@@ -652,9 +689,9 @@ window.StoreApp = {
                 <div class="d-flex justify-content-between align-items-center mb-4">                    
                     <div class="d-flex align-items-center">
                         <div class="me-3">
-                            <label for="company-filter" class="form-label visually-hidden">Filtrar por empresa</label>
+                            <label for="company-filter" class="form-label visually-hidden">Filtrar por negócio</label>
                             <select id="company-filter" class="form-select form-select-sm" onchange="StoreApp.filterByCompany(this.value)">
-                                <option value="all" ${this.companyFilterId === 'all' ? 'selected' : ''}>Todas as Empresas</option>
+                                <option value="all" ${this.companyFilterId === 'all' ? 'selected' : ''}>Todas os Negócios</option>
                                 ${companyFilterOptions}
                             </select>
                         </div>
@@ -684,40 +721,87 @@ window.StoreApp = {
         `;
         return `
             ${backButton}
-            <!-- Step Indicator -->
-            <div class="step-indicator">
-                <div class="step active" data-step="1">
-                    <div class="step-number">1</div>
-                    <span>Empresa</span>
+            <div class="row">
+                <div class="col-lg-8">
+                    <!-- Step Indicator -->
+                    <div class="step-indicator">
+                        <div class="step active" data-step="1">
+                            <div class="step-number">1</div>
+                            <span>Negócio</span>
+                        </div>
+                        <div class="step" data-step="2">
+                            <div class="step-number">2</div>
+                            <span>Tipo</span>
+                        </div>
+                        <div class="step" data-step="3">
+                            <div class="step-number">3</div>
+                            <span>Informações</span>
+                        </div>
+                        <div class="step" data-step="4">
+                            <div class="step-number">4</div>
+                            <span>Distribuição</span>
+                        </div>
+                        <div class="step" data-step="5">
+                            <div class="step-number">5</div>
+                            <span>Código</span>
+                        </div>
+                        <div class="step" data-step="6">
+                            <div class="step-number">6</div>
+                            <span>Revisão</span>
+                        </div>
+                    </div>
+
+                    ${this.renderStep1()}
+                    ${this.renderStep2()}
+                    ${this.renderStep3()}
+                    ${this.renderStep4()}
+                    ${this.renderStep5()}
+                    ${this.renderStep6()}
                 </div>
-                <div class="step" data-step="2">
-                    <div class="step-number">2</div>
-                    <span>Tipo</span>
-                </div>
-                <div class="step" data-step="3">
-                    <div class="step-number">3</div>
-                    <span>Informações</span>
-                </div>
-                <div class="step" data-step="4">
-                    <div class="step-number">4</div>
-                    <span>Configuração</span>
-                </div>
-                <div class="step" data-step="5">
-                    <div class="step-number">5</div>
-                    <span>Código</span>
-                </div>
-                <div class="step" data-step="6">
-                    <div class="step-number">6</div>
-                    <span>Revisão</span>
+                <div class="col-lg-4">
+                    <div class="summary-panel">
+                        ${this.renderSummaryPanel()}
+                    </div>
                 </div>
             </div>
+        `;
+    },
 
-            ${this.renderStep1()}
-            ${this.renderStep2()}
-            ${this.renderStep3()}
-            ${this.renderStep4()}
-            ${this.renderStep5()}
-            ${this.renderStep6()}
+    renderSummaryPanel() {
+        return `
+            <div class="card summary-card mb-4">
+                <div class="card-body">
+                    <div class="d-flex align-items-start mb-2">
+                        <div class="flex-grow-1">
+                            <small class="text-muted">App</small>
+                            <h5 class="mb-1" id="summary-title">Sem título</h5>
+                            <div class="text-muted small" id="summary-slug">slug indefinido</div>
+                        </div>
+                        <span class="badge bg-light text-dark" id="summary-access">Acesso: N/A</span>
+                    </div>
+                    <div class="mb-2">
+                        <small class="text-muted">Desenvolvedor</small><br>
+                        <span id="summary-company">Não selecionada</span>
+                    </div>
+                    <div class="mb-2">
+                        <small class="text-muted">Plataformas</small><br>
+                        <div id="summary-platforms"></div>
+                        <div class="text-muted small">Android gera APK em modo debug (leve)</div>
+                    </div>
+                    <div class="mb-3">
+                        <small class="text-muted">Preço</small><br>
+                        <span id="summary-price">Gratuito</span>
+                    </div>
+                    <div class="summary-actions d-grid gap-2">
+                        <button class="btn btn-primary" onclick="StoreApp.saveApp()">
+                            <i class="fas fa-save"></i> Salvar
+                        </button>
+                        <button class="btn btn-outline-secondary" onclick="StoreApp.showCodePreview()">
+                            <i class="fas fa-eye"></i> Preview
+                        </button>
+                    </div>
+                </div>
+            </div>
         `;
     },
 
@@ -763,26 +847,26 @@ window.StoreApp = {
     },
 
     renderStep1() {
-        let companyOptions = '<option value="">Carregando empresas...</option>';
+        let companyOptions = '<option value="">Carregando negócios...</option>';
 
         if (this.userCompanies && this.userCompanies.length > 0) {
-            companyOptions = '<option value="">Selecione uma empresa</option>' +
+            companyOptions = '<option value="">Selecione um negócio</option>' +
                 this.userCompanies.map(company =>
                     `<option value="${company.id}" data-cnpj="${company.cnpj || ""}">${company.name}</option>`
                 ).join("");
         } else if (this.userCompanies && this.userCompanies.length === 0) {
-            companyOptions = '<option value="">Você não tem permissão de moderador em nenhuma empresa</option>';
+            companyOptions = '<option value="">Você não tem permissão de moderador em nenhum negócio</option>';
         }
 
         return `
             <div class="form-section active" id="step-1">
-                <h3><i class="fas fa-building"></i> Validação da Empresa</h3>
-                <p class="text-muted">Apenas empresas com CNPJ válido podem publicar aplicativos</p>
+                <h3><i class="fas fa-building"></i> Validação de Negócio</h3>
+                <p class="text-muted">Apenas negócios com CNPJ válido podem publicar aplicativos</p>
                 
                 <div class="row">
                     <div class="col-md-6">
                         <div class="mb-3">
-                            <label for="company-select" class="form-label">Selecione sua empresa</label>
+                            <label for="company-select" class="form-label">Selecione seu negócio</label>
                             <select class="form-select" id="company-select" required>
                                 ${companyOptions}
                             </select>
@@ -801,9 +885,9 @@ window.StoreApp = {
                     <i class="fas fa-info-circle"></i>
                     <strong>Requisitos:</strong>
                     <ul class="mb-0 mt-2">
-                        <li>Você deve ter nível de moderador ou superior na empresa</li>
-                        <li>A empresa deve ter um CNPJ válido cadastrado</li>
-                        <li>O aplicativo será publicado em nome da empresa</li>
+                        <li>Você deve ter nível de moderador ou superior no negócio</li>
+                        <li>O negócio deve ter um CNPJ válido cadastrado</li>
+                        <li>O aplicativo será publicado em nome do negócio</li>
                     </ul>
                 </div>
 
@@ -957,21 +1041,29 @@ window.StoreApp = {
                 <div class="row">
                     <div class="col-md-6">
                         <div class="mb-3">
-                            <label for="access-level" class="form-label">Nível de Acesso *</label>                            
+                            <label for="access-level" class="form-label">Distribuição *</label>                            
                             <select class="form-select" id="access-level" required aria-describedby="access-level-help">
-                                <option value="0">Toda a Internet - Acessível por qualquer pessoa, sem login.</option>
-                                <option value="1">Usuários Logados - Qualquer usuário autenticado na plataforma pode usar.</option>
-                                <option value="2">Restrito (Instalação) - Requer que o usuário instale ou assine o app.</option>
-                                <option value="3">Privado - Apenas para usuários ou empresas com permissão explícita.</option>
+                                <option value="0">Toda a Internet</option>
+                                <option value="1">Plataforma</option>
+                                <option value="2">Exclusiva</option>
                             </select>
                             <div id="access-level-help" class="form-text">
                                 <ul class="list-unstyled mb-0 small mt-2">
-                                    <li><i class="fas fa-globe text-info"></i> <strong>Toda a Internet:</strong> Ideal para apps que não precisam de dados do usuário (landing pages, ferramentas abertas).</li>
-                                    <li><i class="fas fa-users text-primary"></i> <strong>Usuários Logados:</strong> Visível para todos os usuários da plataforma Workz.</li>
-                                    <li><i class="fas fa-store text-warning"></i> <strong>Restrito (Instalação):</strong> O app aparece no catálogo, mas requer uma ação de "instalar".</li>
-                                    <li><i class="fas fa-lock text-secondary"></i> <strong>Privado:</strong> O app não é listado publicamente e o acesso é controlado manualmente.</li>
+                                    <li><i class="fas fa-globe text-info"></i> <strong>Toda a Internet:</strong> Disponível para qualquer pessoa, gratuitamente e sem login. Ideal para apps que não usam Workz SDK. É listado na Workz! Store.</li>
+                                    <li><i class="fas fa-users text-primary"></i> <strong>Plataforma:</strong> Distribuído para entidades registradas na plataforma. Requer login Workz!. É listado na Workz! Store.</li>
+                                    <li><i class="fas fa-lock text-secondary"></i> <strong>Exlusiva:</strong> Disponibilizado para negócios com permissão explícita. Membros do negócio recebem acesso direto via Área de Trabalho.</li>
                                 </ul>
                             </div>
+                        </div>
+                        <!-- Seletor de negócio (apenas quando Privado) -->
+                        <div class="mb-3" id="private-company-container" style="display:none;">
+                            <label for="private-company-search" class="form-label">Negócio Cliente</label>
+                            <div class="position-relative">
+                                <input type="text" class="form-control" id="private-company-search" placeholder="Digite para pesquisar negócios...">
+                                <div id="private-company-results" class="list-group" style="position:absolute; z-index:10; width:100%; max-height:220px; overflow:auto;"></div>
+                            </div>
+                            <div class="form-text">Selecione o negócio para o qual este app será disponibilizado.</div>
+                            <div id="private-company-selected" class="mt-2"></div>
                         </div>
                         <div class="mb-3">
                             <label for="app-version" class="form-label">Versão *</label>
@@ -981,18 +1073,43 @@ window.StoreApp = {
                     </div>
                     <div class="col-md-6">
                         <div class="mb-3">
-                            <label for="entity-type" class="form-label">Tipo de Entidade</label>
+                            <label for="entity-type" class="form-label">Entidade Cliente</label>
                             <select class="form-select" id="entity-type">
-                                <option value="0">Geral - Todos os tipos</option>
                                 <option value="1">Usuários</option>
-                                <option value="2">Empresas</option>
-                                <option value="3">Equipes</option>
+                                <option value="2">Negócios</option>
                             </select>
+                        </div>
+                        <!-- Plataformas alvo para build (apenas apps Flutter) -->
+                        <div class="mb-3" id="build-platforms-container" style="display:none;">
+                            <label class="form-label">Plataformas para novo build:</label>
+                            <div class="d-flex align-items-center flex-wrap gap-2">
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="checkbox" id="config-build-web" value="web">
+                                    <label class="form-check-label" for="config-build-web">
+                                        <i class="fas fa-globe text-info"></i> Web
+                                    </label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="checkbox" id="config-build-android" value="android">
+                                    <label class="form-check-label" for="config-build-android">
+                                        <i class="fab fa-android text-success"></i> Android
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="form-text small">
+                                Essas plataformas serão usadas como padrão ao iniciar builds para este app Flutter.
+                            </div>
                         </div>
                         <div class="mb-3">
                             <label for="app-price" class="form-label">Preço (R$)</label>
                             <input type="number" class="form-control" id="app-price" min="0" step="0.01" value="0.00">
                             <div class="form-text">0.00 para aplicativo gratuito</div>
+                            <div id="price-terms-container" class="form-check mt-2" style="display:none;">
+                                <input class="form-check-input" type="checkbox" id="price-terms">
+                                <label class="form-check-label" for="price-terms">
+                                    Concordo com os <a href="#" target="_blank">termos de remuneração</a> e política de repasse.
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1012,7 +1129,7 @@ window.StoreApp = {
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="scope-companies" value="companies.read">
                                 <label class="form-check-label" for="scope-companies">
-                                    <i class="fas fa-building text-info"></i> Ler dados de empresas
+                                    <i class="fas fa-building text-info"></i> Ler dados de negócios
                                 </label>
                             </div>
                             <div class="form-check">
@@ -1025,6 +1142,12 @@ window.StoreApp = {
                                 <input class="form-check-input" type="checkbox" id="scope-posts" value="posts.read">
                                 <label class="form-check-label" for="scope-posts">
                                     <i class="fas fa-newspaper text-secondary"></i> Ler posts e feed
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="scope-posts-write" value="posts.write">
+                                <label class="form-check-label" for="scope-posts-write">
+                                    <i class="fas fa-pen text-secondary"></i> Escrever posts e feed
                                 </label>
                             </div>
                         </div>
@@ -1076,6 +1199,50 @@ window.StoreApp = {
                         Use este token para autenticar seu app Flutter via WorkzSDK.
                     </div>
                 </div>
+
+                <!-- Layout / Aspect Ratio -->
+                <div class="mb-4">
+                    <label class="form-label">Layout e Orientação</label>
+                    <p class="text-muted small">Defina a proporção da tela e se o app suporta layouts diferentes em cada orientação.</p>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="aspect-ratio" class="form-label">Aspect Ratio</label>
+                                <select class="form-select" id="aspect-ratio">
+                                    <option value="4:3">4:3 (padrão)</option>
+                                    <option value="16:9">16:9 (wide)</option>
+                                    <option value="3:2">3:2</option>
+                                    <option value="1:1">1:1</option>
+                                    <option value="custom">Personalizado…</option>
+                                </select>
+                                <input type="text" class="form-control mt-2 d-none" id="aspect-ratio-custom" placeholder="Ex: 21:9">
+                                <div class="form-text">
+                                    Usado para dimensionar o iframe do app nos players e previews.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div class="mb-2">
+                                <label class="form-label">Orientações suportadas</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="supports-portrait" checked>
+                                    <label class="form-check-label" for="supports-portrait">
+                                        <i class="fas fa-mobile-alt"></i> Retrato (vertical)
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="supports-landscape" checked>
+                                    <label class="form-check-label" for="supports-landscape">
+                                        <i class="fas fa-mobile-alt fa-rotate-90"></i> Paisagem (horizontal)
+                                    </label>
+                                </div>
+                                <div class="form-text">
+                                    Quando ambas estiverem marcadas, o player pode alternar entre orientações.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 
                 <div class="d-flex justify-content-between">
                     <button type="button" class="btn btn-secondary" onclick="StoreApp.prevStep()">
@@ -1120,7 +1287,7 @@ window.StoreApp = {
             <div class="form-section" id="step-6">
                 <h3><i class="fas fa-check-circle"></i> Revisão e Publicação</h3>
                 <p class="text-muted">Revise as informações do seu aplicativo antes de publicar</p>
-                
+
                 <div class="row">
                     <div class="col-md-8">
                         <div class="card">
@@ -1134,24 +1301,38 @@ window.StoreApp = {
                                         <h4 id="final-title" class="mb-1">Nome do App</h4>
                                         <p id="final-description" class="text-muted mb-1">Descrição do aplicativo</p>
                                         <small class="text-muted">
-                                            Por: <span id="final-publisher">Empresa</span> | 
+                                            Por: <span id="final-publisher">Negócio</span> | 
                                             Versão: <span id="final-version">1.0.0</span> | 
                                             Preço: R$ <span id="final-price">0,00</span>
                                         </small>
                                     </div>
                                 </div>
-                                
+
                                 <div class="row">
                                     <div class="col-md-6">
-                                        <strong>Configurações:</strong>
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <strong>Informações:</strong>
+                                            <button class="btn btn-sm btn-outline-secondary" onclick="StoreApp.goToStep(3)"><i class="fas fa-edit"></i> Editar</button>
+                                        </div>
                                         <ul class="list-unstyled mt-2">
                                             <li><i class="fas fa-link"></i> URL: workz.app/<span id="final-slug">app-slug</span></li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <strong>Configurações:</strong>
+                                            <button class="btn btn-sm btn-outline-secondary" onclick="StoreApp.goToStep(4)"><i class="fas fa-edit"></i> Editar</button>
+                                        </div>
+                                        <ul class="list-unstyled mt-2">
                                             <li><i class="fas fa-lock"></i> Acesso: <span id="final-access">Público</span></li>
                                             <li><i class="fas fa-users"></i> Entidade: <span id="final-entity">Geral</span></li>
                                         </ul>
                                     </div>
-                                    <div class="col-md-6">
-                                        <strong>Permissões:</strong>
+                                    <div class="col-12 mt-2">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <strong>Permissões:</strong>
+                                            <button class="btn btn-sm btn-outline-secondary" onclick="StoreApp.goToStep(4)"><i class="fas fa-edit"></i> Editar</button>
+                                        </div>
                                         <ul id="final-scopes" class="list-unstyled mt-2">
                                             <li><i class="fas fa-info-circle"></i> Nenhuma permissão especial</li>
                                         </ul>
@@ -1176,7 +1357,7 @@ window.StoreApp = {
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="d-flex justify-content-between mt-4">
                     <button type="button" class="btn btn-secondary" onclick="StoreApp.prevStep()">
                         <i class="fas fa-arrow-left"></i> Anterior
@@ -1200,7 +1381,14 @@ window.StoreApp = {
             // Apply company filter
             if (this.companyFilterId && this.companyFilterId !== 'all') {
                 const filterId = parseInt(this.companyFilterId, 10);
-                apps = apps.filter(app => parseInt(app.exclusive_to_entity_id, 10) === filterId);
+                apps = apps.filter(app => {
+                    // publisher é o negócio responsável pelo app.
+                    // company_id é mantido apenas como compatibilidade antiga.
+                    const publisherId = Number(
+                        app.publisher != null ? app.publisher : app.company_id
+                    );
+                    return publisherId === filterId;
+                });
             }
 
             if (apps.length > 0) {
@@ -1285,7 +1473,7 @@ window.StoreApp = {
                                 <button class="btn btn-outline-danger" onclick="StoreApp.deleteApp(${app.id}, '${app.slug || ''}')">
                                     <i class="fas fa-trash"></i> Excluir
                                 </button>
-                                <button class="btn ${app.st == 1 ? 'btn-outline-warning' : 'btn-outline-success'}" onclick="StoreApp.${app.st == 1 ? 'unpublishAppFromCard' : 'publishAppFromCard'}(${app.id})">
+                                <button class="btn ${app.st == 1 ? 'btn-outline-warning' : 'btn-outline-success'}" onclick="StoreApp.${app.st == 1 ? 'unpublishAppFromCard' : 'publishAppFromCard'}(${app.id}, '${app.tt || app.title}')">
                                     <i class="fas ${app.st == 1 ? 'fa-ban' : 'fa-rocket'}"></i> ${app.st == 1 ? 'Despublicar' : 'Publicar'}
                                 </button>
                             </div>
@@ -1412,12 +1600,14 @@ window.StoreApp = {
     },
 
     async publishAppFromCard(appId) {
-        if (!confirm('Tem certeza que deseja publicar este app na loja?')) return;
+        const appName = document.querySelector(`[onclick="StoreApp.publishAppFromCard(${appId})"]`)?.closest('.card-body')?.querySelector('.card-title')?.textContent || `ID ${appId}`;
+        if (!confirm(`Tem certeza que deseja publicar o app "${appName}" na loja?`)) return;
         await this.updateAppStatus(appId, true);
     },
 
     async unpublishAppFromCard(appId) {
-        if (!confirm('Tem certeza que deseja despublicar este app da loja? Ele não estará mais visível para outros usuários.')) return;
+        const appName = document.querySelector(`[onclick="StoreApp.unpublishAppFromCard(${appId})"]`)?.closest('.card-body')?.querySelector('.card-title')?.textContent || `ID ${appId}`;
+        if (!confirm(`Tem certeza que deseja despublicar o app "${appName}" da loja? Ele não estará mais visível para outros usuários.`)) return;
         await this.updateAppStatus(appId, false);
     },
 
@@ -1428,16 +1618,11 @@ window.StoreApp = {
     },
 
     async deleteApp(appId, slug = '') {
+        const appName = document.querySelector(`[onclick="StoreApp.deleteApp(${appId}, '${slug}')"]`)?.closest('.card-body')?.querySelector('.card-title')?.textContent || slug || `ID ${appId}`;
         try {
-            if (!confirm('Tem certeza que deseja excluir este app? Esta ação é irreversível.')) return;
+            if (!confirm(`Tem certeza que deseja excluir o app "${appName}"? Esta ação é irreversível.`)) return;
             let resp = null;
-            try {
-                resp = await this.apiDelete(`/apps/${appId}`);
-            } catch (_) { /* fallback abaixo */ }
-            const httpOk = resp && typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300;
-            if (!resp || (resp.success === false && !httpOk)) {
-                resp = await this.apiPost(`/apps/${appId}/delete`, {});
-            }
+            resp = await this.apiDelete(`/apps/${appId}`); // Standardized DELETE endpoint
             const ok = resp && (resp.success || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300));
             if (ok) {
                 this.showToast('Aplicativo excluído com sucesso!', 'success');
@@ -2262,8 +2447,11 @@ window.StoreApp = {
         if (!this.editMode) { // Apenas para novos apps
             if (type === 'flutter') {
                 // Modo simples: não usar Mini‑IDE; manter apenas textarea Dart
+                // Não sobrescrever automaticamente com template; manter vazio até o usuário colar ou usar "Template"
                 this.appData.code = '';
-                this.appData.dartCode = this.appData.dartCode || this.getFlutterTemplate();
+                if (!this.appData.dartCode) {
+                    this.appData.dartCode = '';
+                }
                 this.appData.appFiles = {};
                 this.appData.activeFile = null;
             } else if (type === 'javascript') {
@@ -2279,6 +2467,23 @@ window.StoreApp = {
 
         // Show/hide token field based on app type
         this.toggleTokenField();
+
+        // Update build platforms UI (step 4) when switching between JS/Flutter
+        try {
+            const buildPlatformsContainer = document.getElementById('build-platforms-container');
+            const buildWeb = document.getElementById('config-build-web');
+            const buildAndroid = document.getElementById('config-build-android');
+            if (buildPlatformsContainer && buildWeb && buildAndroid) {
+                buildPlatformsContainer.style.display = (this.appType === 'flutter') ? '' : 'none';
+                if (this.appType === 'flutter') {
+                    const currentPlatforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
+                        ? this.appData.buildPlatforms
+                        : ['web'];
+                    buildWeb.checked = currentPlatforms.includes('web');
+                    buildAndroid.checked = currentPlatforms.includes('android');
+                }
+            }
+        } catch (_) {}
 
         this.validateCurrentStep();
     },
@@ -2493,7 +2698,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                               ),
                               SizedBox(height: 16),
-                              _buildFeatureItem(Icons.sdk, 'WorkzSDK Integrado'),
+                              _buildFeatureItem(Icons.integration_instructions, 'WorkzSDK Integrado'),
                               _buildFeatureItem(Icons.devices, 'Multiplataforma'),
                               _buildFeatureItem(Icons.speed, 'Performance Otimizada'),
                               _buildFeatureItem(Icons.security, 'Seguro e Confiável'),
@@ -2609,7 +2814,7 @@ class _HomeScreenState extends State<HomeScreen> {
           '📱 Plataforma: Flutter\\n'
           '⚡ Engine: Flutter Web\\n'
           '🔧 SDK: WorkzSDK v2.0\\n'
-          '📅 Build: ${new Date().toLocaleString('pt-BR')}\\n'
+          '📅 Build: \${DateTime.now().toString()}\\n'
           '🎯 Status: Funcionando\\n\\n'
           '✨ Recursos Ativos:\\n'
           '• Interface responsiva\\n'
@@ -3003,21 +3208,27 @@ if (document.readyState === 'loading') {
         this.appData.slug = appData.slug || '';
         this.appData.description = appData.ds || appData.description || '';
         this.appData.version = appData.version || '1.0.0';
-        this.appData.price = parseFloat(appData.price || 0);
+        // Preço pode vir como price ou vl no backend; cair para 0 se ausente
+        const rawPrice = (appData.price !== undefined ? appData.price : appData.vl);
+        const normalizedPrice = (rawPrice !== undefined && rawPrice !== null)
+            ? String(rawPrice).replace(',', '.')
+            : '0';
+        const parsedPrice = parseFloat(normalizedPrice);
+        this.appData.price = Number.isFinite(parsedPrice) ? parsedPrice : 0;
         this.appData.accessLevel = parseInt(appData.access_level || 1);
-        this.appData.entityType = parseInt(appData.entity_type || 0);
+        this.appData.entityType = parseInt(appData.entity_type || 1);
         this.appData.color = appData.color || '#3b82f6';
         this.appData.scopes = appData.scopes ? (Array.isArray(appData.scopes) ? appData.scopes : JSON.parse(appData.scopes)) : [];
 
         // Set company data
         if (appData.company_id || appData.exclusive_to_entity_id) {
             const companyId = appData.company_id || appData.exclusive_to_entity_id;
-            console.log('🏢 Procurando empresa com ID:', companyId);
-            console.log('🏢 Empresas disponíveis:', this.userCompanies);
+            console.log('🏢 Procurando negócio com ID:', companyId);
+            console.log('🏢 Negócios disponíveis:', this.userCompanies);
 
             const company = this.userCompanies.find(c => c.id === parseInt(companyId));
             if (company) {
-                console.log('✅ Empresa encontrada:', company);
+                console.log('✅ Negócio encontrado:', company);
                 this.appData.company = {
                     id: company.id,
                     name: company.name,
@@ -3029,7 +3240,7 @@ if (document.readyState === 'loading') {
                     const companySelect = document.getElementById('company-select');
                     if (companySelect) {
                         companySelect.value = company.id;
-                        console.log('🔄 Empresa selecionada no dropdown:', company.id);
+                        console.log('🔄 Negócio selecionada no dropdown:', company.id);
 
                         const cnpjDisplay = document.getElementById('cnpj-display');
                         if (cnpjDisplay) {
@@ -3037,11 +3248,11 @@ if (document.readyState === 'loading') {
                             this.validateCNPJ(company.cnpj);
                         }
                     } else {
-                        console.warn('⚠️ Dropdown de empresa não encontrado');
+                        console.warn('⚠️ Dropdown de negócio não encontrado');
                     }
                 }, 100);
             } else {
-                console.warn('⚠️ Empresa não encontrada nas empresas do usuário');
+                console.warn('⚠️ Negócio não encontrado entre os negócios do usuário');
             }
         }
 
@@ -3059,7 +3270,14 @@ if (document.readyState === 'loading') {
         if (versionField) versionField.value = this.appData.version;
 
         const priceField = document.getElementById('app-price');
-        if (priceField) priceField.value = this.appData.price;
+        if (priceField) {
+            const p = Number.isFinite(this.appData.price) ? this.appData.price : 0;
+            priceField.value = p.toFixed(2);
+        }
+        // Atualiza visibilidade do checkbox de termos
+        this.togglePriceTermsVisibility();
+        // Atualiza resumo após carregar dados (inclui preço)
+        this.updateSummaryPanel();
 
         const accessField = document.getElementById('access-level');
         if (accessField) accessField.value = this.appData.accessLevel;
@@ -3076,6 +3294,36 @@ if (document.readyState === 'loading') {
         // Set app type
         this.appType = appData.app_type || 'javascript';
         this.selectAppType(this.appType);
+
+        // Layout / orientação (defaults quando não vierem do backend)
+        this.appData.aspectRatio = appData.aspect_ratio || this.appData.aspectRatio || '4:3';
+        this.appData.supportsPortrait = (typeof appData.supports_portrait === 'boolean') ? appData.supports_portrait : true;
+        this.appData.supportsLandscape = (typeof appData.supports_landscape === 'boolean') ? appData.supports_landscape : true;
+
+        setTimeout(() => {
+            const aspectSelect = document.getElementById('aspect-ratio');
+            const aspectCustom = document.getElementById('aspect-ratio-custom');
+            if (aspectSelect) {
+                const known = ['4:3','16:9','3:2','1:1'];
+                if (known.includes(this.appData.aspectRatio)) {
+                    aspectSelect.value = this.appData.aspectRatio;
+                    if (aspectCustom) {
+                        aspectCustom.classList.add('d-none');
+                        aspectCustom.value = '';
+                    }
+                } else {
+                    aspectSelect.value = 'custom';
+                    if (aspectCustom) {
+                        aspectCustom.classList.remove('d-none');
+                        aspectCustom.value = this.appData.aspectRatio;
+                    }
+                }
+            }
+            const sp = document.getElementById('supports-portrait');
+            const sl = document.getElementById('supports-landscape');
+            if (sp) sp.checked = !!this.appData.supportsPortrait;
+            if (sl) sl.checked = !!this.appData.supportsLandscape;
+        }, 100);
 
         // Populate code fields
         if (this.appType === 'flutter') {
@@ -3100,6 +3348,9 @@ if (document.readyState === 'loading') {
         document.querySelectorAll('input[type="checkbox"][value*="."]').forEach(checkbox => {
             checkbox.checked = this.appData.scopes.includes(checkbox.value);
         });
+
+        // Garantir consistência inicial entre scopes e nível de acesso
+        this.enforceAccessLevelConsistency();
 
         // Go to step 5 to start editing code directly
         // this.currentStep = 5; // Movido para a função editApp
@@ -3129,12 +3380,16 @@ if (document.readyState === 'loading') {
             color: "#3b82f6",
             accessLevel: 1,
             version: "1.0.0",
-            entityType: 0,
+            entityType: 1,
+            termsAccepted: false,
             price: 0,
             scopes: [],
             code: "",
             dartCode: "",
-            token: null
+            token: null,
+            aspectRatio: '4:3',
+            supportsPortrait: true,
+            supportsLandscape: true
         };
 
         // Reset app type
@@ -3257,18 +3512,23 @@ if (document.readyState === 'loading') {
                     const buildStatus = response.build_status || (response.data && response.data.build_status) || null;
 
                     if (savedAppType === 'flutter' && savedAppId) {
-                        // Em criação, o backend já inicia o build. Em edição, vamos forçar um rebuild.
-                        if (this.editMode) {
-                            await this.triggerBuildAndMonitor(savedAppId);
-                        } else {
-                            // Se a API já sinalizou pending/building, apenas acompanhar; caso contrário, iniciar rebuild para garantir
-                            if (buildStatus === 'pending' || buildStatus === 'building') {
-                                this.showToast('Build iniciado. Acompanhe o status…', 'info');
-                                setTimeout(() => this.showBuildStatus(savedAppId), 800);
-                            } else {
-                                await this.triggerBuildAndMonitor(savedAppId);
-                            }
+                        // Plataformas preferidas definidas na Etapa 4 (Web/Android)
+                        const preferredPlatforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
+                            ? this.appData.buildPlatforms
+                            : ['web'];
+
+                        // Fluxo B (fila com platforms):
+                        // Enfileira um job na build_queue via AppManagementController::triggerBuild,
+                        // garantindo que o worker use exatamente essas plataformas.
+                        this.showToast('Iniciando build Flutter (fila) para: ' + preferredPlatforms.join(', '), 'info');
+                        try {
+                            await this.apiPost(`/apps/${savedAppId}/build`, { platforms: preferredPlatforms });
+                        } catch (e) {
+                            console.error('Falha ao enfileirar build na fila:', e);
                         }
+                        // Abre modal pendente e começa a acompanhar o status real da fila/worker
+                        this.displayPendingBuildModal(savedAppId);
+                        setTimeout(() => this.startBuildWatch(savedAppId), 800);
                     }
                 } catch (buildErr) {
                     console.error('Falha ao iniciar/monitorar build:', buildErr);
@@ -3454,20 +3714,17 @@ if (document.readyState === 'loading') {
             return res;
         }
     },
-    async postRebuildCompat(appId) {
-        // Primeiro, verificar se já existe um build em andamento (ou pendente)
-        try {
-            const statusRes = await this.getBuildStatusCompat(appId);
-            if (statusRes && statusRes.success && statusRes.data && (statusRes.data.build_status === 'pending' || statusRes.data.build_status === 'building')) {
-                return { success: true, message: 'Build já em andamento.' };
-            }
-        } catch (_) { /* segue para tentar rebuild */ }
+    async postRebuildCompat(appId, platforms) {
+        const payload = {};
+        if (Array.isArray(platforms) && platforms.length) {
+            payload.platforms = platforms;
+        }
 
         // Preferir endpoint de rebuild; fallback para build genérico
-        let res = await this.apiPost(`/apps/${appId}/rebuild`, {});
+        let res = await this.apiPost(`/apps/${appId}/rebuild`, payload);
         const httpOk = res && typeof res.status === 'number' && res.status >= 200 && res.status < 300;
         if (res && (res.success || httpOk)) return res;
-        return await this.apiPost(`/apps/${appId}/build`, {});
+        return await this.apiPost(`/apps/${appId}/build`, payload);
     },
 
     // Polling contínuo com cancelamento ao fechar o modal
@@ -3552,11 +3809,15 @@ if (document.readyState === 'loading') {
         if (companyField && companyField.value) {
             formData.company_id = parseInt(companyField.value);
         }
+        // Publisher deve sempre refletir a negócio responsável pelo app
+        if (formData.company_id) {
+            formData.publisher = formData.company_id;
+        }
 
         const priceField = document.getElementById('app-price');
         // company_id é obrigatório para criação
         if (!this.editMode && !formData.company_id) {
-            throw new Error('O campo "Empresa" é obrigatório. Selecione uma empresa válida.');
+            throw new Error('O campo "Negócio" é obrigatório. Selecione um negócio válido.');
         }
         if (priceField && priceField.value) {
             formData.price = parseFloat(priceField.value) || 0;
@@ -3572,6 +3833,16 @@ if (document.readyState === 'loading') {
             formData.entity_type = parseInt(entityField.value);
         }
 
+        // Se nível de acesso for 0 (Toda a Internet), força entity_type = 0 e ignora o select
+        if (formData.access_level === 0) {
+            formData.entity_type = 0;
+        }
+
+        // Se privado, incluir negócio alvo selecionado
+        if (formData.access_level === 2 && this.appData.privateCompanies.length > 0) {
+            formData.private_company_ids = this.appData.privateCompanies.map(c => c.id);
+        }
+
         // Scopes
         const selectedScopes = [];
         document.querySelectorAll('input[type="checkbox"][value*="."]:checked').forEach(checkbox => {
@@ -3580,10 +3851,34 @@ if (document.readyState === 'loading') {
         
         formData.scopes = selectedScopes; // Sempre incluir scopes, mesmo que vazio, para permitir limpar
 
+        // Regra: se houver scopes selecionados, não permitir "Toda a Internet"
+        if (formData.access_level === 0 && formData.scopes.length > 0) {
+            formData.access_level = 1;
+        }
+
         // Adicionado: Tratamento de upload de ícone
         if (this.appData.icon) { // this.appData.icon should hold the base64 string or the existing URL
             formData.icon = this.appData.icon;
         }
+
+        // Layout / aspect ratio + orientação
+        try {
+            const aspectSelect = document.getElementById('aspect-ratio');
+            const aspectCustom = document.getElementById('aspect-ratio-custom');
+            let ar = (this.appData.aspectRatio || '4:3').trim();
+            if (aspectSelect) {
+                if (aspectSelect.value === 'custom' && aspectCustom && aspectCustom.value.trim()) {
+                    ar = aspectCustom.value.trim();
+                } else if (aspectSelect.value && aspectSelect.value !== 'custom') {
+                    ar = aspectSelect.value.trim();
+                }
+            }
+            if (!ar || !ar.includes(':')) ar = '4:3';
+            formData.aspect_ratio = ar;
+
+            formData.supports_portrait = !!this.appData.supportsPortrait;
+            formData.supports_landscape = !!this.appData.supportsLandscape;
+        } catch (_) {}
 
 
         // Código (sempre via textarea; Mini‑IDE desativado)
@@ -3623,60 +3918,10 @@ if (document.readyState === 'loading') {
         return field ? field.value.trim() : defaultValue;
     },
 
-    collectFormData() {
-        console.log('Coletando dados do formulário...');
-
-        // Campos básicos
-        const titleField = document.getElementById('app-title');
-        const slugField = document.getElementById('app-slug');
-        const descField = document.getElementById('app-description');
-        const companyField = document.getElementById('company-select');
-        const versionField = document.getElementById('app-version');
-        const priceField = document.getElementById('app-price');
-        const accessField = document.getElementById('access-level');
-        const entityField = document.getElementById('entity-type');
-        const colorField = document.getElementById('app-color');
-
-        // Campo de código
-        const codeField = document.getElementById('app-code') || document.getElementById('filesystem-code-editor-textarea');
-
-        // Coletar scopes selecionados
-        const selectedScopes = [];
-        document.querySelectorAll('input[type="checkbox"][value*="."]:checked').forEach(checkbox => {
-            selectedScopes.push(checkbox.value);
-        });
-
-        // Token field for Flutter apps
-        const tokenField = document.getElementById('app-token');
-
-        const formData = {
-            company_id: companyField ? parseInt(companyField.value) : (this.appData.company?.id || null),
-            title: titleField ? titleField.value : this.appData.title,
-            slug: slugField ? slugField.value : this.appData.slug,
-            description: descField ? descField.value : this.appData.description,
-            version: versionField ? versionField.value : this.appData.version,
-            price: priceField ? parseFloat(priceField.value) || 0 : this.appData.price,
-            access_level: accessField ? parseInt(accessField.value) : this.appData.accessLevel,
-            entity_type: entityField ? parseInt(entityField.value) : this.appData.entityType,
-            color: colorField ? colorField.value : this.appData.color,
-            scopes: selectedScopes.length > 0 ? selectedScopes : this.appData.scopes,
-            app_type: this.appType,
-            js_code: this.appType === 'javascript' ? (codeField ? codeField.value : this.appData.code) : '',
-            dart_code: this.appType === 'flutter' ? (codeField ? codeField.value : this.appData.dartCode) : '',
-            token: this.appType === 'flutter' && tokenField ? tokenField.value : (this.appData.token || null),
-            icon: this.appData.icon || null
-        };
-
-        console.log('Dados coletados:', formData);
-        return formData;
-    },
-
     setupFormEventListeners() {
         // Company select change handler
         const companySelect = document.getElementById("company-select");
-        if (!companySelect || companySelect.dataset.listenerAttached) return;
-
-        if (companySelect) {
+        if (companySelect && !companySelect.dataset.listenerAttached) {
             companySelect.addEventListener("change", (e) => {
                 const selectedOption = e.target.selectedOptions[0];
                 if (selectedOption && selectedOption.value) {
@@ -3704,6 +3949,7 @@ if (document.readyState === 'loading') {
                     this.appData.company = null;
                 }
                 this.validateCurrentStep();
+                this.updateSummaryPanel();
             });
             companySelect.dataset.listenerAttached = 'true';
         }
@@ -3722,6 +3968,7 @@ if (document.readyState === 'loading') {
                     }
                 }
                 this.validateCurrentStep();
+                this.updateSummaryPanel();
             });
         }
 
@@ -3731,6 +3978,7 @@ if (document.readyState === 'loading') {
             appSlug.addEventListener("input", (e) => {
                 this.appData.slug = e.target.value;
                 this.validateCurrentStep();
+                this.updateSummaryPanel();
             });
         }
 
@@ -3791,21 +4039,161 @@ if (document.readyState === 'loading') {
         if (appPrice) {
             appPrice.addEventListener("input", (e) => {
                 this.appData.price = parseFloat(e.target.value) || 0;
+                this.togglePriceTermsVisibility();
+                this.validateCurrentStep();
+                this.updateSummaryPanel();
             });
+            // inicializar visibilidade ao montar listeners
+            this.togglePriceTermsVisibility();
         }
 
         const accessLevel = document.getElementById("access-level");
         if (accessLevel) {
             accessLevel.addEventListener("change", (e) => {
                 this.appData.accessLevel = parseInt(e.target.value);
+                // Impede selecionar "Toda a Internet" quando houver scopes marcados
+                this.enforceAccessLevelConsistency();
+                // Alterna seletor de empresa privada
+                this.togglePrivateCompanySelector();
             });
+            // estado inicial
+            this.togglePrivateCompanySelector();
+            this.enforceAccessLevelConsistency();
         }
 
         const entityType = document.getElementById("entity-type");
         if (entityType) {
             entityType.addEventListener("change", (e) => {
                 this.appData.entityType = parseInt(e.target.value);
+                // Se usuário selecionar "Usuários" enquanto nível Privado (2), rebaixa para Usuários Logados (1)
+                if (this.appData.entityType === 1 && this.appData.accessLevel === 2) {
+                    const accessSelect = document.getElementById('access-level');
+                    if (accessSelect) accessSelect.value = '1';
+                    this.appData.accessLevel = 1;
+                    if (typeof this.showToast === 'function') {
+                        this.showToast('Modo Privado é exclusivo para Negócios. Nível ajustado para "Usuários Logados".', 'warning');
+                    }
+                }
+                this.validateCurrentStep();
             });
+        }
+
+        // Build platforms (step 4 – only relevant for Flutter apps)
+        const buildPlatformsContainer = document.getElementById('build-platforms-container');
+        const buildWeb = document.getElementById('config-build-web');
+        const buildAndroid = document.getElementById('config-build-android');
+        if (buildPlatformsContainer && buildWeb && buildAndroid) {
+            // Show only for Flutter apps
+            buildPlatformsContainer.style.display = (this.appType === 'flutter') ? '' : 'none';
+
+            // Initialize checkboxes from state
+            const currentPlatforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
+                ? this.appData.buildPlatforms
+                : ['web'];
+            buildWeb.checked = currentPlatforms.includes('web');
+            buildAndroid.checked = currentPlatforms.includes('android');
+
+            const updatePlatforms = () => {
+                const platforms = [];
+                if (buildWeb.checked) platforms.push('web');
+                if (buildAndroid.checked) platforms.push('android');
+                this.appData.buildPlatforms = platforms.length ? platforms : ['web'];
+                this.updateSummaryPanel();
+            };
+            if (!buildWeb.dataset.listenerAttached) {
+                buildWeb.addEventListener('change', updatePlatforms);
+                buildWeb.dataset.listenerAttached = '1';
+            }
+            if (!buildAndroid.dataset.listenerAttached) {
+                buildAndroid.addEventListener('change', updatePlatforms);
+                buildAndroid.dataset.listenerAttached = '1';
+            }
+        }
+
+        // Checkbox de termos (quando preço > 0)
+        const priceTerms = document.getElementById('price-terms');
+        if (priceTerms && !priceTerms.dataset.listenerAttached) {
+            priceTerms.addEventListener('change', (e) => {
+                this.appData.termsAccepted = !!e.target.checked;
+                this.validateCurrentStep();
+            });
+            priceTerms.dataset.listenerAttached = '1';
+        }
+
+        // Seletor de empresa privada (auto-complete)
+        this.setupPrivateCompanySelector();
+
+        // Color pickers (keep #app-color and #app-color-hex in sync)
+        const colorPicker = document.getElementById('app-color');
+        const colorHex = document.getElementById('app-color-hex');
+        const normalizeHex = (val) => {
+            if (!val) return '#3b82f6';
+            let v = String(val).trim();
+            if (!v.startsWith('#')) v = '#' + v;
+            // Accept #RGB or #RRGGBB; expand #RGB
+            if (/^#([0-9a-fA-F]{3})$/.test(v)) {
+                const r = v[1], g = v[2], b = v[3];
+                v = `#${r}${r}${g}${g}${b}${b}`;
+            }
+            return /^#([0-9a-fA-F]{6})$/.test(v) ? v.toLowerCase() : '#3b82f6';
+        };
+        if (colorPicker && !colorPicker.dataset.listenerAttached) {
+            colorPicker.addEventListener('input', (e) => {
+                const v = normalizeHex(e.target.value);
+                this.appData.color = v;
+                if (colorHex && colorHex.value !== v) colorHex.value = v;
+            });
+            colorPicker.dataset.listenerAttached = 'true';
+        }
+        if (colorHex && !colorHex.dataset.listenerAttached) {
+            colorHex.addEventListener('input', (e) => {
+                const v = normalizeHex(e.target.value);
+                this.appData.color = v;
+                if (colorPicker && colorPicker.value !== v) colorPicker.value = v;
+            });
+            colorHex.dataset.listenerAttached = 'true';
+        }
+
+        // Layout / aspect ratio + orientação
+        const aspectSelect = document.getElementById('aspect-ratio');
+        const aspectCustom = document.getElementById('aspect-ratio-custom');
+        if (aspectSelect && !aspectSelect.dataset.listenerAttached) {
+            aspectSelect.addEventListener('change', (e) => {
+                const v = e.target.value;
+                if (v === 'custom') {
+                    if (aspectCustom) {
+                        aspectCustom.classList.remove('d-none');
+                        aspectCustom.focus();
+                    }
+                } else {
+                    if (aspectCustom) {
+                        aspectCustom.classList.add('d-none');
+                    }
+                    this.appData.aspectRatio = v || '4:3';
+                }
+            });
+            aspectSelect.dataset.listenerAttached = '1';
+        }
+        if (aspectCustom && !aspectCustom.dataset.listenerAttached) {
+            aspectCustom.addEventListener('input', (e) => {
+                const val = String(e.target.value || '').trim();
+                this.appData.aspectRatio = val || '4:3';
+            });
+            aspectCustom.dataset.listenerAttached = '1';
+        }
+        const supportsPortrait = document.getElementById('supports-portrait');
+        const supportsLandscape = document.getElementById('supports-landscape');
+        if (supportsPortrait && !supportsPortrait.dataset.listenerAttached) {
+            supportsPortrait.addEventListener('change', (e) => {
+                this.appData.supportsPortrait = !!e.target.checked;
+            });
+            supportsPortrait.dataset.listenerAttached = '1';
+        }
+        if (supportsLandscape && !supportsLandscape.dataset.listenerAttached) {
+            supportsLandscape.addEventListener('change', (e) => {
+                this.appData.supportsLandscape = !!e.target.checked;
+            });
+            supportsLandscape.dataset.listenerAttached = '1';
         }
 
         // Code editor
@@ -3840,6 +4228,8 @@ if (document.readyState === 'loading') {
                     this.appData.scopes = this.appData.scopes.filter(scope => scope !== e.target.value);
                 }
                 console.log('Scopes atualizados:', this.appData.scopes);
+                // Reforça a consistência entre scopes e nível de acesso
+                this.enforceAccessLevelConsistency();
             });
         });
     },
@@ -3880,7 +4270,16 @@ if (document.readyState === 'loading') {
 
             case 4:
                 nextButton = document.getElementById("step-4-next");
-                isValid = true; // Configuration step is always valid
+                // Exige aceite de termos quando houver preço > 0
+                if ((parseFloat(this.appData.price) || 0) > 0) {
+                    isValid = !!this.appData.termsAccepted;
+                } else {
+                    isValid = true;
+                }
+                // Exige seleção de empresa quando Privado (2)
+                if (isValid && Number(this.appData.accessLevel) === 2) {
+                    isValid = Array.isArray(this.appData.privateCompanies) && this.appData.privateCompanies.length > 0;
+                }
                 break;
 
             case 5:
@@ -3905,8 +4304,238 @@ if (document.readyState === 'loading') {
         return isValid;
     },
 
+    // Impede selecionar "Toda a Internet" quando houver scopes marcados (uso do SDK)
+    enforceAccessLevelConsistency() {
+        try {
+            const accessSelect = document.getElementById('access-level');
+            if (!accessSelect) return;
+            const hasScopes = Array.isArray(this.appData.scopes) && this.appData.scopes.length > 0;
+            // Desabilita a opção 0 quando houver scopes
+            Array.from(accessSelect.options).forEach(opt => {
+                if (String(opt.value) === '0') {
+                    opt.disabled = !!hasScopes;
+                }
+            });
+
+            if (hasScopes && String(accessSelect.value) === '0') {
+                // Força para "Usuários Logados"
+                accessSelect.value = '1';
+                this.appData.accessLevel = 1;
+                const accessHelp = document.getElementById('access-level-help');
+                if (accessHelp) {
+                    accessHelp.insertAdjacentHTML('beforeend', '<div id="access-level-warning" class="form-text text-warning mt-2"><i class="fas fa-info-circle"></i> Nível de acesso ajustado pois apps com permissões requerem login.</div>');
+                    setTimeout(() => document.getElementById('access-level-warning')?.remove(), 5000);
+                }
+                if (typeof this.showToast === 'function') {
+                    this.showToast('Apps com permissões do SDK exigem login e instalação. Nível "Toda a Internet" foi ajustado.', 'warning');
+                }
+            }
+            // Regra: Privado (2) é exclusivo para Negócios (entity_type = 2)
+            const entitySelect = document.getElementById('entity-type');
+            if (String(accessSelect.value) === '2' && entitySelect && String(entitySelect.value) !== '2') {
+                entitySelect.value = '2';
+                this.appData.entityType = 2;
+                if (typeof this.showToast === 'function') {
+                    this.showToast('Modo Privado é exclusivo para Negócios. Tipo ajustado para "Negócios".', 'info');
+                }
+            }
+
+            // Regra: "Toda a Internet" (0) força entity_type = 0 e desabilita o select
+            if (entitySelect) {
+                if (String(accessSelect.value) === '0') {
+                    // Garante que exista a opção Geral (0) e selecione-a
+                    let opt0 = Array.from(entitySelect.options).find(o => String(o.value) === '0');
+                    if (!opt0) {
+                        opt0 = document.createElement('option');
+                        opt0.value = '0';
+                        opt0.textContent = 'Geral';
+                        entitySelect.prepend(opt0);
+                    }
+                    entitySelect.value = '0';
+                    entitySelect.disabled = true;
+                    this.appData.entityType = 0;
+                } else {
+                    // Reabilita select e remove a opção 0 se existir, voltando ao padrão 1/2
+                    entitySelect.disabled = false;
+                    const opt0 = Array.from(entitySelect.options).find(o => String(o.value) === '0');
+                    if (opt0) {
+                        // Se estava selecionado 0, muda para 1 (Usuários) por padrão
+                        if (String(entitySelect.value) === '0') {
+                            entitySelect.value = '1';
+                            this.appData.entityType = 1;
+                        }
+                        entitySelect.removeChild(opt0);
+                    }
+                }
+            }
+            // Alternar campo de seleção de empresa privada
+            this.togglePrivateCompanySelector();
+        } catch (e) { /* noop */ }
+    },
+
+    // Exibe/oculta checkbox de termos com base no preço
+    togglePriceTermsVisibility() {
+        try {
+            const price = parseFloat(this.appData.price) || 0;
+            const container = document.getElementById('price-terms-container');
+            if (!container) return;
+            container.style.display = price > 0 ? 'block' : 'none';
+            if (price <= 0) {
+                // reset aceite quando voltar a 0
+                const cb = document.getElementById('price-terms');
+                if (cb) cb.checked = false;
+                this.appData.termsAccepted = false;
+            }
+        } catch (_) {}
+    },
+
+    // Exibe/oculta seletor de empresa para modo Privado (2)
+    togglePrivateCompanySelector() {
+        try {
+            const isPrivate = Number(this.appData.accessLevel) === 2;
+            const wrap = document.getElementById('private-company-container');
+            if (!wrap) return;
+            wrap.style.display = isPrivate ? 'block' : 'none';
+            if (!isPrivate) { // Clear selection when not in private mode
+                this.appData.privateCompanies = [];
+                const sel = document.getElementById('private-company-selected');
+                if (sel) sel.innerHTML = '';
+                const list = document.getElementById('private-company-results');
+                if (list) list.innerHTML = '';
+                const input = document.getElementById('private-company-search');
+                if (input) input.value = '';
+            }
+        } catch (_) {}
+    },
+
+    renderSelectedCompanies() {
+        const container = document.getElementById('private-company-selected');
+        if (!container) return;
+
+        if (this.appData.privateCompanies.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+
+        container.innerHTML = this.appData.privateCompanies.map(company => `
+            <span class="badge bg-primary me-1 mb-1">
+                ${this.escapeHtml(company.name)}
+                <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.6em;" aria-label="Remover" onclick="StoreApp.removePrivateCompany(${company.id})"></button>
+            </span>`).join('');
+    },
+    // Auto-complete de empresas (Workz! Companies)
+    setupPrivateCompanySelector() {
+        try {
+            const input = document.getElementById('private-company-search');
+            const list = document.getElementById('private-company-results');
+            const selected = document.getElementById('private-company-selected');
+            if (!input || input.dataset.listenerAttached) return;
+
+            let t = null;
+            const render = (items = []) => {
+                if (!list) return;
+                list.innerHTML = '';
+                items.slice(0,10).forEach(c => {
+                    const a = document.createElement('a');
+                    a.href = '#';
+                    a.className = 'list-group-item list-group-item-action';
+                    const cnpj = (c.cnpj || c.national_id || '').toString();
+                    a.innerHTML = `<div class="d-flex align-items-center"><img src="${c.im || '/images/app-default.png'}" style="width:24px;height:24px;border-radius:6px;margin-right:8px;"/> ${this.escapeHtml(c.tt || 'Negócio')} <small class="ms-2 text-muted">${this.escapeHtml(cnpj)}</small></div>`;
+                    a.addEventListener('click', (ev) => {
+                        ev.preventDefault();                        
+                        const newCompany = { id: Number(c.id), name: c.tt, cnpj: cnpj, im: c.im };
+                        // Add company only if it's not already selected
+                        if (!this.appData.privateCompanies.some(pc => pc.id === newCompany.id)) {
+                            this.appData.privateCompanies.push(newCompany);
+                            this.renderSelectedCompanies();
+                        }
+                        // Clear results and input
+                        if (list) list.innerHTML = '';
+                        if (input) input.value = '';
+                        this.validateCurrentStep();
+                    });
+                    list.appendChild(a);
+                });
+            };
+
+            const doSearch = async (term) => {
+                term = String(term || '').trim();
+                if (!term || term.length < 2) { render([]); return; }
+                try {
+                    const payload = {
+                        db: 'workz_companies',
+                        table: 'companies',
+                        columns: ['id','tt','national_id','im'],
+                        conditions: { st: 1, tt: { op: 'LIKE', value: `%${term}%` } },
+                        fetchAll: true,
+                        limit: 20,
+                        order: { by: 'tt', dir: 'ASC' }
+                    };
+                    const res = await this.apiPost('/search', payload);
+                    const rows = Array.isArray(res?.data) ? res.data : (res?.data ? [res.data] : []);
+                    render(rows);
+                } catch (e) {
+                    render([]);
+                }
+            };
+
+            input.addEventListener('input', (e) => {
+                clearTimeout(t); t = setTimeout(() => doSearch(e.target.value), 250);
+            });
+            input.dataset.listenerAttached = '1';
+        } catch (_) {}
+    },
+
+    removePrivateCompany(companyId) {
+        this.appData.privateCompanies = this.appData.privateCompanies.filter(c => c.id !== companyId);
+        this.renderSelectedCompanies();
+        // Re-validate step to enable/disable next button
+        this.validateCurrentStep();
+    },
+
     setupPreviewListener() {
         console.log('Setup preview listener');
+    },
+
+    updateSummaryPanel() {
+        try {
+            if (this.viewMode !== 'form') return;
+            const titleEl = document.getElementById('summary-title');
+            const slugEl = document.getElementById('summary-slug');
+            const accessEl = document.getElementById('summary-access');
+            const companyEl = document.getElementById('summary-company');
+            const priceEl = document.getElementById('summary-price');
+            const platformsEl = document.getElementById('summary-platforms');
+
+            if (titleEl) titleEl.textContent = this.appData.title || 'Sem título';
+            if (slugEl) slugEl.textContent = this.appData.slug ? `${this.appData.slug}.workz.co` : 'slug indefinido';
+
+            const accessLevels = { 0: 'Público', 1: 'Usuários logados', 2: 'Privado' };
+            if (accessEl) accessEl.textContent = `Acesso: ${accessLevels[this.appData.accessLevel] || 'N/A'}`;
+
+            if (companyEl) {
+                if (this.appData.company && this.appData.company.name) {
+                    companyEl.textContent = this.appData.company.name;
+                } else {
+                    companyEl.textContent = 'Não selecionada';
+                }
+            }
+
+            if (priceEl) {
+                const price = parseFloat(this.appData.price || 0);
+                priceEl.textContent = price > 0 ? `R$ ${price.toFixed(2)}` : 'Gratuito';
+            }
+
+            if (platformsEl) {
+                const chips = [];
+                const platforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
+                    ? this.appData.buildPlatforms
+                    : ['web'];
+                if (platforms.includes('web')) chips.push('<span class="summary-chip"><i class="fas fa-globe text-info"></i> Web</span>');
+                if (platforms.includes('android')) chips.push('<span class="summary-chip"><i class="fab fa-android text-success"></i> Android (debug)</span>');
+                platformsEl.innerHTML = chips.join('') || '<span class="text-muted small">Nenhuma plataforma selecionada</span>';
+            }
+        } catch (_) { /* ignore summary errors */ }
     },
 
     // Utility functions
@@ -4041,6 +4670,7 @@ if (document.readyState === 'loading') {
         }
 
         this.validateCurrentStep();
+        this.updateSummaryPanel();
     },
 
     loadCodeTemplate() {
@@ -4050,7 +4680,9 @@ if (document.readyState === 'loading') {
         // Only load template if field is empty and not in edit mode
         if (codeField.value.trim() === '' && !this.editMode) {
             if (this.appType === 'flutter') {
-                codeField.value = this.appData.dartCode || this.getFlutterTemplate();
+                // Para Flutter, não preencher automaticamente com template;
+                // deixar em branco até o usuário colar código ou usar "Template".
+                codeField.value = this.appData.dartCode || '';
                 this.appData.dartCode = codeField.value;
             } else {
                 codeField.value = this.appData.code || this.getJavaScriptTemplate();
@@ -4064,7 +4696,7 @@ if (document.readyState === 'loading') {
         const elements = {
             "final-title": this.appData.title || "",
             "final-description": this.appData.description || "Sem descrição",
-            "final-publisher": this.appData.company?.name || "Empresa",
+            "final-publisher": this.appData.company?.name || "Negócio",
             "final-version": this.appData.version || "1.0.0",
             "final-price": parseFloat(this.appData.price || 0).toFixed(2).replace(".", ","),
             "final-slug": this.appData.slug || "",
@@ -4080,15 +4712,15 @@ if (document.readyState === 'loading') {
         // Update access level
         const accessElement = document.getElementById("final-access");
         if (accessElement) {
-            const accessLevels = { 1: "Público", 2: "Instalação", 3: "Privado" };
-            accessElement.textContent = accessLevels[this.appData.accessLevel] || "Público";
+            const accessLevels = { 0: "Toda a Internet", 1: "Usuários logados", 2: "Privado" };
+            accessElement.textContent = accessLevels[this.appData.accessLevel] || "Toda a Internet";
         }
 
         // Update entity type
         const entityElement = document.getElementById("final-entity");
         if (entityElement) {
-            const entityTypes = { 0: "Geral", 1: "Usuários", 2: "Empresas", 3: "Equipes" };
-            entityElement.textContent = entityTypes[this.appData.entityType] || "Geral";
+            const entityTypes = { 0: "Geral", 1: "Usuários", 2: "Negócios" };
+            entityElement.textContent = entityTypes[this.appData.entityType] || "Usuários";
         }
 
         // Update icon
@@ -4270,62 +4902,61 @@ if (document.readyState === 'loading') {
             }
 
             if (this.appType === 'javascript') {
+                // Preview de JS via interactive/newWindow, usando um Blob HTML.
                 this._livePreviewMode = 'js';
                 const html = this._buildJsPreviewHtml(code);
-                const modalHtml = `
-                    <div class="modal fade" id="livePreviewModal" tabindex="-1">
-                        <div class="modal-dialog modal-xl">
-                            <div class="modal-content">
-                                <div class="modal-header">
-                                    <h5 class="modal-title"><i class="fas fa-eye"></i> Preview (JavaScript)</h5>
-                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                try {
+                    const blob = new Blob([html], { type: 'text/html' });
+                    const url = URL.createObjectURL(blob);
+                    const title = `Preview: ${this.appData.title || 'JavaScript App'}`;
+                    const hasInteractiveWindow =
+                        typeof window !== 'undefined' &&
+                        typeof window.newWindow === 'function';
+                    if (hasInteractiveWindow) {
+                        window.newWindow(
+                            url,
+                            `preview-js-${Date.now()}`,
+                            '/images/apps/app-studio.png',
+                            title
+                        );
+                    } else {
+                        // Fallback para o modal antigo, se interactive não estiver disponível
+                        const modalHtml = `
+                            <div class="modal fade" id="livePreviewModal" tabindex="-1">
+                                <div class="modal-dialog modal-xl">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title"><i class="fas fa-eye"></i> Preview (JavaScript)</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                        </div>
+                                        <div class="modal-body p-0">
+                                            <iframe id="live-preview-frame" style="width:100%; height:70vh; border:0; background:#fff"></iframe>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <small class="text-muted me-auto">Atualiza automaticamente enquanto você digita</small>
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="modal-body p-0">
-                                    <iframe id="live-preview-frame" style="width:100%; height:70vh; border:0; background:#fff"></iframe>
-                                </div>
-                                <div class="modal-footer">
-                                    <small class="text-muted me-auto">Atualiza automaticamente enquanto você digita</small>
-                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>`;
-                this.showModal(modalHtml, 'livePreviewModal');
-                // Set srcdoc after modal is in DOM
-                setTimeout(() => {
-                    const iframe = document.getElementById('live-preview-frame');
-                    if (iframe) iframe.srcdoc = html;
-                }, 50);
+                            </div>`;
+                        this.showModal(modalHtml, 'livePreviewModal');
+                        setTimeout(() => {
+                            const iframe = document.getElementById('live-preview-frame');
+                            if (iframe) iframe.srcdoc = html;
+                        }, 50);
+                    }
+                } catch (e) {
+                    console.warn('Falha ao abrir preview JS via interactive, usando modal:', e);
+                }
                 return;
             }
 
             // Flutter quick preview via build worker
             this._livePreviewMode = 'flutter';
-            const modalHtml = `
-                <div class="modal fade" id="livePreviewModal" tabindex="-1">
-                    <div class="modal-dialog modal-xl">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title"><i class="fas fa-eye"></i> Preview (Flutter Web)</h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                            </div>
-                            <div class="modal-body p-0" id="live-preview-body">
-                                <div class="p-3"><i class="fas fa-spinner fa-spin me-2"></i>Gerando preview...</div>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-outline-primary" id="btn-refresh-preview"><i class="fas fa-redo"></i> Atualizar Preview</button>
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>`;
-            this.showModal(modalHtml, 'livePreviewModal');
-            // Hook refresh button
-            setTimeout(() => {
-                const btn = document.getElementById('btn-refresh-preview');
-                if (btn) btn.addEventListener('click', () => this._generateFlutterPreview());
-                this._generateFlutterPreview();
-            }, 50);
+            this.showToast('Gerando preview Flutter em uma nova janela…', 'info');
+            // Para Flutter, delegamos ao worker que retorna uma URL /preview/;
+            // assim que estiver pronta, abrimos via interactive/newWindow.
+            this._generateFlutterPreview(true);
 
         } catch (e) {
             console.error('Preview error:', e);
@@ -4373,10 +5004,24 @@ if (document.readyState === 'loading') {
         } catch (e) { /* ignore */ }
     },
 
-    async _generateFlutterPreview() {
-        const slug = this.appData.slug || ('preview-' + Date.now());
-        const codeField = document.getElementById('app-code');
-        const dartCode = codeField ? codeField.value : (this.appData.dartCode || '');
+    async _generateFlutterPreview(openInWindow = false) {
+        const slug = (this.appData.slug || '').trim() || ('preview-' + Date.now());
+        // Obter código atual do editor (CodeMirror ou textarea / estado)
+        let dartCode = '';
+        if (this._codeMirrorInstance) {
+            dartCode = this._codeMirrorInstance.getValue() || '';
+        } else {
+            const codeField = document.getElementById('app-code');
+            dartCode = (codeField ? codeField.value : (this.appData.dartCode || '')).trim();
+        }
+        if (!dartCode) {
+            this.showToast('Escreva algum código Dart antes de gerar o preview.', 'info');
+            const body = document.getElementById('live-preview-body');
+            if (body) {
+                body.innerHTML = '<div class="p-3 text-warning">Nenhum código Dart encontrado para pré-visualizar.</div>';
+            }
+            return;
+        }
 
         // Prefer same-origin proxy (/preview -> nginx -> worker), with fallbacks
         const bases = [];
@@ -4408,13 +5053,62 @@ if (document.readyState === 'loading') {
                 this._activePreviewBase = urlBase; // track for cleanup and iframe src
                 this._activePreviewToken = data.data?.token || null;
                 const url = data.data?.url || null; // like /preview/<token>/
-                const body = document.getElementById('live-preview-body');
-                if (url && body) {
-                    body.innerHTML = '<iframe id="live-preview-frame" style="width:100%; height:70vh; border:0; background:#fff"></iframe>';
-                    const iframe = document.getElementById('live-preview-frame');
-                    iframe.src = (urlBase || '') + url;
-                } else if (body) {
-                    body.innerHTML = '<div class="p-3 text-danger">Pré-visualização indisponível.</div>';
+                 if (url) {
+                    const fullUrl = (urlBase || '') + url;
+
+                    const canUseInteractive =
+                        openInWindow &&
+                        typeof window !== 'undefined' &&
+                        typeof window.newWindow === 'function';
+
+                    if (canUseInteractive) {
+                        const title = `Preview: ${this.appData.title || 'Flutter App'}`;
+                        window.newWindow(
+                            fullUrl,
+                            `preview-flutter-${Date.now()}`,
+                            '/images/apps/app-studio.png',
+                            title
+                        );
+                    } else {
+                        // Fallback: criar (se preciso) e usar o modal de preview embutido
+                        let body = document.getElementById('live-preview-body');
+                        if (!body) {
+                            const modalHtml = `
+                                <div class="modal fade" id="livePreviewModal" tabindex="-1">
+                                    <div class="modal-dialog modal-xl">
+                                        <div class="modal-content">
+                                            <div class="modal-header">
+                                                <h5 class="modal-title">
+                                                    <i class="fas fa-eye"></i> Preview (Flutter)
+                                                </h5>
+                                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                            </div>
+                                            <div class="modal-body p-0" id="live-preview-body"></div>
+                                            <div class="modal-footer">
+                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                                                    Fechar
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>`;
+                            this.showModal(modalHtml, 'livePreviewModal');
+                            body = document.getElementById('live-preview-body');
+                        }
+
+                        if (body) {
+                            body.innerHTML =
+                                '<iframe id="live-preview-frame" style="width:100%; height:70vh; border:0; background:#fff"></iframe>';
+                            const iframe = document.getElementById('live-preview-frame');
+                            iframe.src = fullUrl;
+                        }
+                    }
+                    return;
+                } else {
+                    const body = document.getElementById('live-preview-body');
+                    if (body && !openInWindow) {
+                        body.innerHTML = '<div class="p-3 text-danger">Pré-visualização indisponível.</div>';
+                    }
                 }
                 return; // stop after first success
             } catch (e) {
@@ -4472,6 +5166,10 @@ if (document.readyState === 'loading') {
         } else {
             const content = document.getElementById('build-status-content');
             if (content) { content.innerHTML = this.renderBuildStatusContent(buildData); }
+            try {
+                const modal = bootstrap.Modal.getOrCreateInstance(existing);
+                modal.show();
+            } catch (_) { /* ignore bootstrap errors */ }
         }
     },
 
@@ -4484,6 +5182,17 @@ if (document.readyState === 'loading') {
         };
 
         const config = statusConfig[buildData.build_status] || statusConfig['success'];
+        const isFlutter = String(buildData.app_type || '').toLowerCase() === 'flutter';
+
+        // Default plataformas: usa preferências salvas no formulário (etapa 4),
+        // se existirem; caso contrário, assume apenas Web.
+        let defaultPlatforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
+            ? this.appData.buildPlatforms
+            : ['web'];
+        // Se o backend enviar algo como build_targets no buildData futuramente, podemos
+        // mesclar aqui sem quebrar o comportamento atual.
+        const webCheckedAttr = defaultPlatforms.includes('web') ? 'checked' : '';
+        const androidCheckedAttr = defaultPlatforms.includes('android') ? 'checked' : '';
 
         const problems = this.extractBuildProblems(buildData.build_log || '') || [];
         return `
@@ -4496,6 +5205,30 @@ if (document.readyState === 'loading') {
                     </div>
                 </div>
             </div>
+            
+            ${isFlutter ? `
+                <div class="mt-2 mb-3">
+                    <h6>Plataformas para novo build:</h6>
+                    <div class="d-flex align-items-center flex-wrap gap-2">
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="build-target-web" value="web" ${webCheckedAttr}>
+                            <label class="form-check-label" for="build-target-web">
+                                <i class="fas fa-globe text-info"></i> Web
+                            </label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" type="checkbox" id="build-target-android" value="android" ${androidCheckedAttr}>
+                            <label class="form-check-label" for="build-target-android">
+                                <i class="fab fa-android text-success"></i> Android
+                            </label>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-primary ms-2" onclick="StoreApp.triggerRebuildWithTargets(${buildData.app_id})">
+                            <i class="fas fa-hammer"></i> Rebuild com plataformas selecionadas
+                        </button>
+                    </div>
+                    <small class="text-muted d-block mt-1">Se nenhuma plataforma for selecionada, o build padrão será apenas Web.</small>
+                </div>
+            ` : ''}
             
             ${buildData.builds && buildData.builds.length > 0 ? `
                 <h6>Builds por Plataforma:</h6>
@@ -4943,11 +5676,16 @@ if (document.readyState === 'loading') {
         try {
             this.showToast('Iniciando rebuild do app Flutter...', 'info');
 
-            const response = await this.postRebuildCompat(appId);
+            // Respeita as plataformas configuradas na Etapa 4 (buildPlatforms)
+            let platforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
+                ? this.appData.buildPlatforms
+                : ['web'];
+
+            const response = await this.postRebuildCompat(appId, platforms);
             const httpOk = response && typeof response.status === 'number' && response.status >= 200 && response.status < 300;
             if (response && (response.success || httpOk)) {
-                this.showToast('Rebuild iniciado com sucesso!', 'success');
-                // Refresh the build status
+                this.showToast('Rebuild iniciado com sucesso para: ' + platforms.join(', '), 'success');
+                // Atualiza o status do build após alguns segundos
                 setTimeout(() => this.checkBuildStatus(appId), 2000);
             } else {
                 throw new Error(response.message || 'Erro ao iniciar rebuild');
@@ -4955,6 +5693,32 @@ if (document.readyState === 'loading') {
         } catch (e) {
             console.error('Error rebuilding app:', e);
             this.showToast('Erro ao fazer rebuild: ' + e.message, 'error');
+        }
+    },
+
+    async triggerRebuildWithTargets(appId) {
+        try {
+            const webCb = document.getElementById('build-target-web');
+            const androidCb = document.getElementById('build-target-android');
+            const targets = [];
+            if (webCb && webCb.checked) targets.push('web');
+            if (androidCb && androidCb.checked) targets.push('android');
+            if (!targets.length) {
+                alert('Selecione pelo menos uma plataforma para o build.');
+                return;
+            }
+            this.showToast('Iniciando build Flutter para: ' + targets.join(', '), 'info');
+            const response = await this.postRebuildCompat(appId, targets);
+            const httpOk = response && typeof response.status === 'number' && response.status >= 200 && response.status < 300;
+            if (response && (response.success || httpOk)) {
+                this.showToast('Build iniciado com sucesso!', 'success');
+                setTimeout(() => this.checkBuildStatus(appId), 2000);
+            } else {
+                throw new Error(response.message || 'Erro ao iniciar build');
+            }
+        } catch (e) {
+            console.error('Error triggering platform build:', e);
+            this.showToast('Erro ao iniciar build: ' + e.message, 'error');
         }
     },
 

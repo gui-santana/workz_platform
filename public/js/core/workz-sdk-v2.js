@@ -29,7 +29,32 @@
       this.token = null;
       this.user = null;
       this.context = null;
+      this.isAppToken = false;
       this.ready = false;
+    }
+
+    decodeJwtPayload(token) {
+      try {
+        const parts = String(token || '').split('.');
+        if (parts.length < 2) return null;
+        let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const pad = b64.length % 4;
+        if (pad) {
+          b64 += '='.repeat(4 - pad);
+        }
+        const json = decodeURIComponent(atob(b64).split('').map((c) => {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(json);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    isAppScopedToken(token) {
+      const payload = this.decodeJwtPayload(token);
+      const aud = payload?.aud || '';
+      return (typeof aud === 'string') && aud.startsWith('app:');
     }
 
     parseTokenFromUrl() {
@@ -53,11 +78,15 @@
 
     async initStandalone(apiClient) {
       this.token = this.parseTokenFromUrl();
+      this.isAppToken = this.isAppScopedToken(this.token);
       
       if (this.token) {
-        localStorage.setItem('jwt_token', this.token);
+        if (!this.isAppToken) {
+          localStorage.setItem('jwt_token', this.token);
+        }
       } else {
         this.token = localStorage.getItem('jwt_token');
+        this.isAppToken = this.isAppScopedToken(this.token);
       }
       
       if (this.token && !this.user) {
@@ -74,8 +103,11 @@
 
     async initEmbed(apiClient) {
       this.token = this.parseTokenFromUrl();
+      this.isAppToken = this.isAppScopedToken(this.token);
       if (this.token) {
-        localStorage.setItem('jwt_token', this.token);
+        if (!this.isAppToken) {
+          localStorage.setItem('jwt_token', this.token);
+        }
       }
 
       return new Promise((resolve) => {
@@ -84,11 +116,13 @@
           if (!data || typeof data !== 'object') return;
           
           if (data.type === 'workz-sdk:auth') {
-            this.token = data.jwt || null;
+            if (!this.isAppToken) {
+              this.token = data.jwt || null;
+            }
             this.user = data.user || null;
             this.context = data.context || null;
             
-            if (this.token) {
+            if (this.token && !this.isAppToken) {
               localStorage.setItem('jwt_token', this.token);
             }
             
@@ -101,7 +135,7 @@
         // If we already have token from URL, proceed without handshake
         if (this.token) {
           this.finishInit(apiClient, resolve);
-          return;
+          // Continua o handshake para obter user/context quando possível.
         }
 
         // Initiate handshake with parent
@@ -206,6 +240,21 @@
           data.success = false;
           data.status = response.status;
         }
+
+        // Redirect to app login when token is missing (external access)
+        try {
+          const errMsg = String(data.error || data.message || '');
+          const missingToken = response.status === 401 && /token/i.test(errMsg) && /fornecido|missing|not provided/i.test(errMsg);
+          if (missingToken && typeof window !== 'undefined') {
+            const slug = window.WorkzAppConfig?.slug;
+            if (slug) {
+              const target = `/app/public/${encodeURIComponent(slug)}`;
+              if (!window.location.pathname.startsWith('/app/public/')) {
+                window.location.href = target;
+              }
+            }
+          }
+        } catch (_) {}
       }
 
       return data;
@@ -468,6 +517,7 @@
       this.auth = null;
       this.apiClient = null;
       this.storage = null;
+      this.payments = null;
       this.listeners = {};
       this.initialized = false;
     }
@@ -492,6 +542,70 @@
       
       // Initialize storage module
       this.storage = new StorageModule(this.apiClient, this.auth);
+      
+      // Initialize payments module (Phase 1: one-time purchases)
+      this.payments = {
+        /**
+         * Creates a Mercado Pago preference for one-time purchases.
+         * params: { appId, title?, quantity?, unitPrice?, currency?, companyId?, backUrls? }
+         * returns: { success, transaction_id, preference_id, init_point }
+         */
+        createPurchase: async (params) => {
+          const body = {
+            app_id: params.appId,
+            title: params.title,
+            quantity: params.quantity,
+            unit_price: params.unitPrice,
+            currency: params.currency,
+            company_id: params.companyId,
+            back_urls: params.backUrls,
+          };
+          return await this.apiClient.post('/payments/preference', body);
+        },
+        /**
+         * Fetches a transaction by ID
+         */
+        getTransaction: async (id) => {
+          return await this.apiClient.get(`/payments/transactions/${encodeURIComponent(id)}`);
+        },
+        /**
+         * Lists current user's transactions with optional filters
+         */
+        listMyTransactions: async (filters = {}) => {
+          const params = new URLSearchParams();
+          if (filters.appId) params.set('app_id', String(filters.appId));
+          if (filters.status) params.set('status', String(filters.status));
+          if (filters.limit) params.set('limit', String(filters.limit));
+          const qs = params.toString();
+          const path = qs ? `/payments/transactions?${qs}` : '/payments/transactions';
+          return await this.apiClient.get(path);
+        },
+        /**
+         * Gets only the status of a transaction
+         */
+        getStatus: async (id) => {
+          return await this.apiClient.get(`/payments/status/${encodeURIComponent(id)}`);
+        },
+        /**
+         * Charges using Stripe PaymentIntent.
+         * params: { appId, amount, currency?, paymentMethodId?, pmId?, companyId?, description?, metadata?, usePix? }
+         * If paymentMethodId/pmId is omitted, backend returns client_secret for client-side confirmation.
+         */
+        chargeToken: async (params) => {
+          const body = {
+            app_id: params.appId,
+            amount: params.amount,
+            currency: params.currency,
+            payment_method_id: params.paymentMethodId,
+            pm_id: params.pmId,
+            company_id: params.companyId,
+            description: params.description,
+            metadata: params.metadata,
+            use_pix: params.usePix,
+          };
+          return await this.apiClient.post('/payments/charge', body);
+        },
+      };
       
       // Load platform adapter
       this.adapter = this.loadAdapter();

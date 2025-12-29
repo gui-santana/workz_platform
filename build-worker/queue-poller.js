@@ -104,12 +104,26 @@ async function processQueueJob(job) {
   const slug = job.slug;
   const codeSource = { dart_code: job.dart_code, files: job.files };
 
+  // Plataformas alvo para este job.
+  // v1: lemos de job.platforms (string "web,android") quando existir; caso contrário, default ['web'].
+  let platforms = ['web'];
+  try {
+    if (job.platforms && typeof job.platforms === 'string') {
+      const parts = job.platforms.split(',').map(p => String(p || '').trim().toLowerCase()).filter(Boolean);
+      if (parts.length > 0) {
+        platforms = Array.from(new Set(parts));
+      }
+    }
+  } catch (_) {
+    // fallback silencioso para ['web']
+  }
+
   try {
     const dc = typeof codeSource.dart_code === 'string' ? codeSource.dart_code : '';
     const dcLen = dc.length;
     const dcHash = dcLen > 0 ? crypto.createHash('sha1').update(dc).digest('hex').slice(0, 12) : 'none';
     const filesCount = codeSource.files && typeof codeSource.files === 'object' ? Object.keys(codeSource.files).length : 0;
-    console.log(`[queue:${job.job_id}] payload: dart_code_len=${dcLen} sha1=${dcHash} files=${filesCount}`);
+    console.log(`[queue:${job.job_id}] payload: dart_code_len=${dcLen} sha1=${dcHash} files=${filesCount} platforms=${platforms.join(',')}`);
   } catch (_) { /* ignore */ }
 
   const tempBuildDir = path.join(BUILD_WORKSPACE, slug);
@@ -226,34 +240,61 @@ async function processQueueJob(job) {
   } else {
     console.log(`[queue:${job.job_id}] analyze ok (sem erros; avisos permitidos)`);
   }
-    const baseHref = `/apps/flutter/${appId}/web/`;
-    console.log(`[queue:${job.job_id}] flutter build web --release --base-href=${baseHref}`);
-    const { stdout, stderr } = await executeCommand(`flutter build web --release --base-href=${baseHref}`, tempBuildDir);
-    const buildLog = stdout + '\n' + stderr;
+    let combinedLog = '';
 
-    const sourceArtifacts = path.join(tempBuildDir, 'build', 'web');
-    // New canonical path for web artifacts: /public/apps/flutter/<appId>/web
-    const destArtifacts = path.join(PUBLIC_APPS_DIR, 'flutter', String(appId), 'web');
-    console.log(`[queue:${job.job_id}] copy artifacts`);
-    // Clean destination to avoid stale files
-    await fs.remove(destArtifacts).catch(() => {});
-    await fs.ensureDir(destArtifacts);
-    await fs.copy(sourceArtifacts, destArtifacts);
+    // Sempre construir Web quando solicitado
+    if (platforms.includes('web')) {
+      const baseHref = `/apps/flutter/${appId}/web/`;
+      console.log(`[queue:${job.job_id}] flutter build web --release --base-href=${baseHref}`);
+      const { stdout, stderr } = await executeCommand(`flutter build web --release --base-href=${baseHref}`, tempBuildDir);
+      combinedLog += stdout + '\n' + stderr;
 
-    // Write a build stamp for easy verification on host
-    const stamp = {
-      job_id: job.job_id,
-      app_id: appId,
-      slug,
-      completed_at: new Date().toISOString(),
-      api_base: API_BASE,
-      worker_pid: process.pid
-    };
-    try { await fs.writeFile(path.join(destArtifacts, 'workz-build.json'), JSON.stringify(stamp, null, 2)); } catch(_) {}
+      const sourceArtifacts = path.join(tempBuildDir, 'build', 'web');
+      // New canonical path for web artifacts: /public/apps/flutter/<appId>/web
+      const destArtifacts = path.join(PUBLIC_APPS_DIR, 'flutter', String(appId), 'web');
+      console.log(`[queue:${job.job_id}] copy web artifacts`);
+      await fs.remove(destArtifacts).catch(() => {});
+      await fs.ensureDir(destArtifacts);
+      await fs.copy(sourceArtifacts, destArtifacts);
 
+      const stamp = {
+        job_id: job.job_id,
+        app_id: appId,
+        slug,
+        completed_at: new Date().toISOString(),
+        api_base: API_BASE,
+        worker_pid: process.pid,
+        platforms,
+      };
+      try {
+        await fs.writeFile(path.join(destArtifacts, 'workz-build.json'), JSON.stringify(stamp, null, 2));
+      } catch(_) {}
+    }
+
+    // Build Android (APK) quando incluído nas plataformas
+    if (platforms.includes('android')) {
+      const androidCommand = 'flutter build apk --debug --no-shrink';
+      console.log(`[queue:${job.job_id}] ${androidCommand}`);
+      const { stdout, stderr } = await executeCommand(androidCommand, tempBuildDir);
+      combinedLog += '\n\n=== ANDROID BUILD ===\n' + stdout + '\n' + stderr;
+
+      const sourceApk = path.join(tempBuildDir, 'build', 'app', 'outputs', 'flutter-apk', 'app-debug.apk');
+      const destDir = path.join(PUBLIC_APPS_DIR, 'flutter', String(appId), 'android');
+      await fs.ensureDir(destDir);
+      if (await fs.pathExists(sourceApk)) {
+        const safeSlug = (slug || `app_${appId || 'x'}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const destApk = path.join(destDir, `${safeSlug}-debug.apk`);
+        console.log(`[queue:${job.job_id}] copy android artifact -> ${destApk}`);
+        await fs.copy(sourceApk, destApk);
+      } else {
+        console.warn(`[queue:${job.job_id}] APK não encontrado em ${sourceApk}`);
+      }
+    }
+
+    const finalLog = combinedLog || 'Build concluído sem saída de log.';
     const webPath = `/apps/flutter/${appId}/web/`;
-    console.log(`[queue:${job.job_id}] success -> ${webPath}`);
-    await updateQueueJob(job.job_id, appId, 'success', buildLog, webPath);
+    console.log(`[queue:${job.job_id}] success -> ${webPath} (platforms=${platforms.join(',')})`);
+    await updateQueueJob(job.job_id, appId, 'success', finalLog, webPath);
   } catch (error) {
     console.error(`[queue:${job.job_id}] build failed:`, error?.message || error);
     await updateQueueJob(job.job_id, appId, 'failed', error?.message || String(error));

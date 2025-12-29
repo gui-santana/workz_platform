@@ -195,7 +195,8 @@ JS;
             case 'javascript':
             case 'js':
             default:
-                return "/apps/javascript/$appId/";
+                // Evita 403 por listagem de diretório quando o index não é servido automaticamente.
+                return "/apps/javascript/$appId/index.html";
         }
     }
 

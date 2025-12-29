@@ -1,5 +1,5 @@
 // JavaScript otimizado
-// Compilado em: 2025-11-07 15:31:15
+// Compilado em: 2025-12-09 20:14:21
 // Compilador Universal - Genérico
 
 console.log('🚀 App JavaScript iniciado (Compilador Universal)');
@@ -135,43 +135,12 @@ window.StoreApp = {
                 this.loadFromLocalStorage();
             }
 
-            // Criar pastas padrão localmente se não existirem
-            if (this.folders.length === 0 && !this.defaultFoldersCreated) {
-                this.createDefaultFoldersLocally();
-            }
-
             console.log('Dados carregados:', { tasks: this.tasks.length, folders: this.folders.length });
         } catch (error) {
             console.error('Erro ao carregar dados:', error);
             this.loadFromLocalStorage();
-            // Criar pastas padrão localmente em caso de erro
-            if (this.folders.length === 0 && !this.defaultFoldersCreated) {
-                this.createDefaultFoldersLocally();
-            }
+           
         }
-    },
-
-    createDefaultFoldersLocally() {
-        if (this.defaultFoldersCreated) return;
-        this.defaultFoldersCreated = true;
-
-        this.folders = [
-            { id: 'folder_1', name: 'IBH - Entrevias', description: 'Peça destinada ao acompanhamento das obrigações de Entrevias', color: '#FFD700' },
-            { id: 'folder_2', name: 'IBH - CART', description: 'Cartório de Registro de Títulos', color: '#FF4444' },
-            { id: 'folder_3', name: 'IBH - EXO', description: 'Exame de Ordem', color: '#4444FF' },
-            { id: 'folder_4', name: 'Educação', description: 'Tarefas relacionadas à educação', color: '#FFB6C1' },
-            { id: 'folder_5', name: 'Finanças Pessoais', description: 'Controle financeiro pessoal', color: '#FF69B4' }
-        ];
-
-        // Criar algumas tarefas de exemplo
-        this.tasks = [
-            { id: 'task_1', title: 'B3 - Atualização Cadastral da Entrevias', description: 'Tarefa de exemplo', folderId: 'folder_1', status: 'Em execução', priority: 27 },
-            { id: 'task_2', title: 'Pentágono - CART Apólice de Seguro', description: 'Tarefa de exemplo', folderId: 'folder_2', status: 'Em execução', priority: 15 },
-            { id: 'task_3', title: 'CVM - Anúncio de Encerramento', description: 'Tarefa de exemplo', folderId: 'folder_1', status: 'Iniciadas', priority: 12 },
-            { id: 'task_4', title: 'Workz! - Registro de Marca', description: 'Tarefa de exemplo', folderId: 'folder_4', status: 'Iniciadas', priority: 70 },
-            { id: 'task_5', title: 'Pátria - Debenture Tracking', description: 'Tarefa de exemplo', folderId: 'folder_5', status: 'Pendentes', priority: 12 },
-            { id: 'task_6', title: 'Prefeitura - Acompanhar recurso', description: 'Tarefa de exemplo', folderId: 'folder_2', status: 'Pendentes', priority: 8 }
-        ];
     },
 
     // Métodos de armazenamento local

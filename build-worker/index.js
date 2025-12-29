@@ -5,6 +5,7 @@ const { exec } = require('child_process');
 const fs = require('fs-extra'); // Usamos fs-extra para facilitar a cópia de diretórios
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -35,6 +36,90 @@ const PREVIEW_ROOT = path.join(BUILD_WORKSPACE, 'preview');
 
 // Minimal default entrypoint to avoid empty main.dart builds
 const DEFAULT_MAIN_DART = "import 'package:flutter/material.dart';\nvoid main()=>runApp(const MaterialApp(home: Scaffold(body: Center(child: Text('Hello')))));\n";
+const ANDROID_DART_INJECTION = process.env.ANDROID_DART_INJECTION || '';
+const BUILD_COMMAND_TIMEOUT_MS = Number(process.env.BUILD_COMMAND_TIMEOUT_MS || 600000);
+const BUILD_APK_TIMEOUT_SECS = Number(process.env.BUILD_APK_TIMEOUT_SECS || 600);
+
+async function ensureBuildLogDir(tempBuildDir) {
+  const logDir = path.join(tempBuildDir, 'build-logs');
+  await fs.ensureDir(logDir);
+  return logDir;
+}
+
+async function appendBuildLog(tempBuildDir, platform, entry) {
+  try {
+    const logDir = await ensureBuildLogDir(tempBuildDir);
+    const filePath = path.join(logDir, `${platform}.log`);
+    const timestamp = new Date().toISOString();
+    const formatted = `${timestamp} | ${entry}\n\n`;
+    await fs.appendFile(filePath, formatted);
+  } catch (e) {
+    console.warn(`[build-log] Falha ao escrever log (${platform}): ${e.message || e}`);
+  }
+}
+
+async function cleanAndroidGradleCache(tempBuildDir, slug) {
+  try {
+    const homeDir = os.homedir ? os.homedir() : (process.env.HOME || process.env.USERPROFILE);
+    if (homeDir) {
+      const gradleDir = path.join(homeDir, '.gradle');
+      if (await fs.pathExists(gradleDir)) {
+        await fs.remove(gradleDir);
+        console.log(`[${slug}] Removed global Gradle dir: ${gradleDir}`);
+      }
+    }
+    const androidGradleDir = path.join(tempBuildDir, 'android', '.gradle');
+    if (await fs.pathExists(androidGradleDir)) {
+      await fs.remove(androidGradleDir);
+      console.log(`[${slug}] Removed local Android .gradle dir`);
+    }
+    const androidBuildDir = path.join(tempBuildDir, 'android', 'build');
+    if (await fs.pathExists(androidBuildDir)) {
+      await fs.remove(androidBuildDir);
+      console.log(`[${slug}] Removed local Android build dir`);
+    }
+    const dartToolAndroid = path.join(tempBuildDir, '.dart_tool', 'android');
+    if (await fs.pathExists(dartToolAndroid)) {
+      await fs.remove(dartToolAndroid);
+      console.log(`[${slug}] Removed .dart_tool/android cache`);
+    }
+  } catch (e) {
+    console.warn(`[${slug}] Falha ao limpar cache Gradle:`, e.message || e);
+  }
+}
+
+async function applyAndroidDartInjection(tempBuildDir, slug) {
+  try {
+    if (!ANDROID_DART_INJECTION) return;
+    const targetPath = path.join(tempBuildDir, 'lib', 'main.dart');
+    if (!await fs.pathExists(targetPath)) return;
+    const current = await fs.readFile(targetPath, 'utf8');
+    if (current.includes('// Workz Android injection')) return;
+    await fs.appendFile(targetPath, `\n// Workz Android injection\n${ANDROID_DART_INJECTION}\n`);
+    console.log(`[${slug}] Android dart injection aplicado.`);
+  } catch (e) {
+    console.warn(`[${slug}] Falha ao aplicar Android Dart injection:`, e.message || e);
+  }
+}
+
+async function disableAndroidMinify(tempBuildDir, slug) {
+  try {
+    const appGradle = path.join(tempBuildDir, 'android', 'app', 'build.gradle');
+    if (!await fs.pathExists(appGradle)) return;
+    let content = await fs.readFile(appGradle, 'utf8');
+    // Força minifyEnabled/shrinkResources para false no build release
+    content = content.replace(/minifyEnabled\s+true/g, 'minifyEnabled false');
+    if (!/shrinkResources\s+false/.test(content)) {
+      content = content.replace(/(minifyEnabled\s+false)/, '$1\n            shrinkResources false');
+    } else {
+      content = content.replace(/shrinkResources\s+true/g, 'shrinkResources false');
+    }
+    await fs.writeFile(appGradle, content);
+    console.log(`[${slug}] minify/shrink desabilitados para release (APK).`);
+  } catch (e) {
+    console.warn(`[${slug}] Falha ao desabilitar minify/shrink:`, e.message || e);
+  }
+}
 
 // Ensure Flutter Web toolchain is ready (run once, best-effort)
 let __flutterReady = false;
@@ -56,7 +141,7 @@ async function ensureFlutterWebReady() {
  */
 app.post('/build/:appId', (req, res) => {
     const appId = req.params.appId;
-    const { dart_code, slug, files } = req.body; // Agora pode receber 'files'
+    const { dart_code, slug, files, platforms } = req.body; // Agora pode receber 'files' e 'platforms'
 
     // Valida se tem 'slug', 'appId' e pelo menos uma forma de código ('dart_code' ou 'files')
     if (!appId || !slug || (!dart_code && !files)) {
@@ -67,7 +152,7 @@ app.post('/build/:appId', (req, res) => {
     res.status(202).json({ success: true, message: `Build para o app ${appId} iniciado.` });
 
     // Inicia o processo de build em segundo plano (sem 'await')
-    runBuildProcess(appId, slug, { dart_code, files });
+    runBuildProcess(appId, slug, { dart_code, files, platforms });
 });
 
 // Valid Dart package name helper (lowercase, digits, underscores; must start with letter or underscore)
@@ -94,15 +179,20 @@ async function runBuildProcess(appId, slug, codeSource) {
         const dcLen = dc.length;
         const dcHash = dcLen > 0 ? crypto.createHash('sha1').update(dc).digest('hex').slice(0, 12) : 'none';
         const filesCount = codeSource && codeSource.files && typeof codeSource.files === 'object' ? Object.keys(codeSource.files).length : 0;
-        console.log(`[${slug}] payload: dart_code_len=${dcLen} sha1=${dcHash} files=${filesCount}`);
+        const platforms = Array.isArray(codeSource.platforms) && codeSource.platforms.length
+            ? Array.from(new Set(codeSource.platforms.map(p => String(p || '').toLowerCase())))
+            : ['web'];
+        console.log(`[${slug}] payload: dart_code_len=${dcLen} sha1=${dcHash} files=${filesCount} platforms=${platforms.join(',')}`);
     } catch (_) { /* ignore diagnostics */ }
-    await updateBuildStatus(appId, 'building', 'Preparando ambiente...');
+    await updateBuildStatus(appId, 'building', 'Preparando ambiente...', { platform: 'web' });
 
     try {
         // 1. Preparar o ambiente de build
         await fs.ensureDir(tempBuildDir);
+        await appendBuildLog(tempBuildDir, 'workflow', 'Workspace preparado e pronto para build.');
         const projectName = toDartPackageName(slug || `app_${appId}`);
         await executeCommand(`flutter create . --project-name ${projectName}`, tempBuildDir);
+        await disableAndroidMinify(tempBuildDir, slug);
         
         // 2. Injetar o código do usuário (lógica nova)
         if (codeSource.files && typeof codeSource.files === 'object') {
@@ -173,7 +263,7 @@ dependencies:
             console.log(`[${slug}] Código injetado em lib/main.dart.`);
         }
 
-        await updateBuildStatus(appId, 'building', 'Código injetado, iniciando compilação...');
+        await updateBuildStatus(appId, 'building', 'Código injetado, iniciando compilação...', { platform: 'web' });
         // Ensure pubspec has required dependencies before fetching
         await ensurePubspecDeps(tempBuildDir, slug);
 
@@ -213,34 +303,93 @@ dependencies:
             console.log(`[${slug}] dart analyze: sem erros (avisos não bloqueiam).`);
         }
 
-        // 4. Executar o build do Flutter (com base-href para subpath)
-        const baseHref = `/apps/flutter/${appId}/web/`;
-        const { stdout, stderr } = await executeCommand(`flutter build web --release --base-href=${baseHref}`, tempBuildDir);
-        const buildLog = stdout + '\n' + stderr;
-        console.log(`[${slug}] Build finalizado.`);
+        // 4. Executar os builds solicitados
+        const platforms = Array.isArray(codeSource.platforms) && codeSource.platforms.length
+            ? Array.from(new Set(codeSource.platforms.map(p => String(p || '').toLowerCase())))
+            : ['web'];
 
-        // 5. Copiar os artefatos para o diretório público
-        const sourceArtifacts = path.join(tempBuildDir, 'build', 'web');
-        // Canonical path: /public/apps/flutter/<appId>/web
-        const destArtifacts = path.join(PUBLIC_APPS_DIR, 'flutter', String(appId), 'web');
-        
-        await fs.remove(destArtifacts).catch(() => {});
-        await fs.ensureDir(destArtifacts);
-        await fs.copy(sourceArtifacts, destArtifacts);
-        // Build stamp to confirm update times regardless of FS timestamp quirks
-        try {
-        const stamp = { app_id: appId, slug, completed_at: new Date().toISOString(), worker_pid: process.pid };
-            await fs.writeFile(path.join(destArtifacts, 'workz-build.json'), JSON.stringify(stamp, null, 2));
-        } catch(_) {}
-        console.log(`[${slug}] Artefatos copiados para ${destArtifacts}.`);
+        // 4.1 Build Web (sempre que solicitado)
+        if (platforms.includes('web')) {
+            try {
+                const baseHref = `/apps/flutter/${appId}/web/`;
+                const webCommand = `flutter build web --release --base-href=${baseHref}`;
+                await appendBuildLog(tempBuildDir, 'web', `COMMAND: ${webCommand}`);
+                const { stdout, stderr } = await executeCommand(webCommand, tempBuildDir);
+                const buildLog = stdout + '\n' + stderr;
+                await appendBuildLog(tempBuildDir, 'web', `${webCommand}\n${buildLog}`);
+                console.log(`[${slug}] Build Web finalizado.`);
 
-        // 6. Atualizar status final e limpar
-        await updateBuildStatus(appId, 'success', buildLog);
-        console.log(`[${slug}] Build concluído com sucesso!`);
+                const sourceArtifacts = path.join(tempBuildDir, 'build', 'web');
+                // Canonical path: /public/apps/flutter/<appId>/web
+                const destArtifacts = path.join(PUBLIC_APPS_DIR, 'flutter', String(appId), 'web');
+                
+                await fs.remove(destArtifacts).catch(() => {});
+                await fs.ensureDir(destArtifacts);
+                await fs.copy(sourceArtifacts, destArtifacts);
+                // Build stamp to confirm update times regardless of FS timestamp quirks
+                try {
+                    const stamp = { app_id: appId, slug, completed_at: new Date().toISOString(), worker_pid: process.pid };
+                    await fs.writeFile(path.join(destArtifacts, 'workz-build.json'), JSON.stringify(stamp, null, 2));
+                } catch(_) {}
+                console.log(`[${slug}] Artefatos Web copiados para ${destArtifacts}.`);
+
+                await updateBuildStatus(appId, 'success', buildLog, {
+                    platform: 'web',
+                    filePath: `/apps/flutter/${appId}/web/`
+                });
+            } catch (err) {
+                await appendBuildLog(tempBuildDir, 'web', `ERROR: ${err.message}`);
+                console.error(`[${slug}] ERRO NO BUILD WEB:`, err.message);
+                await updateBuildStatus(appId, 'failed', err.message, { platform: 'web' });
+                // Se o web falhar, não tentamos outras plataformas
+                throw err;
+            }
+        }
+
+        // 4.2 Build Android (APK) quando solicitado
+        if (platforms.includes('android')) {
+            await appendBuildLog(tempBuildDir, 'android', 'Inicializando build Android (limpando caches)...');
+            await cleanAndroidGradleCache(tempBuildDir, slug);
+            await applyAndroidDartInjection(tempBuildDir, slug);
+            try {
+                await updateBuildStatus(appId, 'building', 'Iniciando build Android (APK)...', { platform: 'android' });
+                const androidClean = 'flutter clean';
+                await appendBuildLog(tempBuildDir, 'android', `COMMAND: ${androidClean}`);
+                await executeCommand(androidClean, tempBuildDir);
+
+                const androidCommand = 'flutter build apk --debug --no-shrink';
+                const timeoutAndroid = `timeout ${BUILD_APK_TIMEOUT_SECS}s ${androidCommand}`;
+                await appendBuildLog(tempBuildDir, 'android', `COMMAND: ${timeoutAndroid}`);
+                const { stdout: aStdout, stderr: aStderr } = await executeCommand(timeoutAndroid, tempBuildDir, BUILD_APK_TIMEOUT_SECS * 1000 + 5000);
+                const androidLog = aStdout + '\n' + aStderr;
+                await appendBuildLog(tempBuildDir, 'android', `${androidCommand}\n${androidLog}`);
+                console.log(`[${slug}] Build Android finalizado.`);
+
+                const sourceApk = path.join(tempBuildDir, 'build', 'app', 'outputs', 'flutter-apk', 'app-debug.apk');
+                const destAndroidDir = path.join(PUBLIC_APPS_DIR, 'flutter', String(appId), 'android');
+                await fs.ensureDir(destAndroidDir);
+                const safeSlug = (slug || `app_${appId || 'x'}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+                const destApk = path.join(destAndroidDir, `${safeSlug}-debug.apk`);
+                await fs.copy(sourceApk, destApk);
+                console.log(`[${slug}] APK copiado para ${destApk}.`);
+
+                await updateBuildStatus(appId, 'success', androidLog, {
+                    platform: 'android',
+                    filePath: `/apps/flutter/${appId}/android/app-release.apk`
+                });
+            } catch (err) {
+                await appendBuildLog(tempBuildDir, 'android', `ERROR: ${err.message}`);
+                console.error(`[${slug}] ERRO NO BUILD ANDROID:`, err.message);
+                await updateBuildStatus(appId, 'failed', err.message, { platform: 'android' });
+                // Não relança; permite que outras plataformas (como web) permaneçam com status próprio
+            }
+        }
+
+        console.log(`[${slug}] Build concluído para plataformas: ${platforms.join(', ')}.`);
 
     } catch (error) {
         console.error(`[${slug}] ERRO NO BUILD:`, error.message);
-        await updateBuildStatus(appId, 'failed', error.message);
+        await updateBuildStatus(appId, 'failed', error.message, { platform: 'web' });
 
     } finally {
         // 7. Limpar o diretório de trabalho temporário
@@ -252,9 +401,9 @@ dependencies:
 /**
  * Helper para executar comandos de shell de forma assíncrona.
  */
-function executeCommand(command, cwd) {
+function executeCommand(command, cwd, timeoutMs = BUILD_COMMAND_TIMEOUT_MS) {
     return new Promise((resolve, reject) => {
-        exec(command, { cwd, maxBuffer: 1024 * 1024 * 20 }, (error, stdout, stderr) => {
+        exec(command, { cwd, maxBuffer: 1024 * 1024 * 20, timeout: timeoutMs }, (error, stdout, stderr) => {
             if (error) {
                 // Mesmo com erro, retornamos o log para análise
                 reject(new Error(stdout + '\n' + stderr));
@@ -380,8 +529,11 @@ app.delete('/preview/:token', async (req, res) => {
 /**
  * Função que atualiza o status no seu banco de dados via API PHP.
  */
-async function updateBuildStatus(appId, status, log) {
+async function updateBuildStatus(appId, status, log, options = {}) {
     console.log(`[App ${appId}] Atualizando status para: ${status}`);
+    const platform = options.platform || 'web';
+    const buildVersion = options.buildVersion || '1.0.0';
+    const filePath = options.filePath || null;
     
     // URL do endpoint que criamos no AppsController.php
     const apiBase = process.env.API_BASE || 'http://nginx';
@@ -401,9 +553,9 @@ async function updateBuildStatus(appId, status, log) {
             body: JSON.stringify({ 
                 status: status, 
                 log: log,
-                platform: 'web',
-                build_version: '1.0.0',
-                file_path: `/apps/flutter/${appId}/web/`
+                platform: platform,
+                build_version: buildVersion,
+                file_path: filePath
             })
         });
     } catch (e) {

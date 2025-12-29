@@ -27,6 +27,11 @@ class AuthMiddleware
             $token = $_GET['token'];
         }
 
+        // 3. Fallback: cookie jwt_token (login externo do app)
+        if (!$token && isset($_COOKIE['jwt_token'])) {
+            $token = $_COOKIE['jwt_token'];
+        }
+
         // Se não encontrou o token em nenhum lugar, nega o acesso.
         if (!$token) {
             http_response_code(401);

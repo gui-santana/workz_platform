@@ -119,15 +119,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (vt === ENTITY.BUSINESS) {
             return {
                 me: 'Somente eu',
-                mod: 'Moderadores',
-                lv1: 'Usuários membros',
+                mod: 'Administradores',
+                lv1: 'Membros do negócio',
                 lv2: 'Usuários logados',
                 lv3: 'Toda a internet'
             };
         } else if (vt === ENTITY.TEAM) {
             return {
                 me: 'Somente eu',
-                mod: 'Moderadores',
+                mod: 'Líderes e Operadores',
                 lv1: 'Membros da equipe',
                 lv2: 'Todos do negócio'
             };
@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const tokens = [];
         // 'Somente eu' sempre permitido
         tokens.push('me');
-        // Moderadores apenas se usuário tiver nível adequado
+        // Administradores/Líderes apenas se usuário tiver nível adequado
         if ((vt === ENTITY.BUSINESS || vt === ENTITY.TEAM) && isMod) tokens.push('mod');
         // Níveis da página conforme limite
         if (fpMax >= 1) tokens.push('lv1');
@@ -459,6 +459,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         form._changePasswordHandler = submitHandler;
                     }
                 }
+
+                if (st.view === 'share-link') {
+                    try { setupPostPrivacyBindings(this.mount); } catch (_) {}
+                    try { initLinkShareView(this.mount); } catch (_) {}
+                }
             });
         }
     };
@@ -626,7 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const clickHandler = async (event) => {
             event.preventDefault();
             event.stopPropagation();
-            if (await confirmDialog('Tem certeza que deseja remover a imagem de fundo?', { danger: true })) {
+            if (await confirmDialog('Tem certeza que deseja remover a imagem de capa?', { danger: true })) {
                 try {
                     const { db, table } = ENTITY_TYPE_TO_TABLE_MAP[entityType];
                     await apiClient.post('/update', { db, table, data: { bk: null }, conditions: { id: entityId } });
@@ -635,10 +640,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     updateEntityBackgroundImageCache(entityType, entityId, null);
 
                     SidebarNav.render();
-                    notifySuccess('Imagem de fundo removida.');
+                    notifySuccess('Imagem de capa removida.');
                 } catch (error) {
                     console.error('[background] remove error', error);
-                    notifyError('Não foi possível remover a imagem de fundo.');
+                    notifyError('Não foi possível remover a imagem de capa.');
                 }
             }
         };
@@ -738,13 +743,217 @@ document.addEventListener('DOMContentLoaded', () => {
 
         SidebarNav.push({
             view: 'image-crop',
-            title: 'Editar imagem',
+            title: 'Ajustar imagem de capa',
             payload: {
                 data: cropPayload.entityContext.data,
                 type: cropPayload.entityContext.view,
                 crop: { ...cropPayload }
             }
         });
+    }
+
+    function safeHostname(url) {
+        try {
+            const host = new URL(url).hostname || '';
+            return host.replace(/^www\./i, '');
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function renderLinkPreviewMarkup(preview) {
+        if (!preview) {
+            return `<div class="w-full rounded-2xl bg-white shadow-inner text-center text-sm text-gray-500 p-4">O conteúdo do link enviado aparecerá aqui.</div>`;
+        }
+        const kind = (preview.kind || preview.type || '').toLowerCase();
+        const title = escapeHtml(preview.title || preview.siteName || safeHostname(preview.url) || 'Pré-visualização');
+        const desc = escapeHtml(preview.description || '');
+        const site = escapeHtml(preview.siteName || preview.provider || safeHostname(preview.url) || 'Link externo');
+
+        if (kind === 'video' && preview.embedUrl) {
+            const embed = escapeHtml(preview.embedUrl);
+            return `
+                <div class="grid gap-3">
+                    <div class="w-full shadow-md rounded-3xl overflow-hidden bg-black">
+                        <div class="aspect-video bg-black">
+                            <iframe src="${embed}" class="w-full h-full" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen title="${title}"></iframe>
+                        </div>
+                        ${title ? `<div class="px-4 py-3 bg-gray-900 text-white text-sm font-semibold">${title}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        const bg = preview.image ? `background-image: url('${escapeHtml(preview.image)}');` : 'background: linear-gradient(135deg, #111827, #1f2937);';
+        return `
+            <div class="w-full shadow-md rounded-3xl overflow-hidden bg-white">
+                <div class="aspect-[3/4] bg-cover bg-center relative" style="${bg}">
+                    <div class="absolute inset-0 bg-gradient-to-b from-black/20 via-black/10 to-black/60 pointer-events-none"></div>
+                    <div class="absolute bottom-0 left-0 right-0 p-4 space-y-1 text-white">
+                        <p class="text-xs uppercase tracking-wide opacity-80">${site}</p>
+                        <p class="text-base font-semibold leading-snug">${title}</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function initLinkShareView(scope = document) {
+        const container = scope.querySelector('[data-role="link-share"]');
+        if (!container) return;
+        const input = container.querySelector('#linkShareInput');
+        const loadBtn = container.querySelector('#linkShareLoad');
+        const previewBox = container.querySelector('#linkSharePreview');
+        const publishBtn = container.querySelector('#linkSharePublish');
+        const captionInput = container.querySelector('#linkShareCaption');
+        const titleEl = container.querySelector('[data-role="link-title"]');
+        const hintEl = container.querySelector('#linkShareHint');
+        const messageEl = container.querySelector('#linkShareMessage');
+        container._linkPreview = container._linkPreview || null;
+
+        const showMessageInline = (msg, type = 'warning') => {
+            if (!messageEl) return;
+            renderTemplate(messageEl, templates.message, { message: msg, type, dismissAfter: 4000 });
+        };
+
+        const setPreview = (payload) => {
+            container._linkPreview = payload || null;
+            if (previewBox) {
+                previewBox.innerHTML = renderLinkPreviewMarkup(payload);
+            }
+            if (titleEl) {
+                const kind = (payload?.kind || payload?.type || '').toLowerCase();
+                titleEl.textContent = kind === 'video' ? 'Novo Link de Vídeo' : (kind ? 'Novo Link de Notícia' : 'Novo Link');
+            }
+            if (hintEl && payload) {
+                const kind = (payload.kind || '').toLowerCase();
+                hintEl.textContent = kind === 'video'
+                    ? 'Plataformas suportadas: YouTube, DailyMotion, Vimeo e Canva.'
+                    : 'Revise a pré-visualização antes de publicar.';
+            }
+            if (captionInput && payload?.description) {
+                const current = (captionInput.value || '').trim();
+                if (!current) {
+                    captionInput.value = payload.description;
+                }
+            }
+        };
+
+        const setLoading = (on) => {
+            if (loadBtn) loadBtn.disabled = on;
+            if (publishBtn) publishBtn.disabled = on;
+            if (loadBtn) {
+                loadBtn.dataset.label = loadBtn.dataset.label || loadBtn.innerText;
+                loadBtn.innerHTML = on ? '<span>Carregando...</span>' : `<span class="fa-stack"><i class="fas fa-circle fa-stack-2x"></i><i class="fas fa-arrow-up fa-stack-1x fa-inverse"></i></span><span>${loadBtn.dataset.label}</span>`;
+            }
+        };
+
+        const handleLoad = async (ev) => {
+            if (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+            }
+            const url = (input?.value || '').trim();
+            if (!url) {
+                showMessageInline('Informe um link para carregar a pré-visualização.');
+                return;
+            }
+            setLoading(true);
+            try {
+                const res = await apiClient.post('/link/preview', { url });
+                if (!res || res.status !== 'success' || !res.preview) {
+                    showMessageInline(res?.message || 'Não foi possível obter a pré-visualização.', 'error');
+                    return;
+                }
+                const preview = { ...(res.preview || {}), kind: res.kind || res.preview?.kind || res.preview?.type || 'article' };
+                setPreview(preview);
+            } catch (_) {
+                showMessageInline('Falha ao carregar o link.', 'error');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        const handlePublish = async (ev) => {
+            if (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+            }
+            const preview = container._linkPreview;
+            if (!preview) {
+                showMessageInline('Carregue um link antes de publicar.');
+                return;
+            }
+            const vtNow = String(viewType || '');
+            const tok = getPostPrivacy();
+            const ppCode = tokenToPrivacyCode(tok, vtNow === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow);
+            const caption = (captionInput?.value || '').trim();
+            let cm = 0;
+            let em = 0;
+            if (viewType === ENTITY.TEAM && viewData?.id) cm = Number(viewData.id) || 0;
+            if (viewType === ENTITY.BUSINESS && viewData?.id) em = Number(viewData.id) || 0;
+            const postType = (preview.kind || '').toLowerCase() === 'video' ? 'video' : 'image';
+            const ct = {
+                caption,
+                linkPreview: {
+                    kind: preview.kind || postType,
+                    provider: preview.provider || '',
+                    url: preview.url || '',
+                    embedUrl: preview.embedUrl || '',
+                    title: preview.title || '',
+                    description: preview.description || '',
+                    image: preview.image || preview.thumbnail || '',
+                    siteName: preview.siteName || preview.provider || safeHostname(preview.url) || '',
+                },
+                post_privacy_token: tok
+            };
+            if (publishBtn) {
+                publishBtn.dataset.label = publishBtn.dataset.label || publishBtn.textContent;
+                publishBtn.textContent = 'Publicando...';
+                publishBtn.disabled = true;
+            }
+            try {
+                const res = await apiClient.post('/posts', { tp: postType, cm, em, post_privacy: Number(ppCode), ct });
+                if (res?.status === 'success') {
+                    notifySuccess('Publicação criada!');
+                    setPreview(null);
+                    if (captionInput) captionInput.value = '';
+                    if (input) input.value = '';
+                    resetFeed();
+                    loadFeed();
+                } else {
+                    showMessageInline(res?.message || 'Não foi possível publicar.', 'error');
+                }
+            } catch (_) {
+                showMessageInline('Não foi possível publicar.', 'error');
+            } finally {
+                if (publishBtn) {
+                    publishBtn.textContent = publishBtn.dataset.label || 'Publicar';
+                    publishBtn.disabled = false;
+                }
+                setLoading(false);
+            }
+        };
+
+        if (loadBtn) {
+            if (loadBtn._linkHandler) loadBtn.removeEventListener('click', loadBtn._linkHandler);
+            loadBtn.addEventListener('click', handleLoad);
+            loadBtn._linkHandler = handleLoad;
+        }
+        if (input) {
+            if (input._linkHandler) input.removeEventListener('keydown', input._linkHandler);
+            const keyHandler = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleLoad(e); } };
+            input.addEventListener('keydown', keyHandler);
+            input._linkHandler = keyHandler;
+        }
+        if (publishBtn) {
+            if (publishBtn._linkHandler) publishBtn.removeEventListener('click', publishBtn._linkHandler);
+            publishBtn.addEventListener('click', handlePublish);
+            publishBtn._linkHandler = handlePublish;
+        }
+        setPreview(container._linkPreview);
     }
 
     // Inicializa o seletor e a bandeja de múltiplas mídias no editor de posts
@@ -1447,7 +1656,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const clickHandler = async (event) => {
             event.preventDefault();
             event.stopPropagation();
-            if (await confirmDialog('Tem certeza que deseja remover a imagem de fundo?', { danger: true })) {
+            if (await confirmDialog('Tem certeza que deseja remover a imagem de capa?', { danger: true })) {
                 try {
                     const { db, table } = ENTITY_TYPE_TO_TABLE_MAP[entityType];
                     await apiClient.post('/update', { db, table, data: { bk: null }, conditions: { id: entityId } });
@@ -1456,10 +1665,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     updateEntityBackgroundImageCache(entityType, entityId, null);
 
                     SidebarNav.render();
-                    notifySuccess('Imagem de fundo removida.');
+                    notifySuccess('Imagem de capa removida.');
                 } catch (error) {
                     console.error('[background] remove error', error);
-                    notifyError('Não foi possível remover a imagem de fundo.');
+                    notifyError('Não foi possível remover a imagem de capa.');
                 }
             }
         };
@@ -1559,7 +1768,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         SidebarNav.push({
             view: 'image-crop',
-            title: 'Editar imagem',
+            title: 'Ajustar imagem de capa',
             payload: {
                 data: cropPayload.entityContext.data,
                 type: cropPayload.entityContext.view,
@@ -1958,7 +2167,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const cancelBtn = sidebarMount.querySelector('[data-action="crop-cancel"]');
         const messageContainer = sidebarMount.querySelector('[data-role="message"]') || document.getElementById('message');
 
-        if (!container || !imageEl || !zoomInput || !saveBtn || !cancelBtn) {
+        // Cancel button is optional (users can use the header back button)
+        if (!container || !imageEl || !zoomInput || !saveBtn) {
             resetImageUploadState();
             return;
         }
@@ -2055,7 +2265,7 @@ document.addEventListener('DOMContentLoaded', () => {
         zoomInput.addEventListener('input', onZoom);
         zoomInput.addEventListener('change', onZoom);
         saveBtn.addEventListener('click', onSave);
-        cancelBtn.addEventListener('click', onCancel);
+        if (cancelBtn) cancelBtn.addEventListener('click', onCancel);
 
         IMAGE_UPLOAD_STATE.cropper = {
             container,
@@ -2368,16 +2578,19 @@ document.addEventListener('DOMContentLoaded', () => {
         editorTriggerV2: (currentUserData) => `
             <div class="w-full p-3 border-b-2 border-gray-100 flex items-center gap-3">
                 <img class="page-thumb w-11 h-11 rounded-full pointer" src="/images/no-image.jpg" />
-                <div id="post-editor" class="flex-1 rounded-3xl h-11 pointer text-gray-500 px-4 text-left bg-gray-100 hover:bg-gray-200 flex items-center overflow-hidden whitespace-nowrap truncate">
+                <div id="post-editor" title="Abrir editor" class="flex-1 rounded-3xl h-11 cursor-pointer text-gray-500 px-4 text-left bg-gray-100 hover:bg-gray-200 flex items-center overflow-hidden whitespace-nowrap truncate">
                     <a class="block w-full overflow-hidden whitespace-nowrap truncate">O que você quer publicar, ${currentUserData.tt.split(' ')[0]}?</a>
                 </div>                
             </div>
             <div class="w-full p-3 flex items-center gap-3">
-                <button class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-text" aria-label="Abrir editor com texto">
+                <button title="Abrir editor com caixa de texto" class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-text" aria-label="Abrir editor com texto">
                     <i class="fas fa-font"></i>                    
                 </button>
-                <button class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-media" aria-label="Abrir editor e adicionar mídia">
-                    <i class="fas fa-image"></i>                    
+                <button title="Abrir editor com imagem ou vídeo" class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-media" aria-label="Abrir editor e adicionar mídia">
+                    <i class="fas fa-upload"></i>                    
+                </button>
+                <button title="Compartilhar um link" class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-link" aria-label="Compartilhar link externo">
+                    <i class="fas fa-link"></i>
                 </button>                
                 <div class="ml-auto flex items-center gap-2">
                     <label for="postPrivacyTrigger" class="sr-only">Privacidade</label>
@@ -2429,11 +2642,8 @@ document.addEventListener('DOMContentLoaded', () => {
             <p class="text-center text-sm mt-4 text-white">
                 Não tem uma conta? 
                 <a href="#" id="show-register-link" class="font-bold text-orange-600 hover:underline">Registre-se</a>
-            </p>
-            <div class="relative my-6">                  
-                <div class="relative flex justify-center text-sm"><span class="px-2 text-white">ou entre com</span></div>
-            </div>
-            <div class="flex flex-col gap-3">
+            </p>            
+            <div class="mt-4 flex flex-col gap-3">
                 <button id="google-login-btn" class="w-full py-2 px-4 border-none shadow-lg rounded-3xl flex items-center justify-center gap-3 bg-gray-100 hover:bg-gray-200 transition-colors"><i class="fab fa-google text-red-500"></i> Entrar com Google</button>
                 <button id="microsoft-login-btn" class="w-full py-2 px-4 border-none shadow-lg rounded-3xl flex items-center justify-center gap-3 bg-gray-100 hover:bg-gray-200 transition-colors"><i class="fab fa-microsoft text-blue-500"></i> Entrar com Microsoft</button>
             </div>
@@ -2610,7 +2820,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
 
         mainContent: `
-            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] overflow-hidden border-4 border-gray shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
+            <div class="dashboard-main w-full grid grid-cols-12 gap-6 rounded-3xl px-4 pt-16 pb-24 bg-gray-300 relative aspect-[3/4] lg:aspect-[4/3] overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]" style="background-image: url(https://bing.biturl.top/?resolution=1366&amp;format=image&amp;index=0&amp;mkt=en-US); background-position: center; background-repeat: no-repeat; background-size: cover;">
                 <div class="col-span-12 grid grid-cols-12 gap-4 h-full min-h-0">
                     <div id="dashboard-statusbar" class="col-span-12 absolute left-4 right-4 top-2 h-8 lg:left-5 lg:right-5 lg:top-2.5 lg:h-9 text-sm lg:text-base text-white font-bold text-shadow-lg flex items-center justify-between">
                         <div id="wClock" class="text-md text-shadow-lg/30">00:00</div>                                                
@@ -2861,8 +3071,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const appItems = resolved.map(app => `
             <button data-app-id="${app.id}" data-app-name="${(app.tt || 'App').toLowerCase()}" class="app-item-button">
-                <div class="w-full aspect-square cursor-pointer ios-icon shadow-md rounded-full">
-                    <img src="${resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 160 })}" alt="${app.tt || 'App'}" class="app-icon-image rounded-full">
+                <div class="w-full aspect-square cursor-pointer ios-icon shadow-md rounded-2xl">
+                    <img src="${resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 160 })}" alt="${app.tt || 'App'}" class="app-icon-image rounded-2xl">
                 </div>
                 <div class="w-full p-1 text-xs text-white text-shadow-lg truncate text-center">
                     ${app.tt || 'App'}
@@ -2880,8 +3090,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             </div>
             <div id="app-quickbar" class="absolute left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[740px] bottom-4 lg:w-[calc(100%-40px)] lg:max-w-[880px] lg:bottom-4 rounded-full bg-white/20 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]"\u003e
-                <div id="quickbar-track" class="flex items-center justify-center gap-3 p-3 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Acesso rápido a apps">
-                    <!-- itens do acesso rápido são injetados pelo JS em initAppLibrary() -->
+                <div id="quickbar-track" class="flex items-center justify-center gap-1 p-3 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Barra de tarefas">
+                    <!-- itens da barra de tarefas são injetados pelo JS em initAppLibrary() -->
                 </div>
             </div>
         `;
@@ -2893,37 +3103,10 @@ document.addEventListener('DOMContentLoaded', () => {
         actionBtn: 'cursor-pointer text-center rounded-3xl text-white transition-colors truncate w-full p-2 mb-1'
     };
 
-    const CONTACT_OPTIONS = [
-        { value: '', label: 'Contato', disabled: true, placeholder: true },
-        { value: 'email', label: 'E-mail' },
-        { value: 'phone', label: 'Telefone' },
-        { value: 'site', label: 'Site' },
-        { value: 'behance', label: 'Behance' },
-        { value: 'discord', label: 'Discord' },
-        { value: 'facebook', label: 'Facebook' },
-        { value: 'flickr', label: 'Flickr' },
-        { value: 'instagram', label: 'Instagram' },
-        { value: 'linkedin', label: 'LinkedIn' },
-        { value: 'pinterest', label: 'Pinterest' },
-        { value: 'reddit', label: 'Reddit' },
-        { value: 'snapchat', label: 'Snapchat' },
-        { value: 'tiktok', label: 'TikTok' },
-        { value: 'tumblr', label: 'Tumblr' },
-        { value: 'twitch', label: 'Twitch' },
-        { value: 'twitter', label: 'X / Twitter' },
-        { value: 'vimeo', label: 'Vimeo' },
-        { value: 'wechat', label: 'WeChat' },
-        { value: 'whatsapp', label: 'WhatsApp' },
-        { value: 'youtube', label: 'YouTube' },
-        { value: 'other', label: 'Outro' }
-    ];
-
     const COUNTRY_OPTIONS = [
         { value: '', label: 'Selecione', disabled: true, placeholder: true },
         { value: 'Brasil', label: 'Brasil' }
     ];
-
-
 
     // =====================================================================
     // 3. UI CONSTRUCTION HELPERS
@@ -2936,7 +3119,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <a>${backLabel ?? 'Voltar'}</a>
             </div>
             <h1 class="text-center text-gray-500 text-xl font-bold">${title}</h1>
-            <div id="message" class="w-full absolute"></div>
+            <div id="message" class="w-full fixed"></div>
         `,
         renderCloseHeader: () => `
             <div id="close" data-sidebar-action="settings" class="mt-1 text-lg items-center gap-2 cursor-pointer text-gray-600 hover:text-orange flex-row justify-between">
@@ -2944,11 +3127,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 <i class="fas fa-chevron-right"></i>                
             </div>
         `,
-        renderHero: ({ tt, im }) => {
+        renderHero: ({ tt, im }, shape = '' ) => {
             const heroSrc = resolveImageSrc(im, tt, { size: 220 });
             return `
             <div class="col-span-1 justify-center">
-                <img id="sidebar-profile-image" data-role="entity-image" class="w-32 h-32 shadow-lg cursor-pointer rounded-full mx-auto object-cover" src="${heroSrc}" alt="${tt ?? 'Imagem'}">
+                <img id="sidebar-profile-image" data-role="entity-image" class="w-32 h-32 shadow-lg cursor-pointer ${ shape === 'square' ? `rounded-2xl` : `rounded-full` } mx-auto object-cover" src="${heroSrc}" alt="${tt ?? 'Imagem'}">
             </div>
         `;
         },
@@ -2998,14 +3181,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${optionsHtml}
                 </select>
             </div>
-        `,
-        contactOptions: (selected = '') => CONTACT_OPTIONS.map(({ value, label, disabled, placeholder }) => {
-            const isSelected = placeholder ? (selected === null || selected === undefined || selected === '') : selected === value;
-            const disabledAttr = disabled ? 'disabled' : '';
-            const selectedAttr = isSelected ? 'selected' : '';
-            const placeholderClass = placeholder ? 'text-gray-500' : '';
-            return `<option value="${value}" class="${placeholderClass}" ${disabledAttr} ${selectedAttr}>${label}</option>`;
-        }).join(''),
+        `,       
         countryOptions: (selected = '') => {
             let normalizedSelected = (selected ?? '').toString().trim().toLowerCase();
             if (normalizedSelected === 'brazil') normalizedSelected = 'brasil';
@@ -3057,21 +3233,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 const borderClass = isLast ? '' : 'border-b border-gray-100';
                 return `
                     <div title="Link" class="${isFirst ? 'rounded-t-2xl' : ''} bg-white grid grid-cols-6 ${borderClass}" data-input-id="${index}">
-                        <input class="${isFirst ? 'rounded-tl-2xl' : ''} border-0 focus:outline-none col-span-2 p-4" type="text" name="url_type" value="${contact.type || ''}">
-                        <input class="border-0 focus:outline-none col-span-4 ${isFirst ? 'rounded-tr-2xl' : ''} p-4" type="text" name="url_value" value="${contact.value || ''}">
+                        <input class="${isFirst ? 'rounded-tl-2xl' : ''} border-0 focus:outline-none col-span-2 p-4" type="text" name="url_type" placeholder="Título" value="${contact.type || ''}">
+                        <input class="border-0 focus:outline-none col-span-4 ${isFirst ? 'rounded-tr-2xl' : ''} p-4" type="text" name="url_value" placeholder="URL (ex.: https://www.workz.co)" value="${contact.value || ''}">
                     </div>
                 `;
             }).join('');
 
             return `
-                <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
-                    <div id="input-container" class="rounded-t-2xl w-full">
-                        ${rows}
+                <div>
+                    <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
+                        <div id="input-container" class="rounded-t-2xl w-full">
+                            ${rows}
+                        </div>
+                        <div id="addButtonContainer" class="grid grid-cols-2 rounded-b-2xl border-t border-gray-200 bg-white">
+                            <div id="add-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-plus centered"></i></div>
+                            <div id="remove-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-minus centered"></i></div>
+                        </div>                    
                     </div>
-                    <div id="addButtonContainer" class="grid grid-cols-2 rounded-b-2xl border-t border-gray-200 bg-white">
-                        <div id="add-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-bl-2xl"><i class="fas fa-plus centered"></i></div>
-                        <div id="remove-input-button" class="col-span-1 p-3 bg-gray-100 hover:bg-gray-200 cursor-pointer text-center rounded-br-2xl"><i class="fas fa-minus centered"></i></div>
-                    </div>
+                    <p class="text-gray-500 text-center mt-2 text-xs">Árvore de links</p>
                 </div>
             `;
         },
@@ -3122,21 +3301,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const personalizationCard = (d) => {
             const hasBk = d?.bk;
-            const changeLabel = hasBk ? 'Substituir' : 'Adicionar';
+            const changeLabel = hasBk ? 'Substituir ' : 'Adicionar';
             let removeButton = '';
             if (hasBk) {
-                removeButton = `<button data-action="remove-background" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fas fa-trash-alt"></i> Remover</button>`;
+                removeButton = `<button data-action="remove-background" class="p-3 bg-white hover:bg-white/50 text-gray-800 rounded-br-2xl flex items-center justify-center gap-2 transition-colors"> Remover</button>`;
             }
             const gridCols = hasBk ? 'grid-cols-2' : 'grid-cols-1';
             return `
-                <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
-                    <div class="p-3 bg-white rounded-t-2xl font-semibold border-b border-gray-200">                            
-                        <img src="${hasBk ? hasBk : '#'}" class="h-auto w-full rounded-xl object-cover"></img>
+                <div class="">
+                    <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
+                        <div class="bg-white rounded-t-2xl font-semibold border-b border-gray-200">                            
+                            <img src="${hasBk ? hasBk : '/images/no_background.webp'}" class="h-auto w-full rounded-t-2xl object-cover"></img>
+                        </div>
+                        <div class="rounded-b-2xl border-t border-gray-300 grid ${gridCols}">
+                            <button data-action="change-background" class="p-3 bg-white hover:bg-white/50 text-gray-800 ${ hasBk ? 'rounded-bl-2xl' : 'rounded-b-2xl' } flex items-center justify-center gap-2 transition-colors"> ${changeLabel}</button>
+                            ${removeButton}
+                        </div>
                     </div>
-                    <div class="p-3 bg-white rounded-b-2xl grid ${gridCols} gap-2">
-                        <button data-action="change-background" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fas fa-image"></i> ${changeLabel}</button>
-                        ${removeButton}
-                    </div>
+                    <p class="text-gray-500 text-center mt-2 text-xs">Imagem de capa</p>
                 </div>
             `;
         };
@@ -3145,36 +3327,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (sidebarContent) sidebarContent.dataset.currentView = view || 'root';
         let html = '';
 
-        // Cabeçalhos unificados
-        const titles = {
-            'profile': data?.tt ?? '',
-            'business': data?.tt ?? '',
-            'team': data?.tt ?? '',
-            'people': 'Pessoas Seguidas',
-            'businesses': 'Negócios Gerenciados',
-            'teams': 'Equipes Gerenciadas',
-            'employees': 'Colaboradores',
-            'testimonials': 'Depoimentos',
-            'billing': 'Cobrança e Recebimento',
-            'transactions': 'Transações',
-            'subscriptions': 'Assinaturas',
-            'user-education': 'Formação Acadêmica',
-            'user-jobs': 'Experiência Profissional',
-            // 'business-shareholding': 'Estrutura Societária' // removido por ora
-            'apps': 'Aplicativos',
-            'password': 'Alterar Senha'
-        };
-
-        const headerBackLabel = (view !== null) ? (([ENTITY.PROFILE, ENTITY.BUSINESS, ENTITY.TEAM].includes(view)) ? 'Ajustes' : (view.startsWith('user-') ? (currentUserData?.tt ?? '') : (data?.tt ?? ''))) : 'Fechar';
-
         const financeShortcuts = UI.shortcutList([
             { id: 'billing', icon: 'fa-money-bill', label: 'Cobrança e Recebimento' },
             { id: 'transactions', icon: 'fa-receipt', label: 'Transações' },
-            { id: 'subscriptions', icon: 'fa-satellite-dish', label: 'Assinaturas' }
+            { id: 'subscriptions', icon: 'fa-file-contract', label: 'Contratos' }
         ]);
-
-        // Cabeçalho e navegação com suporte a stack
-        const isStack = (origin === 'stack');
+        
         if (view === 'image-crop') {
             const cropData = crop ?? {};
             const previewSrc = cropData.imageDataUrl || resolveImageSrc(data?.im, data?.tt, { size: 320 });
@@ -3185,10 +3343,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const cropOutputHeight = Number(cropData.entityContext?.outputHeight) || Math.round(cropOutputWidth / cropAspectRatio) || 600;
             const cropContainerStyle = `width: 100%; max-width: 100%; margin-left: auto; margin-right: auto; aspect-ratio: ${cropOutputWidth} / ${cropOutputHeight};`;
             const cropWrapperClass = isBackgroundImage
-                ? 'relative w-full rounded-3xl overflow-hidden bg-gray-200 border border-gray-300'
-                : 'relative w-full rounded-3xl overflow-hidden bg-gray-200 border border-gray-200';
-            html += `
-                <div id="message" data-role="message" class="w-full"></div>
+                ? 'relative w-full rounded-2xl overflow-hidden bg-gray-200 border border-gray-300'
+                : 'relative w-full rounded-2xl overflow-hidden bg-gray-200 border border-gray-200';
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
+            html += `                
                 <div class="grid gap-4 w-full" style="max-width: 100%; overflow-x: hidden;">
                     <div class="flex flex-col gap-2 items-center w-full" style="max-width: 100%;">
                         <div class="${cropWrapperClass}" data-role="cropper-box" style="${cropContainerStyle}">
@@ -3202,11 +3360,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     </label>
                     <div class="text-xs text-gray-500 text-center w-full" style="max-width: 100%;">Arraste a imagem para ajustar o enquadramento.</div>
                     <div class="grid gap-2 w-full" style="max-width: 100%;">
-                        <button data-action="crop-save" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
-                        <button data-action="crop-cancel" class="shadow-md w-full py-2 px-4 bg-gray-200 text-gray-700 font-semibold rounded-3xl hover:bg-gray-300 transition-colors">Cancelar</button>
+                        <button data-action="crop-save" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>                    
                     </div>
+                    <div id="message" data-role="message" class="w-full"></div>
                 </div>
             `;
+            html += UI.signature();
             return html;
         }
 
@@ -3261,7 +3420,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const cardAbout = UI.sectionCard(UI.rowTextarea('cf', 'Sobre', data.cf));
 
             const cardUserMeta = UI.sectionCard(
-                UI.row('username', 'Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" name="un" value="${data.un ?? ''}">`, { top: true }) +
+                UI.row('username', 'Apelido', `<input class="w-full border-0 focus:outline-none" type="text" id="username" placeholder="username" name="un" value="${data.un ?? ''}">`, { top: true }) +
                 UI.rowSelect('page_privacy', 'Página', `
                 <option value="" ${currentUserData.page_privacy == null ? 'selected' : ''} disabled>Selecione</option>
                 <option value="0" ${currentUserData.page_privacy === 0 ? 'selected' : ''}>Usuários logados</option>
@@ -3288,9 +3447,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const contacts = UI.contactBlock(data?.contacts ?? currentUserData?.contacts ?? '');
 
-            const shortcuts = UI.shortcutList([
-                { id: 'user-education', icon: 'fa-graduation-cap', label: 'Formação Acadêmica' },
-                { id: 'user-jobs', icon: 'fa-user-tie', label: 'Experiência Profissional' },
+            const shortcuts = UI.shortcutList([                
                 { id: 'testimonials', icon: 'fa-scroll', label: 'Depoimentos' },
             ]);
 
@@ -3301,6 +3458,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             html += `
                 ${personalizationCard(data)}
+                <hr>
                 <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
                     <input type="hidden" name="id" value="${data.id}">
                     ${card1}
@@ -3325,26 +3483,28 @@ document.addEventListener('DOMContentLoaded', () => {
             const bgUrl = (function(){ try { return localStorage.getItem('workz.desktop.background') || DEFAULT_BING_BG; } catch (_) { return DEFAULT_BING_BG; } })();            
 
             const bgCard = `
-                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
-                    <div class="p-3 font-semibold">Plano de Fundo</div>
-                    <div class="p-3 grid grid-cols-1 gap-3">
-                        <div id="desktop-bg-preview" class="w-full h-36 rounded-xl bg-center bg-cover border" style="background-image: url(${bgUrl});"></div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <button data-action="desktop-bg-open-picker" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm"><i class="fas fa-image"></i> Escolher imagem</button>
-                            <button data-action="desktop-bg-remove" class="p-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-sm" ${bgUrl && bgUrl !== DEFAULT_BING_BG ? '' : 'disabled'}><i class="fas fa-trash-alt"></i> Remover</button>
+                <div class="">
+                    <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
+                        <div class="bg-white rounded-t-2xl font-semibold border-b border-gray-200">                            
+                            <div id="desktop-bg-preview" class="w-full h-36 rounded-t-2xl bg-center bg-cover" style="background-image: url(${bgUrl});"></div>
+                        </div>                        
+                        <div class="rounded-b-2xl border-t border-gray-300 grid grid-cols-2">                            
+                            <button data-action="desktop-bg-open-picker" class="rounded-bl-2xl p-3 bg-white hover:bg-white/50 text-gray-800 flex items-center justify-center gap-2 transition-colors"> Escolher imagem</button>
+                            <button data-action="desktop-bg-remove" class="rounded-br-2xl p-3 ${bgUrl && bgUrl !== DEFAULT_BING_BG ? 'bg-white hover:bg-white/50 text-gray-800' : 'text-gray-500'} rounded-lr-2xl flex items-center justify-center gap-2 transition-colors" ${bgUrl && bgUrl !== DEFAULT_BING_BG ? '' : 'disabled'}> Remover</button>
                         </div>
-                        <input type="file" id="desktop-bg-file" accept="image/*" class="hidden" />
-                        <div class="text-xs text-gray-500">Quando não personalizado, será exibido o plano de fundo do Bing por padrão.</div>
                     </div>
-                </div>
+                    <input type="file" id="desktop-bg-file" accept="image/*" class="hidden" />
+                    <p class="text-gray-500 text-center mt-2 text-xs">Plano de Fundo - Quando não personalizado, será exibido o plano de fundo do Bing por padrão.</p>
+                </div>            
             `;
 
             html += bgCard;
 
             html += applications;
 
-        } else if (view === 'password') {
-            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
+        } else if (view === 'password') {            
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: 'Alterar a Senha' });
+            
             const userId = data?.id ?? currentUserData?.id ?? '';
             const passwordCard = UI.sectionCard(
                 UI.row('current_password', 'Senha Atual', `<input class="w-full border-0 focus:outline-none" type="password" id="current_password" name="current_password" placeholder="********" required>`, { top: true }) +
@@ -3360,6 +3520,58 @@ document.addEventListener('DOMContentLoaded', () => {
                     <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Alterar Senha</button>
                 </form>
             `;
+        } else if (view === 'share-link') {
+            html += UI.renderCloseHeader();
+            html += `
+            <div data-role="link-share" class="grid gap-6">
+                <h1 class="text-center text-gray-500 text-xl font-bold" data-role="link-title">Compartilhar um link</h1>
+                <div class="w-full">
+                    <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
+                        <div class="grid grid-cols-4 border-b border-gray-200 rounded-t-2xl ">
+                            <label for="linkShareInput" class="col-span-1 p-4 truncate text-gray-500">Link</label>
+                            <div class="col-span-3 p-4">                            
+                                <input id="linkShareInput" type="url" class="w-full border-0 focus:outline-none" placeholder="https://">
+                            </div>
+                        </div>
+                        <button type="button" id="linkShareLoad" aria-pressed="false" class="w-full text-left rounded-b-2xl shadow-md bg-white text-gray-700 p-3 cursor-pointer hover:bg-gray-200 transition-all duration-300 ease-in-out">
+                            <span class="fa-stack">
+                                <i class="fas fa-circle fa-stack-2x"></i>
+                                <i class="fas fa-arrow-up fa-stack-1x fa-inverse"></i>
+                            </span>
+                            Carregar
+                        </button>
+                    </div>
+                    <p class="text-gray-500 text-center mt-2 text-xs">Plataformas de vídeo suportadas: YouTube, DailyMotion, Vimeo e Canva.</p>                
+                </div>
+                <hr> 
+
+                <div class="w-full">
+                    <div class="grid gap-3 shadow-md rounded-2xl" id="linkSharePreview">
+                        <div class="w-full bg-white shadow-inner text-center text-sm text-gray-500 p-4">O conteúdo do link carregado aparecerá aqui.</div>
+                    </div>
+                    <p class="text-gray-500 text-center mt-2 text-xs">Pré-visualização</p>
+                </div>
+
+                <hr>
+                
+                <div class="w-full shadow-md rounded-2xl bg-white overflow-hidden">
+                    <div class="grid grid-cols-4">
+                        <label for="postPrivacySelect" class="col-span-1 p-4 truncate text-gray-500">Privacidade</label>
+                        <select id="postPrivacySelect" class="border-0 focus:outline-none col-span-3 p-4"></select>
+                    </div>
+                </div>
+                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">                
+                    <div class="grid grid-cols-4">
+                        <label for="linkShareCaption" class="col-span-1 p-4 truncate text-gray-500">Legenda</label>
+                        <textarea id="linkShareCaption" name="postCaption" class="border-0 focus:outline-none col-span-3 p-4 min-h-[120px] rounded-r-2xl"></textarea>
+                    </div>            
+                    <div id="linkShareMessage" class="w-full"></div>
+                </div>                    
+                
+                <button id="linkSharePublish" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Publicar</button>
+                
+            </div>
+            `;
         } else if (view === ENTITY.BUSINESS) {
             sidebarContent.id = 'business';
 
@@ -3368,6 +3580,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const basics = UI.sectionCard(
                 UI.row('name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="name" name="tt" value="${data.tt}" required>`, { top: true }) +
+                UI.row('business_email', 'E-mail', `<input class="w-full border-0 focus:outline-none" type="email" id="business_email" name="ml" value="${data.ml ?? ''}" placeholder="contato@empresa.com">`) +
                 UI.row('cnpj', 'CNPJ', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="99.999.999/9999-99" id="cnpj" name="cnpj" value="${data.national_id ?? ''}">`, { bottom: true })
             );
 
@@ -3382,8 +3595,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 `) +
                 UI.rowSelect('feed_privacy', 'Conteúdo', `
                 <option value="" ${data.feed_privacy == null ? 'selected' : ''} disabled>Selecione</option>
-                <option value="0" ${data.feed_privacy === 0 ? 'selected' : ''}>Moderadores</option>
-                <option value="1" ${data.feed_privacy === 1 ? 'selected' : ''}>Usuários membros</option>
+                <option value="0" ${data.feed_privacy === 0 ? 'selected' : ''}>Administradores</option>
+                <option value="1" ${data.feed_privacy === 1 ? 'selected' : ''}>Membros do negócio</option>
                 <option value="2" ${data.feed_privacy === 2 ? 'selected' : ''}>Usuários logados</option>
                 <option value="3" ${data.feed_privacy === 3 && (data.page_privacy > 0) ? 'selected' : ''} ${data.page_privacy < 1 ? 'disabled' : ''}>Toda a internet</option>
                 `, { bottom: true })
@@ -3403,13 +3616,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const shortcuts = UI.shortcutList([
                 // { id:'business-shareholding', icon:'fa-sitemap', label:'Estrutura Societária' },
-                { id: 'employees', icon: 'fa-id-badge', label: 'Colaboradores' },
+                { id: 'employees', icon: 'fa-id-badge', label: 'Membros' },
                 { id: 'testimonials', icon: 'fa-scroll', label: 'Depoimentos' },
-            ]);
-
+            ]);           
 
             html += `
                 ${personalizationCard(data)}
+                <hr>
                 <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
                 <input type="hidden" name="id" value="${data.id}">
                 ${basics}
@@ -3422,9 +3635,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 <hr>
                 ${shortcuts}
                 ${financeShortcuts}
-                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 mt-3">
-                    <button data-action="delete-business" data-id="${data.id}" class="p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-2xl"><i class="fas fa-trash"></i> Excluir Negócio</button>
-                </div>
+
+                <div data-action="delete-business" data-id="${data.id}" title="Excluir Conta" class=" rounded-2xl shadow-md bg-red-200 text-red-700 p-3 cursor-pointer hover:bg-red-300 transition-all duration-300 ease-in-out">
+                    <span class="fa-stack">
+                        <i class="fas fa-circle fa-stack-2x"></i>
+                        <i class="fas fa-trash fa-stack-1x fa-inverse"></i>
+                    </span>
+                    Excluir Negócio
+                </div>                
             `;
         } else if (view === ENTITY.TEAM) {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
@@ -3449,7 +3667,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const feedPrivacy = UI.sectionCard(
                 UI.rowSelect('feed_privacy', 'Conteúdo', `
                 <option value="" ${data.feed_privacy == null ? 'selected' : ''} disabled>Selecione</option>
-                <option value="0" ${data.feed_privacy === 0 ? 'selected' : ''}>Moderadores</option>
+                <option value="0" ${data.feed_privacy === 0 ? 'selected' : ''}>Líderes e Operadores</option>
                 <option value="1" ${data.feed_privacy === 1 ? 'selected' : ''}>Membros da equipe</option>
                 <option value="2" ${data.feed_privacy === 2 ? 'selected' : ''}>Todos do negócio</option>
                 `, { bottom: true })
@@ -3458,20 +3676,25 @@ document.addEventListener('DOMContentLoaded', () => {
             const contacts = UI.contactBlock(data?.contacts ?? data?.url ?? '');
 
             const shortcuts = UI.shortcutList([
-                { id: 'employees', icon: 'fa-id-badge', label: 'Colaboradores' },
+                { id: 'employees', icon: 'fa-id-badge', label: 'Membros' },
             ]);
 
             // Apenas dono ou moderadores da equipe podem excluir a equipe
             let canDeleteTeam = canManageTeam(data);
             const deleteTeamButton = canDeleteTeam
                 ? `
-                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 mt-3">
-                    <button data-action="delete-team" data-id="${data.id}" data-em="${data.em}" class="p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-2xl"><i class="fas fa-trash"></i> Excluir Equipe</button>
+                <div data-action="delete-team" data-id="${data.id}" data-em="${data.em}" title="Excluir Equipe" class=" rounded-2xl shadow-md bg-red-200 text-red-700 p-3 cursor-pointer hover:bg-red-300 transition-all duration-300 ease-in-out">
+                    <span class="fa-stack">
+                        <i class="fas fa-circle fa-stack-2x"></i>
+                        <i class="fas fa-trash fa-stack-1x fa-inverse"></i>
+                    </span>
+                    Excluir Equipe
                 </div>`
                 : '';
 
             html += `
                 ${personalizationCard(data)}
+                <hr>
                 <form id="settings-form" data-view="${view}" class="grid grid-cols-1 gap-6">
                 <input type="hidden" name="id" value="${data.id}">
                 ${basics}
@@ -3480,7 +3703,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${feedPrivacy}
                 ${contacts}
                 <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Salvar</button>
-                </form>                
+                </form>
+                <hr>             
                 ${shortcuts}
                 ${deleteTeamButton}
             `;
@@ -3502,28 +3726,65 @@ document.addEventListener('DOMContentLoaded', () => {
             // Permissões de gestão
             let canManage = (type === 'business') ? isBusinessManager(data.id) : canManageTeam(data);
 
-            const levelSelect = (current) => {
-                const options = [
-                    { v: 1, t: 'Membro' },
-                    { v: 2, t: 'Colaborador' },
-                    { v: 3, t: 'Moderador' },
-                    { v: 4, t: 'Gestor' }
+            const roleOptions = (scopeType) => {
+                if (scopeType === 'business') {
+                    return [
+                        { v: 1, t: 'Convidado' },
+                        { v: 2, t: 'Membro' },
+                        { v: 3, t: 'Administrador' },
+                        { v: 4, t: 'Proprietário' }
+                    ];
+                }
+                return [
+                    { v: 1, t: 'Visualizador' },
+                    { v: 2, t: 'Membro' },
+                    { v: 3, t: 'Operador' },
+                    { v: 4, t: 'Líder' }
                 ];
+            };
+
+            const levelSelect = (current) => {
+                const options = roleOptions(type);
                 return `<select name="nv" class="border-0 focus:outline-none">${options.map(o => `<option value="${o.v}" ${Number(current) === o.v ? 'selected' : ''}>${o.t}</option>`).join('')}</select>`;
+            };
+
+            const roleLabel = (nv) => {
+                const options = roleOptions(type);
+                const found = options.find(o => Number(o.v) === Number(nv));
+                return found ? found.t : `Nível: ${Number(nv ?? 1)}`;
             };
 
             const activeRows = active.length
                 ? active.map(e => {
                     const p = userMap.get(e.us) || { id: e.us, tt: 'Usuário' };
                     if (canManage) {
-                        const controls = `
-                            <div class="flex gap-2 items-center">
+                        const isSelf = String(p.id) === String(currentUserData?.id);
+                        const removeControl = isSelf ? '' : `
+                                <span data-action="remove-member" data-user-id="${p.id}" data-scope-type="${type}" data-scope-id="${data.id}" class="fa-stack text-red-200">
+                                    <i class="fas fa-circle fa-stack-2x"></i>
+                                    <i class="fas fa-trash fa-stack-1x text-red-600"></i>
+                                </span>
+                            `;
+                        const controls = isSelf
+                            ? `<span class="text-gray-500">${roleLabel(e.nv ?? 1)}</span>`
+                            : `                                                        
                                 ${levelSelect(e.nv ?? 1)}
-                                <button data-action="update-member-level" data-user-id="${p.id}" data-scope-type="${type}" data-scope-id="${data.id}" class="p-2 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-md">Atualizar</button>
-                            </div>`;
-                        return UI.row(`member-${p.id}`, p.tt, controls);
+                                <span data-action="update-member-level" data-user-id="${p.id}" data-scope-type="${type}" data-scope-id="${data.id}" class="fa-stack text-blue-200">
+                                    <i class="fas fa-circle fa-stack-2x"></i>
+                                    <i class="fas fa-sync-alt fa-stack-1x text-blue-600"></i>
+                                </span>
+                                ${removeControl}
+                            `;
+                        
+                        return `<div class="grid grid-cols-6 border-b border-gray-200 items-center cursor-pointer" data-id="${p.id}" data-name="${p.tt.toLowerCase()}">
+                                    <div class="col-span-1 p-3 flex justify-center">
+                                        <img src="${p.im}" alt="${`member-${p.id}` || 'Usuário'}" class="w-7 h-7 rounded-full" />
+                                    </div>
+                                    <div class="col-span-2 p-3 pl-0 truncate">${p.tt}</div>
+                                    <div class="col-span-3 p-3 grid grid-flow-col justify-items-end pl-0 truncate">${controls}</div>
+                                </div>`;
                     }
-                    return UI.row(`member-${p.id}`, p.tt, `<span class="text-gray-500">Nível: ${Number(e.nv ?? 1)}</span>`);
+                    return UI.row(`member-${p.id}`, p.tt, `<span class="text-gray-500">${roleLabel(e.nv ?? 1)}</span>`);
                 }).join('')
                 : `<div class="p-3 text-sm text-gray-500">Nenhum membro ativo.</div>`;
 
@@ -3532,17 +3793,45 @@ document.addEventListener('DOMContentLoaded', () => {
                     const p = userMap.get(e.us) || { id: e.us, tt: 'Usuário' };
                     const controls = `
                         <div class="flex gap-2">
-                            <button data-action="accept-member" data-user-id="${p.id}" data-scope-type="${type}" data-scope-id="${data.id}" class="p-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-md">Aceitar</button>
-                            <button data-action="reject-member" data-user-id="${p.id}" data-scope-type="${type}" data-scope-id="${data.id}" class="p-2 bg-red-100 hover:bg-red-200 text-red-800 rounded-md">Recusar</button>
+                            <span data-action="accept-member" data-user-id="${p.id}" data-scope-type="${type}" data-scope-id="${data.id}" class="fa-stack text-green-200">
+                                <i class="fas fa-circle fa-stack-2x"></i>
+                                <i class="fas fa-check fa-stack-1x text-green-600"></i>
+                            </span>
+                            <span data-action="reject-member" data-user-id="${p.id}" data-scope-type="${type}" data-scope-id="${data.id}" class="fa-stack text-red-200">
+                                <i class="fas fa-circle fa-stack-2x"></i>
+                                <i class="fas fa-trash fa-stack-1x text-red-600"></i>
+                            </span>
                         </div>`;
-                    return UI.row(`pending-${p.id}`, p.tt, controls);
+
+                    return `<div class="grid grid-cols-6 border-b border-gray-200 items-center cursor-pointer" data-id="${p.id}" data-name="${p.tt.toLowerCase()}">
+                                <div class="col-span-1 p-3 flex justify-center">
+                                    <img src="${p.im}" alt="${`pending-${p.id}` || 'Usuário'}" class="w-7 h-7 rounded-full" />
+                                </div>
+                                <div class="col-span-2 p-3 pl-0 truncate">${p.tt}</div>
+                                <div class="col-span-3 p-3 grid grid-flow-col justify-items-end pl-0 truncate">${controls}</div>
+                            </div>`;
+
                 }).join('')
                 : `<div class="p-3 text-sm text-gray-500">Sem solicitações pendentes.</div>`;
+                
+            html += `<div>
+                        <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
+                            <div id="employees-list">
+                                ${activeRows}
+                            </div>                            
+                        </div>
+                        <p class="text-gray-500 text-center mt-2 text-xs">Membros ativos</p>
+                    </div>`;
 
-            html += `
-                ${UI.sectionCard(`<div class="p-3 font-semibold">Membros Ativos</div>` + activeRows)}
-                ${UI.sectionCard(`<div class="p-3 font-semibold">Solicitações Pendentes</div>` + pendingRows)}
-            `;
+            html += `<div>
+                        <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
+                            <div id="employees-list">
+                                ${pendingRows}
+                            </div>                            
+                        </div>
+                        <p class="text-gray-500 text-center mt-2 text-xs">Solicitações pendentes</p>
+                    </div>`;
+
         } else if (view === 'people') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             // Pessoas seguidas pelo usuário logado
@@ -3565,7 +3854,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="col-span-1 p-3 flex justify-center">
                             <img src="${img}" alt="${u?.tt || 'Usuário'}" class="w-7 h-7 rounded-full" />
                         </div>
-                        <div class="col-span-5 p-3 truncate">${name}</div>
+                        <div class="col-span-5 p-3 pl-0 truncate">${name}</div>
                     </div>`;
                 }).join('');
                 html += searchCard + UI.sectionCard(`<div id="people-list">${rows}</div>`);
@@ -3577,28 +3866,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? userBusinessesData.filter(r => Number(r?.nv ?? 0) >= 3 && Number(r?.st ?? 1) === 1).map(r => r.em)
                 : [];
             const ids = managed;
-            if (!ids.length) {
-                const createBusinessCard = UI.sectionCard(
-                    UI.row('new-business-name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-business-name" placeholder="Digite o nome do negócio" required>`, { top: true }) +
-                    `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
-                        <button data-action="create-business" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
-                    </div>`
-                );
-                html += createBusinessCard;
+            const createBusinessCard = UI.sectionCard(
+                UI.row('new-business-name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-business-name" placeholder="Digite o nome do negócio" required>`, { top: true, bottom: true })                
+            );  
+            const createBusinessButton = `<button data-action="create-business" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Criar e Prosseguir</button>`;
+            if (!ids.length) {                
+                html += createBusinessCard + createBusinessButton;
                 html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center mt-3">Você ainda não gerencia nenhum negócio.</div>`;
             } else {
                 let list = await fetchByIds(ids, 'businesses');
-                list = Array.isArray(list) ? list : (list ? [list] : []);
-                const createBusinessCard = UI.sectionCard(
-                    UI.row('new-business-name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-business-name" placeholder="Digite o nome do negócio" required>`, { top: true }) +
-                    `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
-                        <button data-action="create-business" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
-                    </div>`
-                );
-                html += createBusinessCard;
+                list = Array.isArray(list) ? list : (list ? [list] : []);                              
                 const searchCardBiz = UI.sectionCard(
                     UI.row('businesses-search', 'Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="businesses-search" placeholder="Digite para filtrar">`, { top: true, bottom: true })
-                );
+                );                
                 html += searchCardBiz;
                 const rows = list.map(b => {
                     const img = resolveImageSrc(b?.im, b?.tt, { size: 100 });
@@ -3608,10 +3888,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="col-span-1 p-3 flex justify-center">
                             <img src="${img}" alt="${name}" class="w-7 h-7 rounded-full" />
                         </div>
-                        <div class="col-span-5 p-3 truncate">${name}</div>
+                        <div class="col-span-5 p-3 pl-0 truncate">${name}</div>
                     </div>`;
                 }).join('');
                 html += UI.sectionCard(`<div id="businesses-list">${rows}</div>`);
+                html += '<hr>' + createBusinessCard + createBusinessButton;
             }
         } else if (view === 'teams') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
@@ -3640,41 +3921,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 .map(r => String(r.em))
             );
             const visible = managed.filter(t => approvedBizSet.has(String(t.em)));
+            const managedBiz = Array.isArray(userBusinessesData)
+                ? userBusinessesData.filter(r => Number(r?.nv ?? 0) >= 3 && Number(r?.st ?? 1) === 1).map(r => r.em)
+                : []; 
+            let bizList = await fetchByIds(managedBiz, 'businesses');
+            bizList = Array.isArray(bizList) ? bizList : (bizList ? [bizList] : []);
+            const options = [`<option value="">Selecione um negócio</option>`]
+                .concat(bizList.map(b => `<option value="${b.id}">${b.tt}</option>`)).join('');
+            const createTeamCard = UI.sectionCard(
+                UI.row('new-team-name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-team-name" placeholder="Digite o nome da equipe" required>`, { top: true }) +
+                UI.rowSelect('new-team-business', 'Negócio', options)
+            );
+            const createTeamButton = `<button data-action="create-team" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Criar e Prosseguir</button>`;
+
             if (!visible.length) {
-                // Select de negócios gerenciados para criar equipe (em)
-                const managedBiz = Array.isArray(userBusinessesData)
-                    ? userBusinessesData.filter(r => Number(r?.nv ?? 0) >= 3 && Number(r?.st ?? 1) === 1).map(r => r.em)
-                    : [];
-                let bizList = await fetchByIds(managedBiz, 'businesses');
-                bizList = Array.isArray(bizList) ? bizList : (bizList ? [bizList] : []);
-                const options = [`<option value="">Selecione um negócio</option>`]
-                    .concat(bizList.map(b => `<option value="${b.id}">${b.tt}</option>`)).join('');
-                const createTeamCard = UI.sectionCard(
-                    UI.row('new-team-name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-team-name" placeholder="Digite o nome da equipe" required>`, { top: true }) +
-                    UI.rowSelect('new-team-business', 'Negócio', options) +
-                    `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
-                        <button data-action="create-team" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
-                    </div>`
-                );
-                html += createTeamCard;
+                // Select de negócios gerenciados para criar equipe (em)                               
+                html += createTeamCard + createTeamButton;
                 html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center mt-3">Você ainda não gerencia nenhuma equipe.</div>`;
             } else {
-                // Formulário de criação no topo (bloco/padrão depoimentos)
-                const managedBiz = Array.isArray(userBusinessesData)
-                    ? userBusinessesData.filter(r => Number(r?.nv ?? 0) >= 3 && Number(r?.st ?? 1) === 1).map(r => r.em)
-                    : [];
-                let bizList = await fetchByIds(managedBiz, 'businesses');
-                bizList = Array.isArray(bizList) ? bizList : (bizList ? [bizList] : []);
-                const options = [`<option value="">Selecione um negócio</option>`]
-                    .concat(bizList.map(b => `<option value="${b.id}">${b.tt}</option>`)).join('');
-                const createTeamCard = UI.sectionCard(
-                    UI.row('new-team-name', 'Nome*', `<input class="w-full border-0 focus:outline-none" type="text" id="new-team-name" placeholder="Digite o nome da equipe" required>`, { top: true }) +
-                    UI.rowSelect('new-team-business', 'Negócio', options) +
-                    `<div class="grid grid-cols-1 border-t border-gray-200 bg-white">
-                        <button data-action="create-team" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-b-2xl"><i class="fas fa-plus"></i> Criar</button>
-                    </div>`
-                );
-                html += createTeamCard;
+                // Formulário de criação no topo (bloco/padrão depoimentos)                
                 const searchCardTeams = UI.sectionCard(
                     UI.row('teams-search', 'Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="teams-search" placeholder="Digite para filtrar">`, { top: true, bottom: true })
                 );
@@ -3687,10 +3952,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="col-span-1 p-3 flex justify-center">
                             <img src="${img}" alt="${name}" class="w-7 h-7 rounded-full" />
                         </div>
-                        <div class="col-span-5 p-3 truncate">${name}</div>
+                        <div class="col-span-5 p-3 pl-0 truncate">${name}</div>
                     </div>`;
                 }).join('');
-                html += UI.sectionCard(`<div id="teams-list">${rows}</div>`);
+                html += UI.sectionCard(`<div id="teams-list">${rows}</div>`);                
+                html += '<hr>' + createTeamCard + createTeamButton;
             }
         } else if (view === 'apps') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
@@ -3715,14 +3981,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const list = Array.isArray(apps) ? apps : (apps ? [apps] : []);
             const searchCardApps = UI.sectionCard(
                 UI.row('apps-search', 'Pesquisar', `<input class="w-full border-0 focus:outline-none" type="text" id="apps-search" placeholder="Digite para filtrar">`, { top: true, bottom: true })
-            );
-            const storeRow = `
-                <div class="grid grid-cols-6 border-b border-gray-200 items-center hover:bg-gray-50 cursor-pointer" id="open-app-store" data-name="loja">
-                    <div class="col-span-1 p-3 flex justify-center">
-                        <img src="/images/app-default.png" alt="Loja" class="w-7 h-7 rounded-md" />
-                    </div>
-                    <div class="col-span-5 p-3 truncate">Loja de Aplicativos</div>
-                </div>`;
+            );            
             const rows = list.map(app => {
                 const img = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 120 });
                 const name = (app?.tt || 'App');
@@ -3731,10 +3990,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="col-span-1 p-3 flex justify-center">
                         <img src="${img}" alt="${name}" class="w-7 h-7 rounded-md" />
                     </div>
-                    <div class="col-span-5 p-3 truncate">${name}</div>
+                    <div class="col-span-5 p-3 pl-0 truncate">${name}</div>
                 </div>`;
             }).join('');
-            html += hideFavCard + searchCardApps + UI.sectionCard(`<div id="apps-list">${storeRow}${rows}</div>`);
+            html += hideFavCard + searchCardApps + UI.sectionCard(`<div id="apps-list">${rows}</div>`);
         } else if (view === 'app-settings') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const app = data || {};
@@ -3742,7 +4001,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const img = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 120 });
             const notifyKey = `app_notify_${appId}`;
             const enabled = (localStorage.getItem(notifyKey) === '1');
-            // Verifica se está nos favoritos (acesso rápido)
+            // Verifica se está nos favoritos (barra de tarefas)
             let inQuick = false;
             try {
                 const quickRes = await apiClient.post('/search', {
@@ -3751,32 +4010,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 inQuick = Array.isArray(quickRes?.data) && quickRes.data.length > 0;
             } catch (_) {}
-            const header = `
-            <div class="w-full bg-white rounded-2xl shadow-md p-4 flex items-center gap-3">
-                <img src="${img}" alt="${app?.tt || 'App'}" class="w-9 h-9 rounded-md" />
-                <div class="font-semibold truncate">${app?.tt || 'Aplicativo'}</div>
-            </div>`;
+            
+            html += UI.renderHero({ tt: app?.tt, im: img }, 'square');
+
             const actions = `
-            <div class="w-full shadow-md rounded-2xl grid grid-cols-1">
-                <div class="grid grid-cols-1 border-t border-gray-200 bg-white">
-                    <button data-action="app-toggle-quick" data-app-id="${appId}" class="p-3 bg-amber-100 hover:bg-amber-200 text-amber-800">
-                        <i class="fas fa-star"></i> ${inQuick ? 'Remover do Acesso Rápido' : 'Adicionar ao Acesso Rápido'}
-                    </button>
-                    <button data-action="app-toggle-notifications" data-app-id="${appId}" class="p-3 bg-blue-100 hover:bg-blue-200 text-blue-800">
-                        <i class="fas fa-bell"></i> ${enabled ? 'Desativar Notificações' : 'Ativar Notificações'}
-                    </button>
-                    <button data-action="app-uninstall" data-app-id="${appId}" class="p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-b-2xl">
-                        <i class="fas fa-trash"></i> Desinstalar aplicativo
-                    </button>
-                </div>
-            </div>`;
-            html += header + actions;
+            <div class="w-full shadow-md rounded-2xl grid grid-cols-1">            
+                <button data-action="app-toggle-quick" data-app-id="${appId}" class="text-left rounded-t-2xl border-b bg-white text-gray-700 p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
+                    <span class="fa-stack">
+                        <i class="fas fa-circle fa-stack-2x"></i>
+                        <i class="fas fa-thumbtack fa-stack-1x fa-inverse"></i>
+                    </span>
+                    ${inQuick ? 'Desafixar da barra de tarefas' : 'Fixar na barra de tarefas'}
+                </button>
+                <button data-action="app-toggle-notifications" data-app-id="${appId}" class="text-left rounded-b-2xl border-b bg-white text-gray-700 p-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out">
+                    <span class="fa-stack">
+                        <i class="fas fa-circle fa-stack-2x"></i>
+                        <i class="fas fa-bell fa-stack-1x fa-inverse"></i>
+                    </span>
+                    ${enabled ? 'Desativar Notificações' : 'Ativar Notificações'}
+                </button>                                
+            </div>            
+            <div data-action="app-uninstall" data-app-id="${appId}" title="Desinstalar Aplicativo" class=" rounded-2xl shadow-md bg-red-200 text-red-700 p-3 cursor-pointer hover:bg-red-300 transition-all duration-300 ease-in-out">
+                <span class="fa-stack">
+                    <i class="fas fa-circle fa-stack-2x"></i>
+                    <i class="fas fa-trash fa-stack-1x fa-inverse"></i>
+                </span>
+                Desinstalar Aplicativo
+            </div>            
+            `;
+            html += actions;
         } else if (view === 'testimonials') {
             html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
             const res = await apiClient.post('/search', { db: 'workz_data', table: 'testimonials', columns: ['*'], conditions: { recipient: data.id, recipient_type: type }, fetchAll: true });
             const list = Array.isArray(res?.data) ? res.data : [];
             if (!list.length) {
-                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Não há depoimentos.</div>`;
+                html += `<div class="rounded-3xl w-full py-3 px-4 text-center bg-yellow-50 text-yellow-800 shadow-md">                            
+                            <span>Não há depoimentos.</span>
+                        </div>`;
             } else {
                 const cards = await Promise.all(list.map(async t => {
                     const author = await fetchByIds(t.author, 'people');
@@ -3803,13 +4073,144 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += cards.join('');
             }
         } else if (view === 'billing') {
-            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
-            html += `<div class="bg-white rounded-2xl shadow-md p-4">Cobrança e Recebimento</div>`;
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: 'Cobrança e Recebimento' });
+
+            const isBusiness = (type === 'business');
+            const entityType = isBusiness ? 'business' : 'user';
+            const entityId = isBusiness ? (data?.id || 0) : (currentUserData?.id || 0);
+
+            // Payment methods
+            let pm = { data: [] };
+            try { pm = await apiClient.get(`/billing/payment-methods?entity=${entityType}&id=${entityId}`); } catch (_) {}
+            const pmList = Array.isArray(pm?.data) ? pm.data : [];
+
+            const pmItems = pmList.length ? pmList.map((m, n) => `
+                <div data-index="${n}" class="w-full bg-white shadow-md ${n == 0 ? 'rounded-t-2xl border-b border-gray-200' : n == (pmList.length - 1) ? 'rounded-b-2xl' : 'border-b border-gray-200'}  p-3 flex items-center justify-between">
+                    <div class="text-sm">
+                        <div class="font-semibold">${m.label || (m.brand ? (m.brand + ' •••• ' + (m.last4 || '')) : 'Cartão')}</div>
+                        <small class="text-gray-500">${(m.exp_month ? (String(m.exp_month).padStart(2,'0') + '/' + (m.exp_year || '')) : '')}</small>
+                    </div>                    
+                    <div class="flex gap-x-1 items-center">
+                        ${m.is_default ? `
+                        <span class="fa-stack text-yellow-200">
+                            <i class="fas fa-circle fa-stack-2x"></i>
+                            <i class="fas fa-star fa-stack-1x text-yellow-600"></i>
+                        </span>
+                        ` : `
+                        <span data-action="billing-card-default" data-id="${m.id}" class="fa-stack text-gray-100 hover:text-yellow-200 transition-colors">
+                            <i class="fas fa-circle fa-stack-2x"></i>
+                            <i class="fas fa-star fa-stack-1x text-gray-300"></i>
+                        </span>
+                        `}
+                        <span data-action="billing-card-delete" data-id="${m.id}" class="fa-stack text-gray-100 hover:text-red-700 transition-colors">
+                            <i class="fas fa-circle fa-stack-2x"></i>
+                            <i class="fas fa-trash fa-stack-1x text-gray-300 hover:text-white transition-colors"></i>
+                        </span>
+                    </div>
+                </div>
+            `).join('') : `<div class="text-sm text-gray-600">Nenhum cartão salvo.</div>`;
+
+            const businessEmail = isBusiness ? (data?.ml || '') : '';
+            const addCardDisabled = isBusiness && !businessEmail;
+            const addCard = `
+                <div class="w-full grid gap-2">                                        
+                    <button data-action="billing-init-stripe" class="shadow-md w-full py-2 px-4 ${addCardDisabled ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-orange-600 text-white hover:bg-orange-700'} font-semibold rounded-3xl transition-colors" ${addCardDisabled ? 'disabled' : ''}>Adicionar cartão</button>
+                    <div class="text-xs text-gray-500">${addCardDisabled ? 'Cadastre um e-mail corporativo nos dados do negócio para habilitar o cartão.' : 'Os dados do cartão são tokenizados e salvos no cofre do provedor. Não armazenamos PAN/CVV.'}</div>
+                    <div id="stripe-card-mount" class="w-full" data-entity="${entityType}" data-entity-id="${entityId}" data-entity-email="${businessEmail}" data-entity-name="${data?.tt || ''}"></div>                    
+                </div>`;
+
+            html += `
+                <div class="grid gap-6">                    
+                    <div class="">${pmItems}</div>                    
+                    ${addCard}
+                </div>`;
+
+            if (isBusiness) {
+                // Bank accounts
+                let ba = { data: [] };
+                try { ba = await apiClient.get(`/billing/bank-accounts?business_id=${entityId}`); } catch (_) {}
+                const baList = Array.isArray(ba?.data) ? ba.data : [];
+                const baItems = baList.length ? baList.map(a => `
+                    <div class="w-full bg-white border border-gray-200 rounded-xl p-3 flex items-center justify-between">
+                        <div class="text-sm">
+                            <div class="font-semibold">${a.holder_name || 'Titular'} ${a.document ? '(' + a.document + ')' : ''}</div>
+                            <div class="text-gray-500">${a.pix_key ? ('PIX: ' + a.pix_key) : (a.bank_name ? (a.bank_name + ' • Ag ' + (a.branch||'') + ' • Conta ' + (a.account_number||'')) : '—')}</div>
+                        </div>
+                        <div class="flex gap-2 items-center">
+                            ${a.is_default ? '<span class="px-2 py-1 text-xs bg-emerald-100 text-emerald-800 rounded">Padrão</span>' : `<button data-action=\"billing-bank-default\" data-id=\"${a.id}\" class=\"px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded\">Tornar padrão</button>`}
+                            <button data-action="billing-bank-delete" data-id="${a.id}" class="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-800 rounded">Remover</button>
+                        </div>
+                    </div>
+                `).join('') : `<div class="text-sm text-gray-600">Nenhuma conta bancária cadastrada.</div>`;
+
+
+                const addBank = UI.sectionCard(
+                    UI.row('ba_holder', 'Titular', `<input class="w-full border-0 focus:outline-none" type="text" id="ba_holder" name="ba_holder" value="">`, { top: true }) +
+                    UI.row('ba_document', 'CPF/CNPJ', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="" id="ba_document" name="ba_document" value="">`) +
+                    UI.row('ba_bank_code', 'Código do banco', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="" id="ba_bank_code" name="ba_bank_code" value="">`) +
+                    UI.row('ba_bank_name', 'Nome do banco', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="" id="ba_bank_name" name="ba_bank_name" value="">`) +
+                    UI.row('ba_branch', 'Agência', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="" id="ba_branch" name="ba_branch" value="">`) +
+                    UI.row('ba_account', 'Conta', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="" id="ba_account" name="ba_account" value="">`) +
+                    UI.rowSelect('ba_type', 'Tipo de conta', `
+                        <option value="checking"}>Conta corrente</option>
+                        <option value="savings">Poupança</option>
+                        <option value="payment">Conta pagamento</option>
+                    `) +
+                    UI.rowSelect('ba_pix_type', 'PIX (opcional)', `
+                        <option value="" selected disabled>PIX (opcional)</option>
+                        <option value="cpf">CPF</option>
+                        <option value="cnpj">CNPJ</option>
+                        <option value="email">Email</option>
+                        <option value="phone">Telefone</option>
+                        <option value="evp">Chave aleatória</option>
+                    `) +
+                    UI.row('ba_pix_key', 'Chave PIX (se selecionado)', `<input class="w-full border-0 focus:outline-none" type="text" placeholder="" id="ba_pix_key" name="ba_pix_key" value="">`, { bottom: true })                    
+                );
+
+                html += `
+                    <hr>
+                    <div class="w-full grid gap-6">
+                        <div class="font-semibold">Contas bancárias</div>
+                        <div class="grid gap-2">${baItems}</div>                                                
+                    </div>
+                    ${addBank}
+                    <button data-action="billing-save-bank" data-business-id="${entityId}" class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-2xl">Salvar conta</button>
+                `;
+            }
         } else if (view === 'transactions') {
-            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
-            html += `<div class="bg-white rounded-2xl shadow-md p-4">Transações</div>`;
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: 'Transações' });
+            const isBusiness = (type === 'business');
+            const qs = new URLSearchParams();
+            if (isBusiness && data?.id) { qs.set('company_id', String(data.id)); }
+            const res = await apiClient.get(`/payments/transactions${qs.toString() ? ('?' + qs.toString()) : ''}`);
+            const list = Array.isArray(res?.data) ? res.data : [];
+            if (!list.length) {
+                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Não há transações.</div>`;
+            } else {
+                const items = list.map(t => {
+                    const canPay = (t.status === 'created' || t.status === 'pending');
+                    const canCancel = (t.status === 'created' || t.status === 'pending');
+                    const actions = (canPay || canCancel) ? `
+                        <div class="p-3 flex gap-2 border-t">
+                            ${canPay ? `<button data-action="tx-pay-now" data-id="${t.id}" data-amount="${Number(t.amount||0)}" data-app-id="${t.app_id||''}" class="px-3 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 rounded">Pagar agora</button>` : ''}
+                            ${canCancel ? `<button data-action="tx-cancel" data-id="${t.id}" class="px-3 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-800 rounded">Cancelar</button>` : ''}
+                        </div>` : '';
+                    return `
+                        <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1">
+                            <div class="p-3 flex items-center justify-between border-b text-sm">
+                                <div><span class="font-semibold">#${t.id}</span> • ${t.currency || 'BRL'} ${Number(t.amount||0).toFixed(2)}</div>
+                                <span class="px-2 py-1 text-xs rounded ${t.status==='approved'?'bg-emerald-100 text-emerald-800':(t.status==='cancelled'?'bg-red-100 text-red-800':'bg-gray-100 text-gray-700')}">${t.status}</span>
+                            </div>
+                            <div class="p-3 text-xs text-gray-600">App ${t.app_id || '-'} • ${t.created_at || ''}</div>
+                            <div id="tx-pay-brick-${t.id}" class="px-3 pb-3 hidden"></div>
+                            ${actions}
+                        </div>
+                    `;
+                }).join('');
+                html += `<div class="grid gap-6">${items}</div>`;
+            }
         } else if (view === 'subscriptions') {
-            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: 'Contratos' });
             const conditions = (type === 'business') ? { em: data.id, subscription: 1 } : { us: data.id, subscription: 1 };
 
             const exists = [{ table: 'apps', local: 'ap', remote: 'id' }];
@@ -3817,62 +4218,49 @@ document.addEventListener('DOMContentLoaded', () => {
             const list = Array.isArray(res?.data) ? res.data : [];
 
             if (!list.length) {
-                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Não há assinaturas.</div>`;
+                html += `<div class="bg-yellow-100 border border-yellow-400 rounded-3xl p-3 text-sm text-center">Nenhum serviço ativo. Use a loja para ativar suporte.</div>`;
             } else {
+                const today = new Date().toISOString().slice(0, 10);
+                const options = [
+                    { days: 30, label: '30 dias', multiplier: 1 },
+                    { days: 90, label: '90 dias', multiplier: 3 },
+                    { days: 180, label: '180 dias', multiplier: 6 },
+                ];
                 const cards = await Promise.all(list.map(async t => {
                     const app = await fetchByIds(t.ap, 'apps');
+                    const price = Number(app?.vl || 0);
                     const avatar = resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 90 });
-                    const actionBtn = (t.end_date === null)
-                        ? `<button title="Cancelar" data-action="reject-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-b-2xl"><i class="fas fa-ban"></i> Cancelar Assinatura</button>`
-                        : `<button title="Renovar" data-action="revert-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-b-2xl"><i class="fas fa-undo"></i> Renovar Assinatura</button>`
-                        ;
+                    const active = Number(t.st || 0) === 1 && (!t.end_date || t.end_date >= today);
+                    const statusClass = active ? 'bg-emerald-100 text-emerald-800' : 'bg-red-50 text-red-700';
+                    const statusText = active ? `Ativo${t.end_date ? ' até ' + t.end_date : ''}` : (t.end_date ? `Expirou em ${t.end_date}` : 'Inativo');
+                    const opts = options.map((opt, idx) => {
+                        const amount = Number((price * opt.multiplier).toFixed(2));
+                        return `<button data-action="service-option" data-app-id="${app?.id || ''}" data-days="${opt.days}" data-amount="${amount}" class="svc-opt-btn ${idx === 0 ? 'active' : ''} px-3 py-2 rounded-xl border ${idx === 0 ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-gray-50'} text-sm">${opt.label} • R$ ${amount.toFixed(2)}</button>`;
+                    }).join('');
                     return `
-                        <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
-                            <div class="pt-4 px-4 col-span-4 flex items-center truncate">
-                                <img class="w-9 h-9 mr-2 rounded-md pointer" src="${avatar}" />
-                                <a class="font-semibold">${app?.tt}</a>
+                        <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4 p-4" data-app-card="${app?.id || ''}" data-company-id="${type === 'business' ? data?.id || '' : ''}" data-price="${price}">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center truncate gap-2">
+                                    <img class="w-9 h-9 mr-2 rounded-md pointer" src="${avatar}" />
+                                    <div class="font-semibold">${app?.tt || 'App'}</div>
+                                </div>
+                                <span class="text-xs px-3 py-1 rounded-full ${statusClass}">${statusText}</span>
                             </div>
-                            <div class="grid grid-cols-1 border-t p-4">                                
-                                ${(app?.vl > 0) ? app?.vl : 'Gratuito'}
-                            </div>
-                            <div class="grid grid-cols-1 border-t">
-                                ${actionBtn}
-                            </div>
+                            <div class="text-sm text-gray-700">${price > 0 ? `A partir de R$ ${price.toFixed(2)} / 30 dias` : 'Gratuito'}</div>
+                            ${price > 0 ? `
+                            <div class="grid gap-2">
+                                <div class="flex flex-wrap gap-2">${opts}</div>
+                                <div id="svc-paybox-${app?.id || ''}" class="hidden"></div>
+                                <button data-action="service-pay" data-app-id="${app?.id || ''}" class="px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-sm">Escolher cartão e pagar</button>
+                            </div>` : `<div class="text-xs text-gray-500">Este app é gratuito.</div>`}
                         </div>
                     `;
                 }));
-                html += cards.join('');
+                html += `<div class="grid gap-4">${cards.join('')}</div>`;
             }
 
-        } else if (view === 'user-education') {
-            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
-            html += `<div class="bg-white rounded-2xl shadow-md p-4">Education content</div>`;
-        } else if (view === 'user-jobs') {
-            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
-            const userJobs = await apiClient.post('/search', { db: 'workz_companies', table: 'employees', columns: ['*'], conditions: { us: currentUserData.id }, order: { by: 'start_date', dir: 'DESC' }, fetchAll: true });
-            const cards = await Promise.all(userJobs?.data?.map(async j => {
-                const business = await fetchByIds(j.em, 'businesses');
-                return `
-                    <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
-                        <div class="pt-4 px-4 col-span-4 flex items-center truncate">
-                            <img class="w-7 h-7 mr-2 rounded-full pointer" src="${resolveImageSrc(business?.im, business?.tt, { size: 100 })}" />
-                            <a class="font-semibold">${business?.tt ?? 'Empresa'}</a>
-                        </div>
-                        <div class="col-span-4 px-4">
-                            <p class="font-semibold">${j.job_title}</p>
-                            <p class="text-sm text-gray-600">${new Date(j.start_date).toLocaleDateString()} - ${j.end_date ? new Date(j.end_date).toLocaleDateString() : 'Atual'}</p>
-                            <p class="text-sm mt-2">${j.description ?? ''}</p>
-                        </div>
-                        <div class="grid grid-cols-2 rounded-b-2xl border-t border-gray-200 bg-white">
-                            <button title="Editar" data-action="edit-job" data-id="${j.id}" class="col-span-1 p-3 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-bl-2xl"><i class="fas fa-edit"></i></button>
-                            <button title="Excluir" data-action="delete-job" data-id="${j.id}" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-br-2xl"><i class="fas fa-trash"></i></button>
-                        </div>
-                    </div>
-                    
-                `;
-            }));
-            html += cards.join('');
-            html += `<button id="add-job-btn" class="w-full py-2 px-4 bg-green-500 text-white font-semibold rounded-3xl hover:bg-green-700 transition-colors mt-4">Adicionar Experiência Profissional</button>`;
+        } else if (view === 'user-education') {            
+        } else if (view === 'user-jobs') {            
         } else if (view === 'post-editor') {
             
             const postCaption = UI.sectionCard(UI.rowTextarea('postCaption', 'Legenda', ''));
@@ -3881,147 +4269,165 @@ document.addEventListener('DOMContentLoaded', () => {
             html += `
             <h1 class="text-center text-gray-500 text-xl font-bold">Criar Publicação</h1>
             <div id="appShell" class="gap-6 flex flex-col">    
-                <section class="editor-card">
-                    <!-- Toolbar superior minimalista -->
-                    <div class="flex items-center gap-6">
-                        <label for="bgUpload" class="tool-icon" title="Plano de fundo">
-                            <i class="fas fa-image"></i>
-                            <input type="file" id="bgUpload" accept="image/*,video/*">
-                        </label>
-                        <button type="button" id="btnAddText" class="tool-icon" title="Adicionar texto">
-                            <i class="fas fa-font"></i>
-                        </button>
-                        <button type="button" id="btnAddImg" class="tool-icon" title="Adicionar imagem">
-                            <i class="fas fa-image"></i>
-                        </button>                        
-                        <button type="button" id="btnCameraMode" class="tool-icon hidden" title="Usar câmera (requer permissão)">
-                            <i class="fas fa-camera"></i>
-                        </button>                        
-                        <button type="button" id="btnSaveJSON" class="tool-icon" title="Salvar layout">
-                            <i class="fas fa-save"></i>
-                        </button>
-                        <label class="tool-icon" for="loadJSON" title="Carregar layout">
-                            <i class="fas fa-folder-open"></i>
-                            <input type="file" id="loadJSON" accept="application/json" class="sr-only">
-                        </label>
-                    </div>
-                </section>
+                
                 
                 <section class="editor-card">
                     <!-- Editor viewport com botão de captura sobreposto -->
-                    <div id="editorViewport" class="bg-white rounded-2xl shadow-md">
-                        <div id="editor" class="rounded-2xl">
+                    <div id="editorViewport" class="bg-transparent relative">
+                        
+                        <div id="editor" class="relative">
                             <canvas id="gridCanvas" width="900" height="1200"></canvas>
                             <div id="guideX" class="guide guide-x" style="display:none; top:50%"></div>
                             <div id="guideY" class="guide guide-y" style="display:none; left:50%"></div>
-                        </div>                    
+                        </div>
                         <!-- Botão de captura estilo Instagram Stories -->
                         <div class="capture-overlay">
-                        <button type="button" id="captureButton" class="capture-button" title="Toque para foto, segure para vídeo">
-                            <div class="capture-inner">
-                                <i class="fa-solid fa-camera capture-icon"></i>
-                            </div>
-                            <div class="capture-hint">
-                                <i class="fa-solid fa-hand-pointer"></i>
-                            </div>
-                        </button>
+                            <button type="button" id="captureButton" class="capture-button" title="Toque para foto, segure para vídeo">
+                               
+                                <div class="capture-hint"></div>
+                            </button>
                         </div>
+                        
+                        <section class="absolute top-0 left-0 right-0">
+                            <!-- Toolbar superior minimalista -->
+                            <div class="w-full overflow-hidden flex items-center justify-between p-4">                                                                   
+                                <label for="bgUpload" title="Preencher com imagem ou vídeo" class="h-10 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-upload"></i>
+                                    <input type="file" id="bgUpload" accept="application/json" class="sr-only">
+                                </label>
+                                <button type="button" title="Inserir caixa de texto" id="btnAddText" class="h-10 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-font"></i>
+                                </button>
+                                <button type="button" title="Inserir imagem" id="btnAddImg" class="h-10 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-icons"></i>
+                                </button>                                                                                            
+                                <label for="bgColorPicker" title="Cor de preenchimento" class="h-10 text-sm cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-fill-drip"></i>
+                                    <input id="bgColorPicker" type="color" value="#ffffff" class="h-1 w-4 mt-px input-color-picker" title="Cor de fundo do texto">
+                                </label>
+                                <label for="loadJSON" title="Importar JSON" class="h-10 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-file-import"></i>
+                                    <input type="file" id="loadJSON" accept="application/json" class="sr-only">
+                                </label>
+                                <button type="button" title="Exportar JSON" id="btnSaveJSON" class="h-10 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-file-export"></i>
+                                </button>
+                            </div>
+                        </section>
+                        
                     </div>                                    
                 </section>
             
-                <section id="itemBar" class="editor-card control-panel" style="display:none">
-                    <div class="flex items-center gap-2">
-                        <span class="text-sm text-slate-600">Selecionado</span>
-                        <select id="zIndex" class="border border-slate-200 rounded-lg px-2 py-1 text-sm">
-                            <option value="front">Trazer p/ frente</option>
-                            <option value="back">Enviar p/ trás</option>
-                        </select>
+                <section id="itemBar" class="gap-6 flex flex-col" style="display:none">
+                    
+                    <div id="textControls" class="hidden w-full mb-6">
+                        <div class="w-full shadow-md rounded-2xl overflow-hidden bg-white">
+                            <div class="flex items-center justify-between p-4 border-b border-gray-200">
+                                <button type="button" id="alignLeft" class="h-9 text-sm cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-align-left"></i>
+                                </button>
+                                <button type="button" id="alignCenter" class="h-9 text-sm cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-align-center"></i>
+                                </button>
+                                <button type="button" id="alignRight" class="h-9 text-sm cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-align-right"></i>
+                                </button>                        
+                                <label for="fontColor" class="h-9 text-sm cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-font"></i>
+                                    <input id="fontColor" type="color" value="#111827" class="h-1 w-4 mt-px input-color-picker" title="Cor do texto">
+                                </label>
+                                <label for="bgTextColor" class="h-9 text-sm cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-tint"></i>
+                                    <input id="bgTextColor" type="color" value="#ffffff" class="h-1 w-4 mt-px input-color-picker" title="Cor de fundo do texto">
+                                </label>
+                                <label for="bgNone"  class="h-9 text-sm cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-tint-slash"></i>
+                                    <input id="bgNone" type="checkbox" class="hidden">
+                                </label>
+                                <button type="button" id="btnEditText" aria-pressed="false" class="h-9 text-sm cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                    <i class="fas fa-pencil-alt"></i>
+                                </button>
+                            </div>
+                            <div class="grid grid-cols-2 p-4 flex items-center gap-2">
+                                <label class="col-span-1 grid grid-cols-4 gap-2 text-sm text-slate-600">
+                                    <label for="animType" class="col-span-1 truncate text-gray-500">Fonte</label>                                    
+                                    <input id="fontSize" type="range" min="12" max="96" value="28" class="col-span-3 accent-slate-500" title="Tamanho da fonte">
+                                </label>
+                                <select id="fontWeight" class="col-span-1 border border-slate-200 rounded-lg px-2 py-1 text-sm" title="Peso">
+                                    <option value="400">Regular</option>
+                                    <option value="600" selected>Seminegrito</option>
+                                    <option value="700">Negrito</option>
+                                </select>    
+                            </div>                        
+                        </div>                        
                     </div>
-                
-                    <div id="textControls" class="hidden flex-wrap items-center gap-2">
-                        <label class="flex items-center gap-2 text-sm text-slate-600">
-                            Fonte
-                            <input id="fontSize" type="range" min="12" max="96" value="28" class="accent-slate-500" title="Tamanho da fonte">
-                        </label>
-                        <input id="fontColor" type="color" value="#111827" class="h-9 w-9 rounded-full border border-slate-200" title="Cor do texto">
-                        <select id="fontWeight" class="border border-slate-200 rounded-lg px-2 py-1 text-sm" title="Peso">
-                            <option value="400">Regular</option>
-                            <option value="600" selected>Semibold</option>
-                            <option value="700">Bold</option>
-                        </select>
-                        <div class="flex items-center gap-2">
-                            <button type="button" id="alignLeft" class="toolbar-btn toolbar-btn--ghost" title="Alinhar à esquerda">
-                                <i class="fa-solid fa-align-left"></i><span class="sr-only">Alinhar à esquerda</span>
-                            </button>
-                            <button type="button" id="alignCenter" class="toolbar-btn toolbar-btn--ghost" title="Centralizar texto">
-                                <i class="fa-solid fa-align-center"></i><span class="sr-only">Centralizar</span>
-                            </button>
-                            <button type="button" id="alignRight" class="toolbar-btn toolbar-btn--ghost" title="Alinhar à direita">
-                                <i class="fa-solid fa-align-right"></i><span class="sr-only">Alinhar à direita</span>
-                            </button>
+
+                    <div class="w-full mb-6 shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
+                        <div class="grid grid-cols-4 border-b border-gray-200">
+                            <label for="zIndex" class="col-span-1 p-4 truncate text-gray-500">Organizar</label>
+                            <select id="zIndex" class="border-0 focus:outline-none col-span-3 p-4">
+                                <option value="front">Avançar</option>
+                                <option value="back">Recuar</option>
+                            </select>                           
                         </div>
-                        <div class="flex items-center gap-2">
-                            <label class="flex items-center gap-2 text-sm text-slate-600">
-                                Fundo
-                                <input id="bgTextColor" type="color" value="#ffffff" class="h-9 w-9 rounded-full border border-slate-200" title="Cor de fundo do texto">
-                            </label>
-                            <label class="flex items-center gap-1 text-sm text-slate-600">
-                                <input id="bgNone" type="checkbox" class="rounded border-slate-300">
-                                Sem fundo
-                            </label>
+                    </div>
+                    
+                    <div class="w-full mb-6 shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">                           
+                        <div class="grid grid-cols-4 border-b border-gray-200">
+                            <label for="animType" class="col-span-1 p-4 truncate text-gray-500">Entrada</label>
+                            <select id="animType" class="border-0 focus:outline-none col-span-3 p-4">
+                                <option value="none">Nenhum</option>
+                                <option value="fade-in">Aparecer</option>
+                                <option value="slide-left">Deslizar pela esquerda</option>
+                                <option value="slide-right">Deslizar pela direita</option>
+                                <option value="slide-top">Deslizar por cima</option>
+                                <option value="slide-bottom">Deslizar por baixo</option>
+                            </select>                                                                                   
                         </div>
-                        <button type="button" id="btnEditText" class="toolbar-btn toolbar-btn--ghost" aria-pressed="false" title="Editar texto selecionado">
-                            <i class="fa-solid fa-edit"></i>
-                            <span id="btnEditTextLabel">Editar</span>
-                        </button>
+                        <div class="grid grid-cols-4 border-b border-gray-200 rounded-t-2xl ">
+                            <label for="animDelay" class="col-span-1 p-4 truncate text-gray-500">Atraso (seg.)</label>
+                            <div class="col-span-3 p-4">
+                                <input id="animDelay" type="number" step="0.1" min="0" value="0" class="w-full border-0 focus:outline-none">                                                                
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-4 border-b border-gray-200 rounded-t-2xl ">
+                            <label for="animDur" class="col-span-1 p-4 truncate text-gray-500">Duração</label>
+                            <div class="col-span-3 p-4">
+                                <input id="animDur" type="number" step="0.1" min="0.1" value="0.8" class="w-full border-0 focus:outline-none">
+                            </div>
+                        </div>                            
                     </div>
-            
-                    <div id="animControls" class="hidden flex-wrap items-center gap-2">
-                        <label class="flex items-center gap-2 text-sm text-slate-600">
-                        Animação
-                        <select id="animType" class="border border-slate-200 rounded-lg px-2 py-1 text-sm">
-                            <option value="none">none</option>
-                            <option value="fade-in">fade-in</option>
-                            <option value="slide-left">slide-in left</option>
-                            <option value="slide-right">slide-in right</option>
-                            <option value="slide-top">slide-in top</option>
-                            <option value="slide-bottom">slide-in bottom</option>
-                        </select>
-                        </label>
-                        <label class="flex items-center gap-2 text-sm text-slate-600">
-                        Delay (s)
-                        <input id="animDelay" type="number" step="0.1" min="0" value="0" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
-                        </label>
-                        <label class="flex items-center gap-2 text-sm text-slate-600">
-                        Duração (s)
-                        <input id="animDur" type="number" step="0.1" min="0.1" value="0.8" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
-                        </label>
-                    </div>
-            
-                    <div class="ml-auto">
-                        <button type="button" id="btnDelete" class="toolbar-btn toolbar-btn--danger" title="Excluir item selecionado">
-                            <i class="fa-solid fa-trash"></i><span>Excluir</span>
-                        </button>
-                    </div>
+                    
+                    <button type="button" id="btnDelete" aria-pressed="false" class="w-full mb-6 text-left rounded-2xl shadow-md bg-red-200 text-red-700 p-3 cursor-pointer hover:bg-red-300 transition-all duration-300 ease-in-out">
+                        <span class="fa-stack">
+                            <i class="fas fa-circle fa-stack-2x"></i>
+                            <i class="fas fa-trash fa-stack-1x fa-inverse"></i>
+                        </span>
+                        Excluir Elemento
+                    </button>                                            
+                    <hr>                                        
                 </section>
                 `;
 
-                html += postCaption;
-
                 html += `
                 <!-- Galeria (carrossel) - upload múltiplo e publicação -->
-                <section class="editor-card">                                                               
-                    <div class="flex items-center gap-2">
-                        <input id="postMediaPicker" class="hidden" type="file" multiple accept="image/*,video/*">
-                        <div class="ml-auto flex items-center gap-2">
-                            <label for="postPrivacySelect" class="text-xs text-slate-600">Privacidade</label>
-                            <select id="postPrivacySelect" class="h-8 px-2 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm"></select>
-                            <button id="publishGalleryBtn" type="button" class="px-3 py-2 rounded-2xl bg-indigo-600 text-white text-sm hover:bg-indigo-700">Publicar</button>
-                        </div>
-                    </div>
-                    <div id="postMediaTray" class=""></div>                   
+                <section class="editor-card">
+                    <div id="postMediaTray" class=""></div> 
+                    <input id="postMediaPicker" class="hidden" type="file" multiple accept="image/*,video/*">                                                          
                 </section>
-            
+                <hr>
+                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">                    
+                    <div class="grid grid-cols-4 border-gray-200">
+                        <label for="postPrivacySelect" class="col-span-1 p-4 truncate text-gray-500">Privacidade</label>
+                        <select id="postPrivacySelect" class="border-0 focus:outline-none col-span-3 p-4"></select>
+                        <button id="publishGalleryBtn" type="button" class="px-3 py-2 rounded-2xl bg-indigo-600 text-white text-sm hover:bg-indigo-700">Publicar</button>
+                    </div>                    
+                </div>
+                `;
+
+                html += postCaption;
+                
+                html += `
                 <!-- Botão Publicar -->
                 <section class="editor-card">
                     <div class="flex flex-col items-center gap-4">
@@ -4036,9 +4442,9 @@ document.addEventListener('DOMContentLoaded', () => {
                                     FPS
                                     <input id="vidFPS" type="number" min="10" max="60" step="1" value="30" class="w-20 border border-slate-200 rounded px-2 py-1 text-sm">
                                 </label>
-                                <label class="flex items-center gap-2 text-slate-600">Fundo <input id="bgColorPicker" type="color" value="#ffffff" class="h-8 w-10 border border-slate-200 rounded"></label> </div><div id="videoExportInfo" class="text-xs text-slate-500 text-center mt-2 hidden">
+                                 </div><div id="videoExportInfo" class="text-xs text-slate-500 text-center mt-2 hidden">  
                                 <i class="fa-solid fa-info-circle"></i> 
-                                <span id="videoExportInfoText"></span>
+                                <span id="videoExportInfoText"></span>                                
                             </div>
                         </div>                                            
 
@@ -4047,16 +4453,14 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <i class="fas fa-paper-plane enviar-icon"></i>
                                 <span class="enviar-text">Publicar</span>
                             </div>
-                        </button>
-                        
-                        
+                        </button>                                                
                     </div>
                 </section>
 
                 <canvas id="outCanvas" width="900" height="1200" class="hidden"></canvas>
                 
                 <!-- Elementos ocultos para captura -->
-                <video id="hiddenCameraStream" autoplay muted playsinline class="hidden"></video>
+                <video id="hiddenCameraStream" autoplay playsinline class="hidden"></video>
                 <canvas id="captureCanvas" class="hidden"></canvas>
             </div>
             `;
@@ -4259,6 +4663,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function customMenu() {
         const customMenu = document.querySelector('#custom-menu');
         const standardMenu = document.querySelector('#standard-menu');
+        const authed = !!localStorage.getItem('jwt_token');
 
         // Limpar menu customizado antes de adicionar novos itens
         if (customMenu) {
@@ -4266,7 +4671,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (viewType === 'dashboard') {
-            customMenu.insertAdjacentHTML('beforeend', UI.menuItem({ action: 'my-profile', icon: 'fa-address-card', label: 'Meu Perfil' }));
+            if (authed) {
+                customMenu.insertAdjacentHTML('beforeend', UI.menuItem({ action: 'my-profile', icon: 'fa-address-card', label: 'Meu Perfil' }));
+            }
         } else {
             if (viewType === ENTITY.PROFILE && currentUserData && currentUserData.id === viewId) {
                 customMenu.insertAdjacentHTML('beforeend', `
@@ -4284,7 +4691,62 @@ document.addEventListener('DOMContentLoaded', () => {
             );
         }
 
-        // Delegação global do roteador cobre cliques com data-action
+        if (standardMenu) {
+            const standardNav = standardMenu.closest('nav');
+            const divider = standardNav?.previousElementSibling;
+            const shouldHide = !authed;
+            if (standardNav) standardNav.style.display = shouldHide ? 'none' : '';
+            if (divider && divider.tagName === 'HR') divider.style.display = shouldHide ? 'none' : '';
+        }
+
+        bindMainActionHandler();
+    }
+
+    function bindMainActionHandler() {
+        try { if (window._mainActionHandler) { document.removeEventListener('click', window._mainActionHandler); } } catch(_) {}
+        const handler = (e) => {
+            // Verificar se clicou no post-editor
+            const postEditor = e.target.closest('#post-editor');
+            if (postEditor) {
+                e.preventDefault();
+                e.stopPropagation(); // Impedir que o event listener global processe
+
+                // Criar um elemento mock com data-sidebar-action para usar com toggleSidebar
+                const mockElement = document.createElement('div');
+                mockElement.dataset.sidebarAction = 'post-editor';
+                toggleSidebar(mockElement, true);
+                return;
+            }
+
+            const btn = e.target.closest('[data-action]');
+            if (!btn) return;
+            // Evita acionar duas vezes ações da barra lateral (lá já existe delegação própria)
+            const sidebarContent = document.querySelector('.sidebar-content');
+            if (sidebarContent && sidebarContent.contains(btn)) return;
+            const action = btn.dataset.action;
+            const actionHandler = ACTIONS[action];
+            if (!actionHandler) return;
+            e.preventDefault();
+            Promise.resolve(actionHandler({ event: e, button: btn, state: getState() }))
+                .finally(() => {
+                    if (action === 'follow-user' || action === 'unfollow-user') {
+                        try {
+                            if (viewType === ENTITY.PROFILE && String(viewId) === String(getState()?.view?.id)) {
+                                const fp = Number(viewData?.feed_privacy ?? 0);
+                                const isOwner = String(currentUserData?.id ?? '') === String(viewId ?? '');
+                                if (fp === 1) {
+                                    if (action === 'follow-user') viewRestricted = false;
+                                    else if (action === 'unfollow-user' && !isOwner) viewRestricted = true;
+                                }
+                                resetFeed();
+                                loadFeed();
+                            }
+                        } catch (_) {}
+                    }
+                });
+        };
+        document.addEventListener('click', handler);
+        window._mainActionHandler = handler;
     }
 
     function normalizeNumericId(value) {
@@ -4351,11 +4813,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'me':
                     return { label: 'Somente eu', icon: 'fa-lock' };
                 case 'mod':
-                    return { label: 'Moderadores', icon: 'fa-user-shield' };
+                    if (scope === 'team') return { label: 'Líderes e Operadores', icon: 'fa-user-shield' };
+                    if (scope === 'business') return { label: 'Administradores', icon: 'fa-user-shield' };
+                    return { label: 'Administradores', icon: 'fa-user-shield' };
                 case 'lv1':
                     if (scope === 'profile') return { label: 'Seguidores', icon: 'fa-user-friends' };
                     if (scope === 'team') return { label: 'Membros da equipe', icon: 'fa-users' };
-                    return { label: 'Usuários membros', icon: 'fa-users' }; // business
+                    return { label: 'Membros do negócio', icon: 'fa-users' }; // business
                 case 'lv2':
                     if (scope === 'team') return { label: 'Todos do negócio', icon: 'fa-users' };
                     return { label: 'Usuários logados', icon: 'fa-user' };
@@ -4368,13 +4832,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const byCode = (c) => {
             if (c === 0) return { label: 'Somente eu', icon: 'fa-lock' };
             if (c === 1) {
-                // Perfil: Seguidores; Demais: Moderadores
-                return (scope === 'profile') ? { label: 'Seguidores', icon: 'fa-user-friends' } : { label: 'Moderadores', icon: 'fa-user-shield' };
+                // Perfil: Seguidores; Demais: Administradores/Líderes
+                if (scope === 'profile') return { label: 'Seguidores', icon: 'fa-user-friends' };
+                if (scope === 'team') return { label: 'Líderes e Operadores', icon: 'fa-user-shield' };
+                return { label: 'Administradores', icon: 'fa-user-shield' };
             }
             if (c === 2) {
                 if (scope === 'profile') return { label: 'Usuários logados', icon: 'fa-user' };
                 if (scope === 'team') return { label: 'Membros da equipe', icon: 'fa-users' }; // fallback restritivo
-                return { label: 'Usuários membros', icon: 'fa-users' }; // business (fallback restritivo)
+                return { label: 'Membros do negócio', icon: 'fa-users' }; // business (fallback restritivo)
             }
             if (c >= 3) return { label: 'Toda a internet', icon: 'fa-globe' };
             return null;
@@ -4675,10 +5141,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const mmime = String(media0?.mimeType || '').toLowerCase();
             let feedMediaType = media0?.type || (mmime.startsWith('video') ? 'video' : (mmime.startsWith('image') ? 'image' : null));
             let feedMediaUrl = media0?.url || (media0?.path ? ('/' + String(media0.path).replace(/^\/+/, '')) : null);
+            const linkPreview = parsedCt?.linkPreview || null;
             // Define imagem de fundo preferindo a mídia (se for imagem)
             let backgroundImage = null;
             if (feedMediaType === 'image' && feedMediaUrl) {
                 backgroundImage = resolveBackgroundImage(feedMediaUrl, item?.tt, { size: 1024 });
+            } else if (linkPreview?.image) {
+                backgroundImage = resolveBackgroundImage(linkPreview.image, item?.tt, { size: 1024 });
             } else {
                 backgroundImage = resolveBackgroundImage(item?.im, item?.tt, { size: 1024 });
             }
@@ -4694,6 +5163,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 feedMediaUrl,
                 ct: parsedCt || item?.ct,
                 media: mediaList,
+                linkPreview,
                 hasCarousel: Array.isArray(mediaList) && mediaList.length > 1,
             };
         });
@@ -4745,13 +5215,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const title = escapeHtml(post?.tt || '');
             const captionRaw = (typeof post?.ct === 'string') ? post.ct : (post?.ct?.caption || post?.ct?.text || '');
             const caption = formatFeedRichText(captionRaw || '');
+            const linkPreview = post?.linkPreview || post?.ct?.linkPreview || null;
+            const linkKind = (linkPreview?.kind || linkPreview?.type || '').toLowerCase();
+            const linkHost = safeHostname(linkPreview?.url || '');
             const formattedDate = escapeHtml(post?.formattedDate || '');
             const likeInfo = post?.likeInfo || {};
             const likeTotal = Number.isFinite(Number(likeInfo.total)) ? Number(likeInfo.total) : 0;
             const userLiked = !!likeInfo.userLiked;
             const likeLabel = likeTotal === 1 ? 'curtida' : 'curtidas';
             const postId = String(post?.id ?? '');
-            const backgroundStyle = (!post?.hasCarousel && post?.feedMediaType !== 'video' && post?.backgroundImage) ? `background-image: ${post.backgroundImage};` : '';
+            const menuMediaUrl = post?.feedMediaUrl || (linkKind !== 'video' ? (linkPreview?.image || '') : '');
+            const menuMediaType = post?.feedMediaType || (linkKind === 'video' ? 'embed' : (linkPreview?.image ? 'image' : ''));
+            const backgroundStyle = (!post?.hasCarousel && post?.feedMediaType !== 'video' && linkKind !== 'video' && post?.backgroundImage) ? `background-image: ${post.backgroundImage};` : '';
             let mediaMarkup = '';
             if (post?.hasCarousel && Array.isArray(post.media)) {
                 const slides = post.media.map((m, idx) => {
@@ -4779,6 +5254,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         </button>
                     </div>
                 </div>`;
+            } else if (linkKind === 'video' && linkPreview?.embedUrl) {
+                const embed = escapeHtml(linkPreview.embedUrl);
+                mediaMarkup = `<div class="absolute inset-0 bg-black flex items-center justify-center"><iframe src="${embed}" class="w-full h-full" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen title="${title || 'Vídeo'}"></iframe></div>`;
             } else if (post?.feedMediaType === 'video' && post?.feedMediaUrl) {
                 mediaMarkup = `<video class="absolute inset-0 w-full h-full object-cover" src="${post.feedMediaUrl}" muted autoplay loop playsinline></video>`;
             }
@@ -4795,9 +5273,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
         <article class="snap-center col-span-12 sm:col-span-6 lg:col-span-4" data-post-id="${postId}">
             <div class="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-lg text-white">
-                <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}"></div>
+                    <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}"></div>
                 ${mediaMarkup}
-                <div class="absolute inset-0 bg-gradient-to-b from-black/15 via-black/10 to-black/20"></div>
+                <div class="absolute inset-0 bg-gradient-to-b from-black/15 via-black/10 to-black/20 pointer-events-none"></div>
                 <div class="relative z-1 w-full h-full">
                     <header class="absolute top-3 left-3 right-3 flex items-center justify-between gap-2">
                         <div class="flex items-center gap-2">
@@ -4811,7 +5289,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <i class="fas fa-ellipsis-v"></i>
                         </button>
                     </header>                    
-                    <div class="absolute top-12 right-2 w-44 bg-black/80 text-white rounded-xl shadow-lg border border-white/10 hidden z-40" data-role="post-menu" data-post-id="${postId}" data-media-url="${post?.feedMediaUrl || ''}" data-media-type="${post?.feedMediaType || ''}" data-can-delete="${canDelete ? '1' : '0'}">
+                    <div class="absolute top-12 right-2 w-44 bg-black/80 text-white rounded-xl shadow-lg border border-white/10 hidden z-40" data-role="post-menu" data-post-id="${postId}" data-media-url="${menuMediaUrl}" data-media-type="${menuMediaType}" data-can-delete="${canDelete ? '1' : '0'}">
                         <button type="button" class="w-full text-left px-3 py-2 hover:bg-white/10" data-feed-action="download-media" data-post-id="${postId}">
                             <i class="fas fa-download mr-2"></i>${post?.feedMediaType === 'video' ? 'Baixar vídeo' : 'Baixar imagem'}
                         </button>
@@ -4821,7 +5299,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         ${canDelete ? `<button type=\"button\" class=\"w-full text-left px-3 py-2 hover:bg-red-500/20 text-red-300\" data-feed-action=\"delete-post\" data-post-id=\"${postId}"\u003e<i class=\\\"fas fa-trash mr-2"\u003e</i>Excluir</button>` : ''}
                     </div>
                     <footer class="absolute bottom-0 left-0 right-0 px-3 pb-3 pt-14 space-y-2 pointer-events-none">
-                        ${title ? `<h3 class="text-base font-semibold text-white drop-shadow pointer-events-auto">${title}</h3>` : ''}
+                        ${title ? (() => {
+                            const linkTitle = escapeHtml(linkPreview?.title || title);
+                            const href = linkPreview?.url ? escapeHtml(linkPreview.url) : null;
+                            return href
+                                ? `<h3 class="text-base font-semibold drop-shadow pointer-events-auto"><a class="text-white hover:text-orange-200 underline-offset-2" href="${href}" target="_blank" rel="noopener noreferrer">${linkTitle}</a></h3>`
+                                : `<h3 class="text-base font-semibold text-white drop-shadow pointer-events-auto">${linkTitle}</h3>`;
+                        })() : ''}
+                        ${linkPreview ? `
+                        <div class="pointer-events-auto bg-black/35 backdrop-blur-sm rounded-2xl p-3 text-white">
+                            ${linkPreview.siteName || linkHost ? `<p class="text-[11px] uppercase tracking-wide text-white/70">${escapeHtml(linkPreview.siteName || linkPreview.provider || linkHost)}</p>` : ''}
+                            ${(() => {
+                                const href = linkPreview.url ? escapeHtml(linkPreview.url) : '';
+                                const linkLabel = escapeHtml(linkPreview.title || linkPreview.siteName || linkHost || 'Link');
+                                return href
+                                    ? `<a class="text-sm font-semibold leading-snug hover:text-orange-200 underline-offset-2" href="${href}" target="_blank" rel="noopener noreferrer">${linkLabel}</a>`
+                                    : `<p class="text-sm font-semibold leading-snug">${linkLabel}</p>`;
+                            })()}
+                        </div>` : ''}
                         ${caption ? `<p class="text-[13px] text-white/90 leading-relaxed pointer-events-auto">${caption}</p>` : ''}
                         <div class="flex items-center gap-2 pointer-events-auto">
                             <button type="button" class="flex items-center justify-center w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 transition text-base ${userLiked ? 'text-red-400' : 'text-white'}" data-feed-action="toggle-like" data-post-id="${postId}" data-liked="${userLiked ? '1' : '0'}" aria-pressed="${userLiked}">
@@ -5382,13 +5877,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return null; // 3 = Toda a internet (sem aviso)
         }
         if (vt === ENTITY.BUSINESS) {
-            if (p === 0) return 'Moderadores';
-            if (p === 1) return 'Usuários membros';
+            if (p === 0) return 'Administradores';
+            if (p === 1) return 'Membros do negócio';
             if (p === 2) return 'Usuários logados';
             return null;
         }
         if (vt === ENTITY.TEAM) {
-            if (p === 0) return 'Moderadores da equipe';
+            if (p === 0) return 'Líderes e Operadores';
             if (p === 1) return 'Membros da equipe';
             if (p === 2) return 'Todos do negócio';
             return null;
@@ -5497,7 +5992,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ===== Sidebar actions =====
     const ACTIONS = {
-        'dashboard': ({ state }) => navigateTo('/'),
+        'dashboard': ({ state }) => {
+            if (!localStorage.getItem('jwt_token')) {
+                window.location.href = '/';
+                return;
+            }
+            navigateTo('/');
+        },
         'my-profile': ({ state }) => navigateTo(`/profile/${state.user?.id}`),
         'share-page': () => sharePage(),
         'list-people': () => navigateTo('/people'),
@@ -5563,6 +6064,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (btn) btn.click();
             } catch (_) {}
         },
+        'editor-quick-link': async () => {
+            const mock = document.createElement('div');
+            mock.dataset.sidebarAction = 'link-share';
+            try { await toggleSidebar(mock, true); } catch (_) { try { toggleSidebar(mock, true); } catch (_) {} }
+        },
         'editor-quick-bg': async () => {
             try {
                 const sc = await openPostEditorAnd(sc => sc && (sc.querySelector('#postMediaPicker') || sc.querySelector('#bgUpload')));
@@ -5596,15 +6102,374 @@ document.addEventListener('DOMContentLoaded', () => {
                 input.click();
             } catch (_) {}
         },
+        // Stripe: inicializa Elements para salvar cartão (SetupIntent)
+        'billing-init-stripe': async () => {
+            try {
+                const mountPoint = document.getElementById('stripe-card-mount');
+                if (!mountPoint) return;
+
+                const cfg = await apiClient.get('/payments/stripe/public-key');
+                const pub = cfg?.publishable_key || '';
+                if (!pub) { notifyError('Chave pública do Stripe não configurada.'); return; }
+
+                if (!window.Stripe) {
+                    await new Promise((resolve, reject) => {
+                        const s = document.createElement('script');
+                        s.src = 'https://js.stripe.com/v3/';
+                        s.async = true;
+                        s.onload = resolve; s.onerror = reject;
+                        document.head.appendChild(s);
+                    });
+                }
+
+                const stripe = window.Stripe(pub);
+                const sc = document.querySelector('.sidebar-content');
+                const mountEntityType = mountPoint?.dataset?.entity;
+                const mountEntityId = Number(mountPoint?.dataset?.entityId || 0);
+                const mountEmail = mountPoint?.dataset?.entityEmail || '';
+                const mountName = mountPoint?.dataset?.entityName || '';
+
+                const entityType = mountEntityType || (SidebarNav?.current?.payload?.entity || (SidebarNav?.current?.payload?.type === ENTITY.BUSINESS ? 'business' : 'user'));
+                const entityId = mountEntityId || SidebarNav?.current?.payload?.id || SidebarNav?.current?.payload?.data?.id || currentUserData?.id || 0;
+                const bizEmail = mountEmail || SidebarNav?.current?.payload?.ml || SidebarNav?.current?.payload?.data?.ml || '';
+                if (entityType === 'business' && !bizEmail) {
+                    notifyError('Cadastre um e-mail corporativo nos dados do negócio antes de adicionar cartão.');
+                    return;
+                }
+
+                const si = await apiClient.post('/billing/stripe/setup-intent', {
+                    email: entityType === 'business' ? bizEmail : (currentUserData?.ml || ''),
+                    name: mountName || SidebarNav?.current?.payload?.tt || SidebarNav?.current?.payload?.data?.tt || currentUserData?.tt || '',
+                    entity_type: entityType,
+                    entity_id: entityId
+                });
+                const clientSecret = si?.client_secret;
+                const stripeCustomerId = si?.customer_id || null;
+                if (!clientSecret) { notifyError('Falha ao obter SetupIntent'); return; }
+
+                const elements = stripe.elements();
+                const cardElement = elements.create('card', { style: { base: { fontSize: '16px' } } });
+
+                mountPoint.innerHTML = `
+                    <div class="grid grid-cols-1 gap-6 pt-6">
+                        <hr>
+                        <div id="stripe-card-element" class="mb-3"></div>
+                        <button id="stripe-save-card" class="w-full py-2 px-4 bg-emerald-600 text-white font-semibold rounded-3xl hover:bg-emerald-700 transition-colors">Salvar cartão</button>
+                    </div>`;
+                cardElement.mount('#stripe-card-element');
+                mountPoint.dataset.mounted = '1';
+
+                const btn = document.getElementById('stripe-save-card');
+                if (btn) {
+                    btn.onclick = async () => {
+                        try {
+                            btn.disabled = true;
+                            const { setupIntent, error } = await stripe.confirmCardSetup(clientSecret, {
+                                payment_method: {
+                                    card: cardElement,
+                                    billing_details: { email: entityType === 'business' ? bizEmail : (currentUserData?.ml || '') }
+                                }
+                            });
+                            if (error) { notifyError(error.message || 'Falha ao salvar cartão'); return; }
+                            const pmId = setupIntent?.payment_method;
+                            if (!pmId) { notifyError('Payment method não retornado'); return; }
+                            await apiClient.post('/billing/payment-methods', {
+                                payment_method_id: pmId,
+                                is_default: true,
+                                email: entityType === 'business' ? bizEmail : (currentUserData?.ml || ''),
+                                name: mountName || SidebarNav?.current?.payload?.tt || SidebarNav?.current?.payload?.data?.tt || currentUserData?.tt || '',
+                                customer_id: stripeCustomerId,
+                                entity_type: entityType,
+                                entity_id: entityId
+                            });
+                            notifySuccess('Cartão salvo.');
+                            if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+                        } catch (e) {
+                            console.error(e);
+                            notifyError('Falha ao salvar cartão.');
+                        } finally {
+                            btn.disabled = false;
+                        }
+                    };
+                }
+            } catch (e) {
+                console.warn(e); notifyError('Não foi possível inicializar o Stripe.');
+            }
+        },
+        // Billing: payment methods
+        'billing-save-card': async ({ button }) => {
+            const sc = button.closest('.sidebar-content') || document;
+            const label = sc.querySelector('input[name="pm_label"]')?.value || '';
+            const brand = sc.querySelector('input[name="pm_brand"]')?.value || '';
+            const last4 = sc.querySelector('input[name="pm_last4"]')?.value || '';
+            const expMonth = Number(sc.querySelector('input[name="pm_exp_month"]')?.value || '') || null;
+            const expYear = Number(sc.querySelector('input[name="pm_exp_year"]')?.value || '') || null;
+            const token = sc.querySelector('input[name="pm_token"]')?.value || '';
+            const entity = button.dataset.entity || 'user';
+            const entityId = Number(button.dataset.entityId || currentUserData?.id || 0);
+            try {
+                button.disabled = true;
+                await apiClient.post('/billing/payment-methods', {
+                    entityType: entity,
+                    entityId: entityId,
+                    pmType: 'card',
+                    label, brand, last4, expMonth, expYear, tokenRef: token,
+                    isDefault: true
+                });
+                notifySuccess('Cartão salvo.');
+                if (typeof SidebarNav !== 'undefined') {
+                    const prev = SidebarNav.prev?.();
+                    SidebarNav.back();
+                    SidebarNav.push(prev || { view: 'billing', title: 'Cobrança e Recebimento', payload: { view: 'billing' } });
+                }
+            } catch (e) { notifyError('Falha ao salvar cartão.'); }
+            finally { button.disabled = false; }
+        },
+        'billing-card-default': async ({ button }) => {
+            const id = Number(button?.dataset?.id || 0);
+            if (!id) return;
+            try {
+                await apiClient.put(`/billing/payment-methods/${id}`, { isDefault: 1 });
+                notifySuccess('Definido como padrão.');
+                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+            } catch (_) { notifyError('Falha ao definir padrão.'); }
+        },
+        'billing-card-delete': async ({ button }) => {
+            const id = Number(button?.dataset?.id || 0);
+            if (!id) return;
+            if (!(await confirmDialog('Remover este cartão?', { danger: true }))) return;
+            try {
+                await apiClient.delete(`/billing/payment-methods/${id}`);
+                notifySuccess('Cartão removido.');
+                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+            } catch (_) { notifyError('Falha ao remover.'); }
+        },
+        // Billing: bank accounts (business)
+        'billing-save-bank': async ({ button }) => {
+            const sc = button.closest('.sidebar-content') || document;
+            const businessId = Number(button?.dataset?.businessId || 0);
+            if (!businessId) { notifyError('Negócio inválido.'); return; }
+            const holder = sc.querySelector('input[name="ba_holder"]')?.value || '';
+            const documentId = sc.querySelector('input[name="ba_document"]')?.value || '';
+            const code = sc.querySelector('input[name="ba_bank_code"]')?.value || '';
+            const bankName = sc.querySelector('input[name="ba_bank_name"]')?.value || '';
+            const branch = sc.querySelector('input[name="ba_branch"]')?.value || '';
+            const account = sc.querySelector('input[name="ba_account"]')?.value || '';
+            const accType = sc.querySelector('select[name="ba_type"]')?.value || 'checking';
+            const pixType = sc.querySelector('select[name="ba_pix_type"]')?.value || '';
+            const pixKey = sc.querySelector('input[name="ba_pix_key"]')?.value || '';
+            try {
+                button.disabled = true;
+                await apiClient.post('/billing/bank-accounts', {
+                    business_id: businessId,
+                    holder_name: holder,
+                    document: documentId,
+                    bank_code: code,
+                    bank_name: bankName,
+                    branch,
+                    account_number: account,
+                    account_type: accType,
+                    pix_key_type: pixType || null,
+                    pix_key: pixKey || null,
+                    is_default: 1
+                });
+                notifySuccess('Conta bancária salva.');
+                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+            } catch (_) { notifyError('Falha ao salvar conta.'); }
+            finally { button.disabled = false; }
+        },
+        'billing-bank-default': async ({ button }) => {
+            const id = Number(button?.dataset?.id || 0);
+            if (!id) return;
+            try {
+                await apiClient.put(`/billing/bank-accounts/${id}`, { isDefault: 1 });
+                notifySuccess('Definida como padrão.');
+                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+            } catch (_) { notifyError('Falha ao definir padrão.'); }
+        },
+        'billing-bank-delete': async ({ button }) => {
+            const id = Number(button?.dataset?.id || 0);
+            if (!id) return;
+            if (!(await confirmDialog('Remover esta conta?', { danger: true }))) return;
+            try {
+                await apiClient.delete(`/billing/bank-accounts/${id}`);
+                notifySuccess('Conta removida.');
+                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+            } catch (_) { notifyError('Falha ao remover.'); }
+        },
+        // Transactions actions
+        'tx-pay-now': async ({ button }) => {
+            const id = Number(button?.dataset?.id || 0);
+            const amount = Number(button?.dataset?.amount || 0);
+            const appId = Number(button?.dataset?.appId || 0);
+            if (!id || !amount || !appId) { notifyError('Dados da transação inválidos.'); return; }
+
+            const mountId = `tx-pay-brick-${id}`;
+            const mount = document.getElementById(mountId);
+            if (!mount) return;
+            try {
+                // Toggle visibility
+                mount.classList.remove('hidden');
+                // Info do valor
+                mount.innerHTML = `<div class="text-sm text-gray-700 mb-2">Total: <span class="font-semibold">R$ ${amount.toFixed(2)}</span></div>`;
+
+                // Buscar cartões salvos do usuário
+                const methods = await apiClient.get(`/billing/payment-methods?entity=user&id=${currentUserData?.id||0}`);
+                const cards = (methods?.data || []).filter(m => m.provider==='mercadopago' && m.pm_type==='card' && Number(m.status)===1 && m.mp_customer_id && m.mp_card_id);
+                if (!cards.length) {
+                    mount.innerHTML += `<div class="text-xs text-red-600">Nenhum cartão salvo. Vá em Cobrança e Recebimento para cadastrar um cartão.</div>`;
+                    return;
+                }
+
+                if (mount.dataset.mounted === '1') return; // já montado
+                mount.dataset.mounted = '1';
+
+                // UI simples: seleção de cartão + CVV + Confirmar
+                const options = cards.map(c => `<option value="${c.id}" ${Number(c.is_default)===1?'selected':''}>${(c.label|| (c.brand||'') + ' •••• ' + (c.last4||''))}</option>`).join('');
+                mount.innerHTML += `
+                    <div class="grid gap-2">
+                        <label class="text-xs text-gray-600">Cartão</label>
+                        <select id="tx-card-select-${id}" class="w-full border rounded-xl p-2">${options}</select>
+                        <label class="text-xs text-gray-600 mt-2">CVV</label>
+                        <input type="password" id="tx-card-cvv-${id}" maxlength="4" inputmode="numeric" class="w-full border rounded-xl p-2" placeholder="123">
+                        <button id="tx-confirm-${id}" class="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl">Confirmar pagamento</button>
+                    </div>`;
+
+                const btn = document.getElementById(`tx-confirm-${id}`);
+                if (btn) {
+                    btn.addEventListener('click', async () => {
+                        try {
+                            const pmId = Number(document.getElementById(`tx-card-select-${id}`).value || 0);
+                            const cvv = String(document.getElementById(`tx-card-cvv-${id}`).value || '').trim();
+                            if (!pmId || cvv.length < 3) { notifyError('Informe CVV válido.'); return; }
+                            // Tokenizar cartão salvo
+                            const tok = await apiClient.post('/billing/mp/tokenize-saved', { pm_id: pmId, security_code: cvv });
+                            const token = tok?.token || null;
+                            if (!token) { notifyError('Falha ao gerar token.'); return; }
+                            const pay = await apiClient.post('/payments/charge', {
+                                app_id: appId,
+                                amount,
+                                token,
+                                pm_id: pmId,
+                                ...(currentUserData?.ml ? { payer_email: currentUserData.ml } : {}),
+                                metadata: { activation: 'tx_pay_now' }
+                            });
+                            if (pay?.success) {
+                                notifySuccess(pay.status === 'approved' ? 'Pagamento aprovado.' : 'Pagamento enviado.');
+                                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+                            } else { notifyError('Falha ao processar pagamento.'); }
+                        } catch (_) {
+                            notifyError('Erro ao processar pagamento.');
+                        }
+                    }, { once: true });
+                }
+            } catch (_) { notifyError('Falha ao preparar pagamento.'); }
+        },
+        'service-option': ({ button }) => {
+            const card = button.closest('[data-app-card]');
+            if (!card) return;
+            card.querySelectorAll('[data-action="service-option"]').forEach(b => {
+                b.classList.remove('active', 'border-blue-500', 'bg-blue-50');
+                b.classList.add('border-gray-200', 'bg-gray-50');
+            });
+            button.classList.add('active', 'border-blue-500', 'bg-blue-50');
+            button.classList.remove('border-gray-200', 'bg-gray-50');
+            const appId = button.dataset.appId || card.dataset.appCard || '';
+            const payBox = document.getElementById(`svc-paybox-${appId}`);
+            if (payBox) {
+                payBox.classList.add('hidden');
+                payBox.innerHTML = '';
+            }
+        },
+        'service-pay': async ({ button }) => {
+            const card = button.closest('[data-app-card]');
+            const appId = Number(button?.dataset?.appId || card?.dataset?.appCard || 0);
+            const price = Number(card?.dataset?.price || 0);
+            const companyIdRaw = card?.dataset?.companyId || null;
+            const companyId = companyIdRaw ? Number(companyIdRaw) : null;
+            if (!appId || price <= 0) { notifyError('Dados do serviço incompletos.'); return; }
+
+            const opt = card?.querySelector('[data-action="service-option"].active') || card?.querySelector('[data-action="service-option"]');
+            const days = opt ? Number(opt.dataset.days || 30) : 30;
+            const amount = opt ? Number(opt.dataset.amount || price) : price;
+            const payBox = document.getElementById(`svc-paybox-${appId}`) || card?.querySelector(`#svc-paybox-${appId}`);
+            if (!payBox) return;
+
+            payBox.classList.remove('hidden');
+            payBox.innerHTML = '<div class="text-xs text-gray-600">Buscando cartões salvos...</div>';
+            try {
+                const entityType = companyId ? 'business' : 'user';
+                const entityId = companyId || currentUserData?.id || 0;
+                const methods = await apiClient.get(`/billing/payment-methods?entity=${entityType}&id=${entityId}`);
+                const cards = (methods?.data || []).filter(m => m.provider==='stripe' && m.pm_type==='card' && Number(m.status)===1);
+                if (!cards.length) {
+                    payBox.innerHTML = `<div class="text-xs text-red-600">Nenhum cartão salvo. Vá em Cobrança e Recebimento para cadastrar um cartão.</div>`;
+                    return;
+                }
+                const options = cards.map(c => `<option value="${c.id}" ${Number(c.is_default)===1?'selected':''}>${(c.label|| (c.brand||'') + ' •••• ' + (c.last4||''))}</option>`).join('');
+                payBox.innerHTML = `
+                    <div class="grid gap-2">
+                        <div class="text-xs text-gray-700">Período: ${days} dias • Total R$ ${amount.toFixed(2)}</div>
+                        <label class="text-xs text-gray-600">Cartão</label>
+                        <select name="svc-card" class="w-full border rounded-xl p-2">${options}</select>
+                        <button data-role="svc-confirm" class="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl">Confirmar pagamento</button>
+                        <div class="text-xs text-gray-600" data-role="svc-msg"></div>
+                    </div>`;
+
+                const btn = payBox.querySelector('button[data-role="svc-confirm"]');
+                if (btn) {
+                    btn.addEventListener('click', async () => {
+                        const msg = payBox.querySelector('[data-role="svc-msg"]');
+                        try {
+                            const pmId = Number(payBox.querySelector('select[name="svc-card"]')?.value || 0);
+                            if (!pmId) { msg.textContent = 'Selecione um cartão.'; msg.classList.add('text-red-600'); return; }
+                            msg.textContent = 'Processando...'; msg.classList.remove('text-red-600'); msg.classList.add('text-gray-600');
+                            const pay = await apiClient.post('/payments/charge', { app_id: appId, amount, pm_id: pmId, company_id: companyId || undefined, support_days: days, metadata: { support_days: days, activation: 'app_support' } });
+                            if (pay?.success) {
+                                msg.textContent = pay.status === 'approved' ? 'Serviço ativo!' : 'Pagamento enviado. Aguarde a confirmação.';
+                                msg.classList.remove('text-red-600'); msg.classList.add('text-green-700');
+                                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+                            } else { msg.textContent = 'Falha ao processar pagamento.'; msg.classList.add('text-red-600'); }
+                        } catch (_) {
+                            const msgNode = payBox.querySelector('[data-role="svc-msg"]');
+                            if (msgNode) { msgNode.textContent = 'Erro ao processar pagamento.'; msgNode.classList.add('text-red-600'); }
+                        }
+                    }, { once: true });
+                }
+            } catch (_) { payBox.innerHTML = `<div class="text-xs text-red-600">Falha ao preparar pagamento.</div>`; }
+        },
+        'tx-cancel': async ({ button }) => {
+            const id = Number(button?.dataset?.id || 0);
+            if (!id) return;
+            if (!(await confirmDialog('Cancelar esta transação?', { danger: true }))) return;
+            try {
+                const r = await apiClient.post(`/payments/transactions/${id}/cancel`, {});
+                if (r?.success) {
+                    notifySuccess('Transação cancelada.');
+                    if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+                } else {
+                    notifyError('Não foi possível cancelar.');
+                }
+            } catch (_) { notifyError('Falha ao cancelar.'); }
+        },
         // Apps: notificações e desinstalar
         'app-toggle-notifications': ({ button }) => {
             const appId = button?.dataset?.appId;
             if (!appId) return;
             const key = `app_notify_${appId}`;
             const enabled = (localStorage.getItem(key) === '1');
-            localStorage.setItem(key, enabled ? '0' : '1');
-            const label = enabled ? 'Ativar Notificações' : 'Desativar Notificações';
-            if (button) button.innerHTML = `<i class="fas fa-bell"></i> ${label}`;
+            localStorage.setItem(key, enabled ? '0' : '1');                    
+            const label = enabled ? `<span class="fa-stack">
+                                        <i class="fas fa-circle fa-stack-2x"></i>
+                                        <i class="fas fa-bell fa-stack-1x fa-inverse"></i>
+                                    </span>
+                                    Ativar Notificações` : 
+                                    `<span class="fa-stack">
+                                        <i class="fas fa-circle fa-stack-2x"></i>
+                                        <i class="fas fa-bell-slash fa-stack-1x fa-inverse"></i>
+                                    </span>
+                                    Desativar`;
+            if (button) button.innerHTML = `${label}`;
         },
         'app-uninstall': async ({ button }) => {
             const appId = button?.dataset?.appId;
@@ -5637,15 +6502,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 const exists = Array.isArray(res?.data) && res.data.length > 0;
                 if (exists) {
                     await apiClient.post('/delete', { db: 'workz_apps', table: 'quickapps', conditions: { us: currentUserData.id, ap: appId } });
-                    if (button) button.innerHTML = '<i class="fas fa-star"></i> Adicionar ao Acesso Rápido';
-                    notifySuccess('Removido do acesso rápido.');
+                    if (button) button.innerHTML = `<span class="fa-stack">
+                                                        <i class="fas fa-circle fa-stack-2x"></i>
+                                                        <i class="fas fa-thumbtack fa-stack-1x fa-inverse"></i>
+                                                    </span>
+                                                    Fixar na barra de tarefas`;
+                    notifySuccess('Desafixado da barra de tarefas.');
                 } else {
                     await apiClient.post('/insert', { db: 'workz_apps', table: 'quickapps', data: { us: currentUserData.id, ap: appId } });
-                    if (button) button.innerHTML = '<i class="fas fa-star"></i> Remover do Acesso Rápido';
-                    notifySuccess('Adicionado ao acesso rápido.');
+                    if (button) button.innerHTML = `<span class="fa-stack">
+                                                        <i class="fas fa-circle fa-stack-2x"></i>
+                                                        <i class="fas fa-thumbtack fa-stack-1x fa-inverse"></i>
+                                                    </span>
+                                                    Desafixar da barra de tarefas`;                                                    
+                    notifySuccess('Fixado na barra de tarefas.');
                 }
             } catch (e) {
-                notifyError('Não foi possível atualizar o acesso rápido.');
+                notifyError('Não foi possível atualizar a barra de tarefas.');
             }
             try { initAppLibrary(el, window.__appListCache || []); } catch (_) {}
         },
@@ -6034,6 +6907,49 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (typeof SidebarNav !== 'undefined') SidebarNav.render();
                 notifySuccess('Solicitação rejeitada.');
+            } finally { setButtonLoading(button, false); }
+        },
+        'remove-member': async ({ button }) => {
+            const uid = button?.dataset?.userId;
+            const scopeType = button?.dataset?.scopeType;
+            const scopeId = button?.dataset?.scopeId;
+            if (!uid || !scopeType || !scopeId) return;
+            const confirmed = await confirmDialog('Remover este membro?', { danger: true, title: 'Remover membro' });
+            if (!confirmed) return;
+            setButtonLoading(button, true, 'Removendo…');
+            try {
+                if (scopeType === 'business') {
+                    await apiClient.post('/companies/members/reject', { companyId: Number(scopeId), userId: Number(uid), remove: 1 });
+                } else {
+                    await apiClient.post('/teams/members/reject', { teamId: Number(scopeId), userId: Number(uid), remove: 1 });
+                }
+
+                const isSelf = String(uid) === String(currentUserData.id);
+                if (scopeType === 'business' && isSelf) {
+                    if (Array.isArray(userBusinessesData)) {
+                        userBusinessesData = userBusinessesData.filter(r => !(String(r.em) === String(scopeId) && Number(r.us) === Number(uid)));
+                    }
+                    userBusinesses = (userBusinesses || []).filter(em => String(em) !== String(scopeId));
+                    memberLevel = 0;
+                    memberStatus = null;
+                    const ac = document.querySelector('#action-container');
+                    if (ac) { ac.innerHTML = ''; pageAction(); }
+                } else if (scopeType !== 'business' && isSelf) {
+                    if (Array.isArray(userTeamsData)) {
+                        userTeamsData = userTeamsData.filter(r => !(String(r.cm) === String(scopeId) && Number(r.us) === Number(uid)));
+                    }
+                    userTeams = (userTeams || []).filter(cm => String(cm) !== String(scopeId));
+                    memberLevel = 0;
+                    memberStatus = null;
+                    if (viewType === ENTITY.TEAM && String(viewId) === String(scopeId)) {
+                        viewRestricted = true;
+                        const main = document.querySelector('#main-content');
+                        if (main) await renderTemplate(main, templates.teamRestricted);
+                    }
+                }
+
+                if (typeof SidebarNav !== 'undefined') SidebarNav.render();
+                notifySuccess('Membro removido.');
             } finally { setButtonLoading(button, false); }
         },
         'update-member-level': async ({ button }) => {
@@ -6644,6 +7560,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Remover w-0 e adicionar classes de largura
                 sidebarWrapper.classList.remove('w-0');
                 sidebarWrapper.classList.add('xl:w-1/4', 'lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
+            } else if (el && el.dataset.sidebarAction === 'link-share') {
+                sidebarWrapper.classList.remove('w-0');
+                sidebarWrapper.classList.add('xl:w-1/4', 'lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
             } else {
                 // Comportamento normal de toggle para outros elementos
                 sidebarWrapper.classList.toggle('w-0');
@@ -6680,12 +7599,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 SidebarNav.setMount(sidebarContent);
 
                 // Renderizar o template do post-editor
-                renderTemplate(sidebarContent, templates.sidebarPageSettings, {
-                    view: 'post-editor',
-                    data: currentUserData,
-                    navTitle: 'Editor de Posts',
-                    prevTitle: 'Voltar',
-                    origin: 'stack'
+                    renderTemplate(sidebarContent, templates.sidebarPageSettings, {
+                        view: 'post-editor',
+                        data: currentUserData,
+                        navTitle: 'Editor de Posts',
+                        prevTitle: 'Voltar',
+                        origin: 'stack'
                 }, async () => {
                     // Callback executado após a renderização completa
                     setTimeout(() => {
@@ -6721,6 +7640,19 @@ document.addEventListener('DOMContentLoaded', () => {
                             }, 500);
                         }
                     }, 200);
+                });
+
+            } else if (action === 'link-share') {
+                SidebarNav.setMount(sidebarContent);
+                renderTemplate(sidebarContent, templates.sidebarPageSettings, {
+                    view: 'share-link',
+                    data: currentUserData,
+                    navTitle: 'Compartilhar Link',
+                    prevTitle: 'Voltar',
+                    origin: 'stack'
+                }, () => {
+                    try { setupPostPrivacyBindings(sidebarWrapper); } catch (_) {}
+                    try { initLinkShareView(sidebarWrapper); } catch (_) {}
                 });
 
             } else if (action === 'page-settings') {
@@ -6845,10 +7777,23 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!shortcut) return;
             const id = shortcut.id;
             const title = pageSettingsData?.tt || 'Ajustes';
+            const basePayload = { data: pageSettingsData, type: pageSettingsView };
+            // Propaga informações de entidade para subviews (billing, transactions, etc.)
+            if (pageSettingsView === ENTITY.BUSINESS && pageSettingsData?.id) {
+                basePayload.entity = 'business';
+                basePayload.id = pageSettingsData.id;
+                basePayload.ml = pageSettingsData.ml || '';
+                basePayload.tt = pageSettingsData.tt || '';
+            } else if (pageSettingsView === ENTITY.PROFILE && currentUserData?.id) {
+                basePayload.entity = 'user';
+                basePayload.id = currentUserData.id;
+                basePayload.ml = currentUserData.ml || '';
+                basePayload.tt = currentUserData.tt || '';
+            }
             if (typeof SidebarNav !== 'undefined') {
-                SidebarNav.push({ view: id, title, payload: { data: pageSettingsData, type: pageSettingsView } });
+                SidebarNav.push({ view: id, title, payload: basePayload });
             } else {
-                renderTemplate(sidebarContent, templates.sidebarPageSettings, { view: id, data: pageSettingsData, type: pageSettingsView, origin: 'page' });
+                renderTemplate(sidebarContent, templates.sidebarPageSettings, { view: id, data: pageSettingsData, type: pageSettingsView, origin: 'page', payload: basePayload });
             }
         };
         sidebarContent.addEventListener('click', shortcutsHandler);
@@ -7623,10 +8568,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 pageRestricted = !hasJwt && pp !== 1;
                 let restricted = false;
                 if (fp === 0) {
-                    // Moderadores
+                    // Administradores
                     restricted = !(isManager || isModerator);
                 } else if (fp === 1) {
-                    // Usuários membros
+                    // Membros do negócio
                     restricted = !isMemberApproved;
                 } else if (fp === 2) {
                     // Usuários logados
@@ -7787,47 +8732,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             editorTriggerEl.hidden = false;
             await renderTemplate(editorTriggerEl, templates['editorTriggerV2'], currentUserData, () => {
-                try { if (window._mainActionHandler) { document.removeEventListener('click', window._mainActionHandler); } } catch(_) {}
-                const _handler = (e) => {
-                    // Verificar se clicou no post-editor
-                    const postEditor = e.target.closest('#post-editor');
-                    if (postEditor) {
-                        e.preventDefault();
-                        e.stopPropagation(); // Impedir que o event listener global processe
-
-                        // Criar um elemento mock com data-sidebar-action para usar com toggleSidebar
-                        const mockElement = document.createElement('div');
-                        mockElement.dataset.sidebarAction = 'post-editor';
-                        toggleSidebar(mockElement, true);
-                        return;
-                    }
-
-                    const btn = e.target.closest('[data-action]');
-                    if (!btn) return;
-                    const action = btn.dataset.action;
-                    const handler = ACTIONS[action];
-                    if (!handler) return;
-                    e.preventDefault();
-                    Promise.resolve(handler({ event: e, button: btn, state: getState() }))
-                        .finally(() => {
-                            if (action === 'follow-user' || action === 'unfollow-user') {
-                                try {
-                                    if (viewType === ENTITY.PROFILE && String(viewId) === String(getState()?.view?.id)) {
-                                        const fp = Number(viewData?.feed_privacy ?? 0);
-                                        const isOwner = String(currentUserData?.id ?? '') === String(viewId ?? '');
-                                        if (fp === 1) {
-                                            if (action === 'follow-user') viewRestricted = false;
-                                            else if (action === 'unfollow-user' && !isOwner) viewRestricted = true;
-                                        }
-                                        resetFeed();
-                                        loadFeed();
-                                    }
-                                } catch (_) {}
-                            }
-                        });
-                };
-                document.addEventListener('click', _handler);
-                window._mainActionHandler = _handler;
+                bindMainActionHandler();
                 // Sincronizar seletor de privacidade do trigger
                 try { setupPostPrivacyBindings(editorTriggerEl); } catch (_) {}
             });
@@ -7851,7 +8756,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         const btnApps = document.getElementById('apps-menu-trigger');
                         if (btnApps) {
                             if (btnApps._bound) btnApps.removeEventListener('click', btnApps._bound);
-                            const handler = async (ev) => { ev.preventDefault(); await openAppsSidebar(); };
+                            const handler = async (ev) => {
+                                ev.preventDefault();
+                                ev.stopPropagation(); // evita dupla abertura (handler próprio + delegado global)
+                                await openAppsSidebar();
+                            };
                             btnApps.addEventListener('click', handler);
                             btnApps._bound = handler;
                         }
@@ -7860,6 +8769,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const delegate = async (ev) => {
                                 const trg = ev.target && ev.target.closest && ev.target.closest('#apps-menu-trigger');
                                 if (!trg) return;
+                                if (ev.defaultPrevented) return; // já tratado pelo handler direto
                                 ev.preventDefault();
                                 await openAppsSidebar();
                             };
@@ -7878,7 +8788,23 @@ document.addEventListener('DOMContentLoaded', () => {
                         },
                         fetchAll: true
                     });
-                    const appIds = Array.isArray(userAppsRaw?.data) ? userAppsRaw.data.map(o => o.ap) : [];
+                    let appIds = Array.isArray(userAppsRaw?.data) ? userAppsRaw.data.map(o => o.ap) : [];
+
+                    // Apps instalados em nível de empresa (empresa do usuário)
+                    try {
+                        const companiesRes = await apiClient.post('/search', {
+                            db: 'workz_companies', table: 'employees', columns: ['em'], conditions: { us: currentUserData.id, st: 1 }, fetchAll: true, limit: 200
+                        });
+                        const companyIds = Array.isArray(companiesRes?.data) ? [...new Set(companiesRes.data.map(r => Number(r.em)))] : [];
+                        if (companyIds.length > 0) {
+                            const gappRes = await apiClient.post('/search', {
+                                db: 'workz_apps', table: 'gapp', columns: ['ap'],
+                                conditions: { st: 1, em: { op: 'IN', value: companyIds } }, fetchAll: true, limit: 500
+                            });
+                            const companyAppIds = Array.isArray(gappRes?.data) ? gappRes.data.map(r => r.ap) : [];
+                            appIds = [...new Set([ ...appIds, ...companyAppIds ])];
+                        }
+                    } catch (_) {}
                     const resolvedApps = await fetchByIds(appIds, 'apps'); // Fetch full app data here
                     try { window.__appListCache = Array.isArray(resolvedApps) ? resolvedApps : (resolvedApps ? [resolvedApps] : []); } catch (_) {}
 
@@ -8046,22 +8972,33 @@ document.addEventListener('DOMContentLoaded', () => {
         let finalUrl = baseUrl;
         const wantSSO = opts.sso !== false; // SSO é para o app, não para o runner
         const mainToken = localStorage.getItem('jwt_token');
+        let runToken = mainToken;
 
-        // O runner SEMPRE precisa de um token para autenticar o carregamento do iframe.
-        // Usamos o token principal do usuário para isso.
-        if (mainToken) {
-            finalUrl += `?token=${encodeURIComponent(mainToken)}`;
+        if (wantSSO) { // Usa token do app (aud app:{id}) quando disponível
+            const trySso = async (ctxPayload) => {
+                const sso = await apiClient.post('/apps/sso', { app_id: app.id, ctx: ctxPayload });
+                return sso?.token || null;
+            };
+            try {
+                const token = await trySso(ctx);
+                if (token) {
+                    runToken = token;
+                }
+            } catch (_) {
+                try {
+                    if (ctx?.type !== 'user' && currentUserData?.id) {
+                        const token = await trySso({ type: 'user', id: currentUserData.id });
+                        if (token) {
+                            runToken = token;
+                        }
+                    }
+                } catch (__) {}
+            }
         }
 
-        if (wantSSO) { // Se o app precisar de um token de SSO próprio (diferente do principal)
-            try {
-                const sso = await apiClient.post('/apps/sso', { app_id: app.id, ctx });
-                const token = sso?.token || null;
-                if (token) {
-                    // O app receberá este token via postMessage ou outro mecanismo no futuro.
-                    // Por enquanto, o runner só precisa do token principal.
-                }
-            } catch (_) {}
+        // O runner precisa de um token para autenticar o carregamento.
+        if (runToken) {
+            finalUrl += `?token=${encodeURIComponent(runToken)}`;
         }
         newWindow(finalUrl, `app_${app.id}`, app.im, app.tt);
     }
@@ -8363,15 +9300,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Botão iniciar (abre/fecha a grade de apps)
             html += `
                 <button data-start="1" class="relative shrink-0 snap-start" title="Início">
-                    <div class="w-12 h-12 rounded-full overflow-hidden bg-white/10 text-white flex items-center justify-center shadow-xl transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
+                    <div class="w-12 h-12 rounded-2xl overflow-hidden bg-white/10 text-white flex items-center justify-center shadow-md transition-transform duration-200 ease-in-out hover:scale-[1.03]">
                         <img src="/images/apps/inicio.png" alt="Início" class="app-icon-image" />
-                    </div>
-                </button>`;
-            // Loja (sempre presente)
-            html += `
-                <button data-store="1" class="relative shrink-0 snap-start" title="Loja de aplicativos">
-                    <div class="w-12 h-12 rounded-full overflow-hidden bg-white/5 shadow-xl transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
-                        <img src="/images/apps/store.jpg" alt="Loja" class="app-icon-image" />
                     </div>
                 </button>`;
             ids.forEach(id => {
@@ -8381,7 +9311,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const name = app?.tt || 'App';
                 html += `                    
                 <button data-app-id="${app.id}" title="${name}" class="relative shrink-0 snap-start" data-quick-id="${app.id}">
-                    <div class="w-12 h-12 rounded-full overflow-hidden bg-white/5 shadow-[0_10px_18px_rgba(0,0,0,0.24),_0_2px_6px_rgba(0,0,0,0.18)] transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.03]">
+                    <div class="w-12 h-12 rounded-2xl overflow-hidden bg-white/5 shadow-md transition-transform duration-200 ease-in-out hover:scale-[1.03]">
                         <img src="${img}" alt="${name}" class="app-icon-image" />
                     </div>
                 </button>`;
@@ -8408,7 +9338,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const icon = span.querySelector('i');
                 if (ids.has(id)) {
                     span.style.opacity = '1';
-                    span.title = 'Remover do acesso rápido';
+                    span.title = 'Desafixar da barra de tarefas';
                     if (icon) icon.className = 'fa-solid fa-star text-[12px]';
                 } else {
                     span.style.opacity = '';
@@ -8946,6 +9876,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return {
             tt: normalizeRequiredString(source.tt ?? source.name),
             national_id: sanitizeDocument(source.national_id ?? source.cnpj),
+            ml: normalizeStringOrNull(source.ml ?? source.email),
             cf: normalizeStringOrNull(source.cf),
             un: normalizeStringOrNull(source.un),
             page_privacy: normalizeNumber(source.page_privacy ?? source.page_privacy),
@@ -9047,7 +9978,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof SidebarNav !== 'undefined' && Array.isArray(SidebarNav.stack)) {
             SidebarNav.stack.forEach((state) => {
                 if (state?.payload?.data && String(state.payload.data.id ?? '') === idStr) {
-                    state.payload = { ...(state.payload || {}), data: updated };
+                    const nextPayload = { ...(state.payload || {}), data: updated };
+                    if (nextPayload.entity === 'business') {
+                        nextPayload.id = updated.id ?? nextPayload.id;
+                        nextPayload.ml = updated.ml ?? nextPayload.ml;
+                        nextPayload.tt = updated.tt ?? nextPayload.tt;
+                    }
+                    state.payload = nextPayload;
                 }
             });
         }

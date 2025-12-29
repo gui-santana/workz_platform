@@ -156,6 +156,28 @@ function notifyAction() {
 
 ---
 
+## 4. Layout e Orientação de Tela
+
+Ao publicar, informe também os metadados de layout para que o player e o preview saibam adaptar o iframe ao seu app. Esses campos são opcionais, mas recomendamos preenchê-los quanto mais próximo a sua experiência visual estiver do comportamento final.
+
+| Campo | Tipo | Descrição |
+| --- | --- | --- |
+| `aspect_ratio` | string | Proporção largura:altura (ex: `16:9`, `4:3`). |  
+| `supports_portrait` | boolean | `true` se o app está preparado para retrato; `false` caso a interface seja exclusiva em paisagem. |
+| `supports_landscape` | boolean | `true` se o app suporta paisagem; `false` se o layout for exclusivamente retrato. |
+
+Se nenhum valor for enviado, usamos `aspect_ratio: '4:3'` e assumimos que retrato e paisagem estão disponíveis (ambos `true`).
+
+```javascript
+window.WorkzAppConfig.layout = {
+  aspect_ratio: '4:3',
+  supports_portrait: true,
+  supports_landscape: true
+};
+```
+
+Esses dados também são expostos na API para que o app runner possa calcular `object-fit`, placeholders e dimensões iniciais quando o aplicativo for carregado em dispositivos móveis ou em previews lado a lado.
+
 ## 4. API de Storage
 
 O `WorkzSDK.storage` oferece métodos para persistir dados de forma segura e com escopo definido (por usuário, empresa ou time). O escopo é gerenciado automaticamente pelo backend com base no usuário autenticado.
@@ -289,3 +311,31 @@ fileInput.addEventListener('change', async (event) => {
       }
     };
     ```
+
+---
+
+## 6. Pagamentos (Fase 1)
+
+O SDK v2 inclui um módulo inicial de pagamentos para compras avulsas com Mercado Pago (Checkout Pro).
+
+Exemplo:
+
+```javascript
+const res = await WorkzSDK.payments.createPurchase({
+  appId: window.WorkzAppConfig.id,
+  title: 'Licença do App',
+  unitPrice: 19.90,
+  quantity: 1,
+  currency: 'BRL',
+  backUrls: {
+    success: location.href,
+    failure: location.href,
+    pending: location.href,
+  },
+});
+if (res && res.success && res.init_point) {
+  window.location.href = res.init_point; // abrir checkout
+}
+```
+
+Ao aprovar o pagamento, o webhook atualiza a transação e a plataforma libera automaticamente o acesso do usuário ao app (entitlement).

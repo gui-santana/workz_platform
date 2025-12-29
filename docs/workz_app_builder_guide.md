@@ -3,18 +3,117 @@
 > Abrange apps JavaScript **nativos** renderizados via `/public/apps/embed.html` e o fluxo de criação/edição/publicação pelo **App Builder**.
 
 ## 1) Visão Geral
-O **App Builder** é um aplicativo JavaScript nativo (executado dentro da própria plataforma) que permite criar outros aplicativos Workz! em **JavaScript** ou **Flutter**.  
-Os apps **JavaScript** têm seu código-fonte persistido em **`apps.js_code`** e são renderizados em um _iframe_ através do documento **`/public/apps/embed.html`**.
+O **App Builder** é um aplicativo JavaScript nativo (executado dentro da própria plataforma) que permite criar aplicativos Workz! em **JavaScript** ou **Flutter**.  
+A base de construção **JS/Flutter** permanece, mas o fluxo passa a ser **manifesto-dirigido**: todo app publicado inclui um **`workz.app.json`** que descreve contexto, permissões, rotas, quotas, eventos, storage e UI shell. Esse manifesto é o contrato entre app e núcleo e é validado pelo Runner antes de executar o app.
 
-Para apps **Flutter**, o Builder aciona pipelines de _build_ multiplataforma que alimentam as tabelas `build_queue` e `flutter_builds` (descritas na documentação do schema).
+Os apps **JavaScript** continuam com código-fonte em **`apps.js_code`** e são renderizados em um _iframe_ via **`/public/apps/embed.html`**.  
+Para apps **Flutter**, o Builder aciona pipelines de _build_ multiplataforma que alimentam `build_queue` e `flutter_builds`, e o manifesto é empacotado junto aos artefatos.
 
 ---
 
-## 2) Pipeline de Renderização (JavaScript)
+## 2) Principios de projeto do App Builder
+- **Construcao guiada por manifesto**: o Builder gera e atualiza `workz.app.json`, que governa permissoes, rotas, quotas, eventos, storage e UI shell.  
+- **Isolamento por padrao (secure-by-default)**: o app nasce sem permissoes; o wizard solicita apenas o necessario.  
+- **Multi-entidade como contexto**: o usuario loga uma vez; o app roda com um **context** resolvido pelo SDK (user/business/team).  
+- **UX consistente via Design System**: o Builder força shell, grid e componentes oficiais; o app define apenas telas dentro do shell.  
+- **Baixa complexidade para dev, alta rastreabilidade**: o dev descreve, o sistema gera e enforca; o runtime mede eventos, latencia e storage.
+
+## 3) Arquitetura macro (App Studio)
+**A) Camada de Autoria (UI do Builder)**
+- Wizard de criacao, editor visual de telas, modelador de dados, automacoes simples, permissoes e papeis, preview/testes.
+
+**B) Camada de Geracao (Compiler/Exporter)**
+- Gera manifesto, bootstrap do app, schemas (se houver dados) e assets dentro das regras do Design System.
+
+**C) Camada de Registro/Publicacao (Store + Registry)**
+- Versionamento (semver), assinatura/validacao do pacote, fluxo **draft → review → published**, catalogo e distribuicao.
+
+**D) Camada de Execucao (Runner/Player)**
+- Container leve (iframe), SDK carregado pelo Runner, APIs enforcadas conforme manifesto, observabilidade e auditoria.
+
+## 4) Manifesto do app (`workz.app.json`)
+O manifesto e o **contrato de execucao** entre app e nucleo. O Runner **so executa** se:
+- manifesto valido,
+- assinatura OK,
+- permissoes compativeis com o ambiente,
+- politicas de sandbox atendidas.
+
+**Secoes tipicas do manifesto**
+- `metadata`: id, nome, versao, tipo (js/flutter), entrypoint.
+- `contextRequirements`: tipo de contexto e regra de troca (user/business/team).
+- `permissions`: roles/claims/policies, storage, eventos, integracoes externas.
+- `uiShell`: layout permitido, componentes oficiais, tema limitado.
+- `routes`: rotas internas/telas declaradas.
+- `quotas`: limites de storage, requests, eventos.
+- `events`: eventos de entrada e saida (sistema + app).
+- `entitlements`: plano/preco/feature flags.
+
+Exemplo minimo (conceitual):
+```json
+{
+  "id": "estoques",
+  "name": "Workz! Estoques",
+  "version": "1.0.0",
+  "appType": "javascript",
+  "entry": "dist/index.html",
+  "contextRequirements": {
+    "mode": "business",
+    "allowContextSwitch": true
+  },
+  "permissions": {
+    "view": ["owner", "admin", "manager", "member"],
+    "storage": ["kv", "docs"],
+    "externalApi": []
+  },
+  "uiShell": {
+    "layout": "standard",
+    "sidebar": true,
+    "theme": { "primary": "#f97316" }
+  },
+  "routes": ["/dashboard", "/produtos", "/movimentacoes"],
+  "events": {
+    "in": ["app:ready", "context:changed"],
+    "out": ["estoque:movimentacao_criada"]
+  },
+  "quotas": { "storageMb": 50, "requestsPerMinute": 120 },
+  "entitlements": { "type": "free" },
+  "build": { "targets": ["web"] }
+}
+```
+
+## 5) Estrutura do pacote do app
+Um app publicado vira um pacote (zip ou diretorio):
+```
+/app
+  /dist
+    index.html
+    main.js
+    assets/...
+  /manifest
+    workz.app.json
+  /schemas
+    data.json
+  /docs
+    README.md
+  signature.json
+```
+
+## 6) Runner/Player (execucao e enforcement)
+Para sustentar o manifesto, o Runner precisa garantir:
+- **CSP rigorosa** e sandbox do iframe.
+- **postMessage policy** com origens e tipos validados.
+- **API firewall** no SDK (bloqueio fora do manifesto).
+- **Quotas por app/contexto** (storage e requests).
+- **Auditoria** de chamadas e tentativas negadas.
+- **Medições** de latencia, erros e uso de storage.
+
+---
+
+## 7) Pipeline de Renderização (JavaScript)
 ```
 apps (js_code, color, icon, ...)
          │
-         ├──> Backend lê e injeta em /public/apps/embed.html
+         ├──> Backend valida manifesto e injeta em /public/apps/embed.html
          │         • {{APP_COLOR}}  → apps.color
          │         • {{APP_ICON}}   → ícone do app (URL/Base64)
          │         • {{APP_SCRIPT}} → apps.js_code
@@ -30,14 +129,14 @@ apps (js_code, color, icon, ...)
 - O `embed.html` oculta o _loader_ quando o bootstrap termina (ou ao final do `try/finally`).  
 - O SDK é inicializado em modo `standalone` (token no querystring do iframe).
 
-### 2.1) `embed.html` (pontos-chave)
+### 7.1) `embed.html` (pontos-chave)
 - **Theme/branding:** `--pico-primary: {{APP_COLOR}}` controla a cor principal.  
 - **Loader acessível:** `#app-loader` com `aria-label="Carregando aplicativo"` e _skeleton_ usando `aria-busy`.  
 - **Isolamento:** o app roda em um contêiner simples; o SDK media a comunicação com a plataforma.
 
 ---
 
-## 3) Contrato do App (JavaScript)
+## 8) Contrato do App (JavaScript)
 O app JavaScript deve expor um objeto global **`window.StoreApp`** contendo ao menos:
 - `bootstrap(): Promise<void>` — ponto de entrada.  
 Opcionalmente, pode organizar utilitários e _handlers_ internos. Exemplo mínimo:
@@ -52,7 +151,7 @@ window.StoreApp = {
 };
 ```
 
-### 3.1) WorkzSDK (expectativas)
+### 8.1) WorkzSDK (expectativas)
 - `init({ mode })` — inicializa o canal com a plataforma.
 - `getUser()` e `getContext()` — dados básicos para render.  
 - `api.get/post/put(path, body?)` — _proxy_ HTTP autenticado para rotas da plataforma.  
@@ -63,25 +162,30 @@ window.StoreApp = {
 
 ---
 
-## 4) App Builder — UX, Campos e Mapeamentos
-O Builder guia o autor por **6 passos**. Abaixo, os principais campos e seu mapeamento na base **`workz_apps`**.
+## 9) App Builder — Wizard, Campos e Mapeamentos
+O Builder guia o autor por **8 passos** alinhados ao manifesto. A saida inclui:
+- `workz.app.json` (manifesto)
+- `ui.json` (telas + navegacao)
+- `schemas/data.json` (se houver dados)
+- bootstrap/codigo (JS ou Flutter)
 
-| Passo | Campo (UI) | App Builder (state) | Tabela/Coluna |
-|---|---|---|---|
-| 1: Empresa | Empresa (select) | `appData.company.id` | `apps.exclusive_to_entity_id` (*restrição opcional de uso*) |
-| 2: Tipo | JavaScript ou Flutter | `appType` | `apps.app_type` |
-| 3: Informações | Nome | `appData.title` | `apps.t` |
-| | Slug | `appData.slug` | `apps.slug` |
-| | Descrição | `appData.description` | `apps.ds` |
-| | Ícone | `appData.icon` (Base64/URL) | (normalmente persistido como URL em `apps.icon` ou em storage) |
-| | Cor | `appData.color` | `apps.color` |
-| 4: Configuração | Nível de Acesso | `appData.accessLevel` | `apps.access_level` |
-| | Versão | `appData.version` | `apps.version`/`apps.js_version` (JS) |
-| | Tipo de Entidade | `appData.entityType` | `apps.entity_type` |
-| | Preço (R$) | `appData.price` | `apps.vl` |
-| | Scopes | `appData.scopes[]` | `apps.scopes` (JSON) |
-| 5: Código | JS ou Dart | `appData.code` / `appData.dartCode` | `apps.js_code` / `apps.dart_code` |
-| 6: Revisão | Publicar | API `POST /apps/create` ou `PUT /apps/:id` | cria/atualiza **`apps`** e opcionalmente **`app_versions`** |
+| Passo | O que o Builder coleta | Saida principal |
+|---|---|---|
+| 1) Identidade | nome, slug, descricao, categoria, icone, publico | `manifest.metadata` + colunas base em `apps` |
+| 2) Contexto | user/business/team, troca de contexto | `manifest.contextRequirements` |
+| 3) Permissoes e acesso | quem pode ver, dados, capacidades | `manifest.permissions` + `apps.scopes/access_level` |
+| 4) Modelagem de dados | colecoes, campos, indices | `schemas/data.json` |
+| 5) Telas e navegacao | layouts, blocos, acoes | `ui.json` + bootstrap do app |
+| 6) Integracoes e eventos | eventos do sistema e do app | `manifest.events` |
+| 7) Pagamentos/entitlements | preco, plano, flags | `manifest.entitlements` + `apps.vl` |
+| 8) Preview/publicacao | validacoes, assinatura, release | pacote publicado + `app_reviews/app_versions` |
+
+**Mapeamento minimo para `workz_apps` (permanece compatível)**
+- `apps.exclusive_to_entity_id`: empresa restrita (quando aplicavel).
+- `apps.app_type`: `javascript` ou `flutter`.
+- `apps.t`, `apps.slug`, `apps.ds`, `apps.icon`, `apps.color`.
+- `apps.access_level`, `apps.entity_type`, `apps.vl`, `apps.scopes`.
+- `apps.js_code` / `apps.dart_code`.
 
 **Revisão & Publicação**
 - `app_reviews` registra aprovações/rejeições.  
@@ -89,7 +193,7 @@ O Builder guia o autor por **6 passos**. Abaixo, os principais campos e seu mape
 
 ---
 
-## 5) Rotas consumidas (pelo Builder)
+## 10) Rotas consumidas (pelo Builder)
 - `GET /me` — obtém empresas do usuário (filtra moderador: `nv >= 3`).  
 - `POST /apps/create` — cria app; **payload base**:
 ```json
@@ -120,7 +224,7 @@ O Builder guia o autor por **6 passos**. Abaixo, os principais campos e seu mape
 
 ---
 
-## 6) Modo Preview (JavaScript)
+## 11) Modo Preview (JavaScript)
 O Builder abre um **modal** com um _iframe_ de _preview_ que:
 - injeta **Pico.css**, simula `WorkzSDK` (métodos mínimos) e **executa o código** do campo editor;
 - intercepta `console.log/error/warn` e erros JS e **posta mensagens** para o _parent_ via `postMessage` para um “Console de Debug”;
@@ -132,7 +236,7 @@ O Builder abre um **modal** com um _iframe_ de _preview_ que:
 
 ---
 
-## 7) Editor de Código
+## 12) Editor de Código
 - Biblioteca: **CodeMirror 5** (JS + _hints_ básicos para WorkzSDK).  
 - Recursos: _line numbers_, _active line_, _fold_, _autocomplete_, _toggle wrap_, _formatador_ simples.  
 - Teclas de atalho: `Ctrl-/` comenta, `F11` tela cheia, `Esc` sai da tela cheia, `Ctrl-F/H/G` busca/troca/linha.  
@@ -140,7 +244,7 @@ O Builder abre um **modal** com um _iframe_ de _preview_ que:
 
 ---
 
-## 8) Fluxo Flutter (Builder → CI → Tabelas)
+## 13) Fluxo Flutter (Builder → CI → Tabelas)
 1. Autor escolhe **Flutter** no Passo 2; o código **Dart** é salvo em `apps.dart_code` (ou repositório externo, conforme estratégia).  
 2. Uma solicitação de build é enfileirada em **`build_queue`** (`build_type`), com `status='pending'`.  
 3. O _runner_ CI atualiza `started_at/completed_at/build_log` e grava artefatos por plataforma em **`flutter_builds`** (`status: building→ready→published`).  
@@ -148,7 +252,7 @@ O Builder abre um **modal** com um _iframe_ de _preview_ que:
 
 ---
 
-## 9) Escopos e Integração com Storage
+## 14) Escopos e Integração com Storage
 Ao publicar, o autor declara _scopes_ de permissões. Com base neles, o app pode usar:
 - `storage.kv.*` → **`storage_kv`** (preferível para chaves pequenas com TTL).  
 - `storage.docs.*` → **`storage_docs`** (documentos JSON versionados).  
@@ -158,14 +262,14 @@ Ao publicar, o autor declara _scopes_ de permissões. Com base neles, o app pode
 
 ---
 
-## 10) Mapeamento de Estados/Status
+## 15) Mapeamento de Estados/Status
 - **`apps.build_status`**: `pending` → `building` → `success` | `failed`.  
 - **`flutter_builds.status`**: `building` → `ready` → `published` | `failed`.  
 - **`app_reviews.status`**: `pending` → `approved` | `rejected` | `needs_changes`.
 
 ---
 
-## 11) Boas Práticas de Segurança
+## 16) Boas Práticas de Segurança
 - **CSP** no `embed.html` (ex.: restringir `script-src` à CDN e ao domínio Workz!).  
 - Sanitizar `{{APP_ICON}}`/`{{APP_SCRIPT}}` no backend; bloquear HTML direto não intencional.  
 - Tokenização do _iframe_ (modo `standalone`) com **tempo de vida curto**; valide _origin_ nas mensagens.  
@@ -174,7 +278,7 @@ Ao publicar, o autor declara _scopes_ de permissões. Com base neles, o app pode
 
 ---
 
-## 12) Troubleshooting
+## 17) Troubleshooting
 - **“WorkzSDK não foi encontrado”** → verifique `/js/core/workz-sdk.js` no `embed.html` e _load order_.  
 - **`window.StoreApp.bootstrap` não existe** → template mínimo ausente no `js_code`.  
 - **Preview sem logs** → checar `postMessage` (mesmo domínio) e listener `window.addEventListener('message', ...)`.  
@@ -183,8 +287,8 @@ Ao publicar, o autor declara _scopes_ de permissões. Com base neles, o app pode
 
 ---
 
-## 13) Exemplos
-### 13.1) “Hello, Workz!” (JavaScript)
+## 18) Exemplos
+### 18.1) “Hello, Workz!” (JavaScript)
 ```js
 window.StoreApp = {
   async bootstrap() {
@@ -199,7 +303,7 @@ window.StoreApp = {
 };
 ```
 
-### 13.2) Payload de Criação (resumo)
+### 18.2) Payload de Criação (resumo)
 ```json
 { "company_id": 123, "app_type": "javascript", "title": "Meu App",
   "slug": "meu-app", "js_code": "/* ... */", "color": "#3b82f6",
@@ -208,7 +312,7 @@ window.StoreApp = {
 
 ---
 
-## 14) Itens de Evolução (sugestões)
+## 19) Itens de Evolução (sugestões)
 - Salvar _snapshots_ de `js_code` em **`app_versions`** automaticamente a cada publicação.  
 - Adicionar `CSP` e `sandbox` também ao `embed.html` em produção com _nonce_.  
 - Normalizar `icon` no **storage_blobs** e referenciar o caminho/URL.  

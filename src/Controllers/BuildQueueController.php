@@ -30,6 +30,7 @@ class BuildQueueController
                 `app_id` INT UNSIGNED NOT NULL,
                 `build_type` VARCHAR(64) NOT NULL DEFAULT 'flutter_web',
                 `status` ENUM('pending','building','success','failed') NOT NULL DEFAULT 'pending',
+                `platforms` VARCHAR(100) NULL,
                 `build_log` MEDIUMTEXT NULL,
                 `output_path` VARCHAR(500) NULL,
                 `started_at` TIMESTAMP NULL,
@@ -41,6 +42,9 @@ class BuildQueueController
                 KEY `idx_queue_app` (`app_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
             $pdo->exec($sql);
+
+            // Backwards‑compatible: garantir coluna platforms em instalações existentes.
+            $pdo->exec("ALTER TABLE build_queue ADD COLUMN IF NOT EXISTS `platforms` VARCHAR(100) NULL");
         } catch (\Throwable $e) {
             // Silently ignore; subsequent operations will surface errors
         }
@@ -128,7 +132,8 @@ class BuildQueueController
                 'app_id' => (int)$job['app_id'],
                 'slug' => $app['slug'] ?? ('app-'.$job['app_id']),
                 'build_type' => $job['build_type'] ?? 'flutter_web',
-                'platform' => 'web',
+                'platform' => 'web', // usado apenas como fallback
+                'platforms' => $job['platforms'] ?? 'web', // string para o worker interpretar
             ];
 
             // Fornece código
@@ -163,7 +168,7 @@ class BuildQueueController
      * POST /api/build-queue/update/{id}
      * Atualiza o status do job e sincroniza estado/artefatos do app.
      */
-    public function updateJob(object $auth = null, int $jobId): void
+    public function updateJob(int $jobId): void
     {
         header('Content-Type: application/json');
         $this->requireWorkerSecret();

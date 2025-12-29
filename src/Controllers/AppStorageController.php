@@ -7,9 +7,12 @@ namespace Workz\Platform\Controllers;
 use Workz\Platform\Models\General;
 use Workz\Platform\Core\StorageManager;
 use PDO;
+use Workz\Platform\Controllers\Traits\AuthorizationTrait;
 
 class AppStorageController
 {
+    use AuthorizationTrait;
+
     private General $generalModel;
 
     public function __construct()
@@ -50,13 +53,25 @@ class AppStorageController
     {
         $userId = (int)($auth->sub ?? 0);
 
-        // Por enquanto, permitir acesso se for o próprio usuário
-        if ($scopeType === 'user' && $userId === $scopeId) {
-            return true;
+        if ($scopeType === 'user') {
+            return $userId === $scopeId;
         }
 
-        // Para outros escopos, permitir por enquanto (para testes)
         return true;
+    }
+
+    /**
+     * Constrói contexto e delega autorização centralizada.
+     */
+    private function enforceStorageAccess(object $auth, string $action, string $scopeType, int $scopeId, int $appId): void
+    {
+        $ctx = ['ap' => $appId];
+        if ($scopeType === 'business') {
+            $ctx['em'] = $scopeId;
+        } elseif ($scopeType === 'team') {
+            $ctx['cm'] = $scopeId;
+        }
+        $this->authorize($action, $ctx, $auth);
     }
 
     // ==================== KV STORAGE ====================
@@ -73,6 +88,8 @@ class AppStorageController
             $scopeType = $_GET['scopeType'] ?? 'user';
             $scopeId = (int)($_GET['scopeId'] ?? $auth->sub ?? 0);
             $key = $_GET['key'] ?? '';
+
+            $this->enforceStorageAccess($auth, 'app.read', $scopeType, $scopeId, $appId);
 
             // Se não há chave, listar todas as chaves
             if (!$key) {
@@ -145,6 +162,8 @@ class AppStorageController
             $key = $input['key'] ?? '';
             $value = $input['value'] ?? null;
             $ttl = $input['ttl'] ?? null;
+
+            $this->enforceStorageAccess($auth, 'app.create', $scopeType, $scopeId, $appId);
 
             error_log("Dados processados - scopeType: $scopeType, scopeId: $scopeId, key: $key");
 
@@ -246,6 +265,8 @@ class AppStorageController
             $scopeId = (int)($_GET['scopeId'] ?? $auth->sub ?? 0);
             $key = $_GET['key'] ?? '';
 
+            $this->enforceStorageAccess($auth, 'app.delete', $scopeType, $scopeId, $appId);
+
             if (!$key) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Parâmetro key é obrigatório']);
@@ -295,6 +316,8 @@ class AppStorageController
             $appId = $this->getAppIdFromToken($auth);
             $scopeType = $_GET['scopeType'] ?? 'user';
             $scopeId = (int)($_GET['scopeId'] ?? $auth->sub ?? 0);
+
+            $this->enforceStorageAccess($auth, 'app.read', $scopeType, $scopeId, $appId);
 
             if (!$this->validateScope($auth, $scopeType, $scopeId)) {
                 http_response_code(403);
@@ -356,6 +379,8 @@ class AppStorageController
             $scopeId = (int)($input['scopeId'] ?? $auth->sub ?? 0);
             $docType = $input['docType'] ?? 'user_data';
             $filters = $input['filters'] ?? [];
+
+            $this->enforceStorageAccess($auth, 'app.read', $scopeType, $scopeId, $appId);
 
             if (!$this->validateScope($auth, $scopeType, $scopeId)) {
                 http_response_code(403);
@@ -427,6 +452,8 @@ class AppStorageController
             $docId = $input['docId'] ?? '';
             $document = $input['document'] ?? [];
 
+            $this->enforceStorageAccess($auth, 'app.create', $scopeType, $scopeId, $appId);
+
             if (!$docId) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Parâmetro docId é obrigatório']);
@@ -495,6 +522,8 @@ class AppStorageController
             $scopeType = $_GET['scopeType'] ?? 'user';
             $scopeId = (int)($_GET['scopeId'] ?? $auth->sub ?? 0);
 
+            $this->enforceStorageAccess($auth, 'app.delete', $scopeType, $scopeId, $appId);
+
             if (!$this->validateScope($auth, $scopeType, $scopeId)) {
                 http_response_code(403);
                 echo json_encode(['error' => 'Sem permissão para acessar este escopo']);
@@ -544,6 +573,8 @@ class AppStorageController
             $scopeType = $_POST['scopeType'] ?? 'user';
             $scopeId = (int)($_POST['scopeId'] ?? $auth->sub ?? 0);
             $blobId = $_POST['name'] ?? uniqid('blob_');
+
+            $this->enforceStorageAccess($auth, 'app.create', $scopeType, $scopeId, $appId);
 
             // Debug: log dos dados recebidos
             error_log("Blob upload - appId: $appId, scopeType: $scopeType, scopeId: $scopeId, blobId: $blobId");
@@ -633,6 +664,8 @@ class AppStorageController
             $scopeType = $_GET['scopeType'] ?? 'user';
             $scopeId = (int)($_GET['scopeId'] ?? $auth->sub ?? 0);
 
+            $this->enforceStorageAccess($auth, 'app.read', $scopeType, $scopeId, $appId);
+
             if (!$this->validateScope($auth, $scopeType, $scopeId)) {
                 http_response_code(403);
                 echo json_encode(['error' => 'Sem permissão para acessar este escopo']);
@@ -686,6 +719,8 @@ class AppStorageController
             $appId = $this->getAppIdFromToken($auth);
             $scopeType = $_GET['scopeType'] ?? 'user';
             $scopeId = (int)($_GET['scopeId'] ?? $auth->sub ?? 0);
+
+            $this->enforceStorageAccess($auth, 'app.read', $scopeType, $scopeId, $appId);
 
             if (!$this->validateScope($auth, $scopeType, $scopeId)) {
                 http_response_code(403);
@@ -745,6 +780,8 @@ class AppStorageController
             $appId = $this->getAppIdFromToken($auth);
             $scopeType = $_GET['scopeType'] ?? 'user';
             $scopeId = (int)($_GET['scopeId'] ?? $auth->sub ?? 0);
+
+            $this->enforceStorageAccess($auth, 'app.delete', $scopeType, $scopeId, $appId);
 
             if (!$this->validateScope($auth, $scopeType, $scopeId)) {
                 http_response_code(403);

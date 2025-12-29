@@ -139,22 +139,6 @@
     z-index: 10; /* Ensure it's on top */
 }
 
-#minimizeZone > button{
-	padding: 0;
-}
-
-#minimizeZone > button > img{
-	margin: 0;
-}
-
-#minimizeZone > button:hover > img{
-	-webkit-transform: scale(1.5);
-	-moz-transform: scale(1.5);
-	-o-transform: scale(1.5);
-	-ms-transform: scale(1.5);
-	transform: scale(1.5);		
-}
-
 .minimizedTitle {
     display: table-cell;
     vertical-align: middle;    

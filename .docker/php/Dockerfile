@@ -10,8 +10,11 @@ RUN apk add --no-cache \
     unzip \
     zip \
     curl \
+    curl-dev \
+    ca-certificates \
     git \
-    && docker-php-ext-install pdo pdo_mysql bz2
+    && update-ca-certificates \
+    && docker-php-ext-install pdo pdo_mysql bz2 curl
 
 # Baixa e instala o Composer globalmente
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer

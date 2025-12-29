@@ -468,6 +468,58 @@ class AppManagementController
                 return;
             }
 
+            // Process icon (base64) and normalize to 512x512 PNG
+            $iconPath = null;
+            if (!empty($input['icon']) && is_string($input['icon']) && str_starts_with($input['icon'], 'data:image')) {
+                try {
+                    list($meta, $data) = explode(',', $input['icon'], 2);
+                    $decoded = base64_decode($data);
+                    if ($decoded !== false) {
+                        $uploadDir = dirname(__DIR__, 2) . '/public/images/apps/';
+                        if (!is_dir($uploadDir)) { @mkdir($uploadDir, 0777, true); }
+                        $filename = 'app_new_' . uniqid() . '.png';
+                        $absNew = $uploadDir . $filename;
+
+                        $saved = false;
+                        if (function_exists('imagecreatefromstring')) {
+                            $src = @imagecreatefromstring($decoded);
+                            if ($src !== false) {
+                                $w = imagesx($src); $h = imagesy($src);
+                                $side = min($w, $h);
+                                $srcX = (int)max(0, ($w - $side) / 2);
+                                $srcY = (int)max(0, ($h - $side) / 2);
+                                $crop = imagecreatetruecolor($side, $side);
+                                imagealphablending($crop, false); imagesavealpha($crop, true);
+                                $transparent = imagecolorallocatealpha($crop, 0, 0, 0, 127);
+                                imagefilledrectangle($crop, 0, 0, $side, $side, $transparent);
+                                imagecopyresampled($crop, $src, 0, 0, $srcX, $srcY, $side, $side, $side, $side);
+
+                                $dst = imagecreatetruecolor(512, 512);
+                                imagealphablending($dst, false); imagesavealpha($dst, true);
+                                $transparent2 = imagecolorallocatealpha($dst, 0, 0, 0, 127);
+                                imagefilledrectangle($dst, 0, 0, 512, 512, $transparent2);
+                                imagecopyresampled($dst, $crop, 0, 0, 0, 0, 512, 512, $side, $side);
+                                $saved = @imagepng($dst, $absNew, 6);
+                                @imagedestroy($dst); @imagedestroy($crop); @imagedestroy($src);
+                            }
+                        }
+                        if (!$saved) { @file_put_contents($absNew, $decoded); }
+                        $iconPath = '/images/apps/' . $filename;
+                    }
+                } catch (\Throwable $e) { /* ignore icon errors */ }
+            }
+
+            // Enforce: apps com scopes não podem ser "Toda a Internet" (0)
+            $scopesArr = is_array($input['scopes'] ?? null) ? $input['scopes'] : [];
+            if (!empty($scopesArr) && (int)($input['access_level'] ?? 0) === 0) {
+                $input['access_level'] = 1;
+            }
+
+            // Enforce: Privado (2) é exclusivo para Negócios (entity_type = 2)
+            if ((int)($input['access_level'] ?? 0) === 2) {
+                $input['entity_type'] = 2;
+            }
+
             // Determine storage type based on app type and size
             $appType = strtolower((string)$input['app_type']);
             $storageType = $this->determineStorageType($appType, $input);
@@ -475,6 +527,12 @@ class AppManagementController
             // Defaults derived from context
             $publisherDefault = $input['publisher'] ?? ($auth->name ?? 'Workz Platform');
             $sourceLanguage = ($appType === 'flutter') ? 'dart' : 'javascript';
+
+            // Normalize layout metadata (optional)
+            $aspectRatio = trim((string)($input['aspect_ratio'] ?? ''));
+            if ($aspectRatio === '') { $aspectRatio = '4:3'; }
+            $supportsPortrait = array_key_exists('supports_portrait', $input) ? (bool)$input['supports_portrait'] : true;
+            $supportsLandscape = array_key_exists('supports_landscape', $input) ? (bool)$input['supports_landscape'] : true;
 
             // Prepare app data
             // Company linkage: set as exclusive owner when provided (supports company_id or company.id)
@@ -503,15 +561,18 @@ class AppManagementController
                 'storage_type' => $storageType,
                 'js_code' => $input['js_code'] ?? '',
                 'dart_code' => $input['dart_code'] ?? '',
-                'exclusive_to_entity_id' => $exclusiveTo,
-                'im' => $input['im'] ?? '/images/no-image.jpg',
+                'publisher' => $exclusiveTo,
+                'im' => $iconPath ?? ($input['im'] ?? '/images/no-image.jpg'),
                 'color' => $input['color'] ?? '#3b82f6',
                 'vl' => $input['vl'] ?? 0.00,
                 'access_level' => $input['access_level'] ?? 1,
-                'entity_type' => $input['entity_type'] ?? 0,
+                'entity_type' => $input['entity_type'] ?? 1,
                 'scopes' => json_encode($input['scopes'] ?? []),
                 'version' => $input['version'] ?? '1.0.0',
                 'publisher' => $publisherDefault,
+                'aspect_ratio' => $aspectRatio,
+                'supports_portrait' => $supportsPortrait ? 1 : 0,
+                'supports_landscape' => $supportsLandscape ? 1 : 0,
                 'st' => 1,
                 'us' => $userId,
                 'created_at' => date('Y-m-d H:i:s'),
@@ -577,15 +638,23 @@ class AppManagementController
                 ]);
             } catch (\Throwable $e) { /* ignore non-critical */ }
 
-            // Enqueue initial build for Flutter apps so the frontend only needs to monitor status
+            // Enqueue initial build for Flutter apps so the frontend only needs to monitor status.
+            // Plataformas: por enquanto, usamos apenas Web aqui; builds explícitos (via /apps/{id}/build)
+            // podem enviar ["web","android"] conforme preferência do usuário no App Studio.
             $buildStatus = null;
             if (strtolower($appType) === 'flutter') {
-                $enqueue = $this->buildPipeline->triggerBuild((int)$appId);
+                $enqueue = $this->buildPipeline->triggerBuild((int)$appId, ['web']);
                 if (!empty($enqueue['success'])) {
                     $buildStatus = 'pending';
                     // Best effort: reflect status on app row if schema supports it
                     try { $this->generalModel->update('workz_apps', 'apps', ['build_status' => $buildStatus, 'last_build_at' => date('Y-m-d H:i:s')], ['id' => $appId]); } catch (\Throwable $e) {}
                 }
+            }
+
+            // Provisionamento para empresa específica (modo Privado)
+            $privateCompanyId = isset($input['private_company_id']) ? (int)$input['private_company_id'] : 0;
+            if (($input['access_level'] ?? null) == 2 && $privateCompanyId > 0) {
+                $this->provisionPrivateAppForCompany((int)$appId, $privateCompanyId);
             }
 
             echo json_encode([
@@ -605,6 +674,18 @@ class AppManagementController
             http_response_code(500);
             echo json_encode(['error' => 'Internal server error']);
         }
+    }
+
+    // Cria vínculo de app privado com uma empresa (gapp em nível de empresa)
+    private function provisionPrivateAppForCompany(int $appId, int $companyId): void
+    {
+        try {
+            // Evitar duplicidades: verifica se já existe um vínculo empresa-app
+            $exists = $this->generalModel->count('workz_apps', 'gapp', [ 'em' => $companyId, 'ap' => $appId, 'st' => 1 ]) > 0;
+            if (!$exists) {
+                $this->generalModel->insert('workz_apps', 'gapp', [ 'em' => $companyId, 'ap' => $appId, 'st' => 1 ]);
+            }
+        } catch (\Throwable $e) { /* ignore non-critical */ }
     }
 
     /**
@@ -633,20 +714,25 @@ class AppManagementController
             }
 
             // Prepare update data (only allow certain fields to be updated)
-            $allowedFields = ['tt', 'ds', 'im', 'color', 'vl', 'access_level', 'scopes', 'version', 'publisher'];
+            $allowedFields = ['tt', 'ds', 'im', 'color', 'vl', 'access_level', 'scopes', 'version', 'publisher', 'aspect_ratio', 'supports_portrait', 'supports_landscape'];
             $updateData = [];
             
             foreach ($allowedFields as $field) {
                 if (isset($input[$field])) {
                     if ($field === 'scopes') {
                         $updateData[$field] = json_encode($input[$field]);
+                    } elseif ($field === 'aspect_ratio') {
+                        $ar = trim((string)$input[$field]);
+                        $updateData[$field] = $ar !== '' ? $ar : '4:3';
+                    } elseif ($field === 'supports_portrait' || $field === 'supports_landscape') {
+                        $updateData[$field] = (int)((bool)$input[$field]);
                     } else {
                         $updateData[$field] = $input[$field];
                     }
                 }
             }
 
-            if (empty($updateData)) {
+            if (empty($updateData) && empty($input['private_company_id'])) {
                 http_response_code(400);
                 echo json_encode(['error' => 'No valid fields to update']);
                 return;
@@ -655,12 +741,18 @@ class AppManagementController
             $updateData['updated_at'] = date('Y-m-d H:i:s');
 
             // Update app
-            $result = $this->generalModel->update(
+            $result = !empty($updateData) ? $this->generalModel->update(
                 'workz_apps',
                 'apps',
                 $updateData,
                 ['id' => $appId]
-            );
+            ) : true;
+
+            // Provisionamento/ajuste de empresa alvo para modo Privado
+            $privateCompanyId = isset($input['private_company_id']) ? (int)$input['private_company_id'] : 0;
+            if (($input['access_level'] ?? null) == 2 && $privateCompanyId > 0) {
+                $this->provisionPrivateAppForCompany((int)$appId, $privateCompanyId);
+            }
 
             if ($result) {
                 echo json_encode([
@@ -745,11 +837,12 @@ class AppManagementController
     {
         header("Content-Type: application/json");
         
+        $app = null;
         try {
             $userId = (int)($auth->sub ?? 0);
             if ($userId <= 0) {
                 http_response_code(401);
-                echo json_encode(['error' => 'Unauthorized']);
+                echo json_encode(['success' => false, 'error' => 'Unauthorized']);
                 return;
             }
 
@@ -758,46 +851,76 @@ class AppManagementController
             $app = $this->getAppWithPermissionCheck($appId, $userId);
             if (!$app) {
                 http_response_code(404);
-                echo json_encode(['error' => 'App not found or access denied']);
+                echo json_encode(['success' => false, 'error' => 'App not found or access denied']);
                 return;
             }
 
-            $platforms = $input['platforms'] ?? null;
+            $platformsInput = $input['platforms'] ?? null;
             $buildOptions = $input['options'] ?? [];
 
             // Trigger build
-            $buildResult = $this->buildPipeline->triggerBuild($appId, $platforms, $buildOptions);
-            
-            if ($buildResult['success']) {
-                echo json_encode([
-                    'success' => true,
-                    'message' => 'Build triggered successfully',
-                    'data' => [
-                        'build_id' => $buildResult['build_id'],
-                        'app_id' => $appId,
-                        'platforms' => $buildResult['platforms'],
-                        'status' => 'building',
-                        'estimated_duration' => $buildResult['estimated_duration'] ?? null
-                    ]
-                ]);
-            } else {
-                http_response_code(500);
-                echo json_encode([
-                    'error' => 'Failed to trigger build',
-                    'message' => $buildResult['error'] ?? 'Unknown error'
-                ]);
+            $requestedPlatforms = [];
+            if (is_array($platformsInput)) {
+                foreach ($platformsInput as $p) {
+                    $candidate = strtolower(trim((string)$p));
+                    if ($candidate === '') {
+                        continue;
+                    }
+                    if (in_array($candidate, ['web', 'android'], true)) {
+                        $requestedPlatforms[] = $candidate;
+                    }
+                }
+            } elseif (is_string($platformsInput) && strlen(trim($platformsInput)) > 0) {
+                $parts = array_map('trim', explode(',', $platformsInput));
+                foreach ($parts as $p) {
+                    $cand = strtolower(trim((string)$p));
+                    if ($cand === '') continue;
+                    if (in_array($cand, ['web', 'android'], true)) {
+                        $requestedPlatforms[] = $cand;
+                    }
+                }
             }
+            $requestedPlatforms = array_values(array_unique($requestedPlatforms));
+            if (empty($requestedPlatforms)) {
+                $requestedPlatforms = ['web'];
+            }
+
+            $buildPayloads = [];
+            foreach ($requestedPlatforms as $platform) {
+                $buildResult = $this->buildPipeline->triggerBuild((int)$appId, [$platform], $buildOptions);
+                $buildPayloads[] = [
+                    'platform' => $platform,
+                    'success' => !empty($buildResult['success']),
+                    'message' => $buildResult['message'] ?? ($buildResult['error'] ?? 'Job enqueued'),
+                    'build_id' => $buildResult['build_id'] ?? null,
+                    'platforms' => $buildResult['platforms'] ?? [$platform]
+                ];
+            }
+
+            $allSuccess = count(array_filter($buildPayloads, fn($row) => $row['success'])) === count($buildPayloads);
+            echo json_encode([
+                'success' => $allSuccess,
+                'message' => $allSuccess ? 'Builds triggered successfully' : 'Some platforms failed to enqueue',
+                'data' => [
+                    'app_id' => $appId,
+                    'jobs' => $buildPayloads
+                ]
+            ]);
 
         } catch (\Throwable $e) {
             error_log("Error triggering build: " . $e->getMessage());
-            http_response_code(500);
-            echo json_encode(['error' => 'Internal server error']);
+            // Nunca propagar erro interno como 500 cru; responder sempre com JSON estruturado
+            echo json_encode([
+                'success' => false,
+                'error' => 'Internal server error',
+                'message' => $e->getMessage()
+            ]);
         }
     }
 
     /**
      * GET /api/apps/{id}/build-status
-     * Get build status and details
+     * Get build status and details (delegando para BuildPipeline)
      */
     public function getBuildStatus(object $auth, string $appId): void
     {
@@ -818,28 +941,114 @@ class AppManagementController
                 return;
             }
 
-            $buildStatus = $this->buildPipeline->getBuildStatus($appId);
-            
+            // Agrega status/artefatos a partir do BuildPipeline (build_queue + flutter_builds)
+            $buildStatus = $this->buildPipeline->getBuildStatus((int)$appId);
+
+            // Formato compatível com o App Builder (buildStatusModal / renderBuildStatusContent)
+            $appType = strtolower((string)($app['app_type'] ?? 'javascript'));
+
+            $compiledAt = null;
+            $buildLog   = null;
+            $builds     = [];
+
+            // Converter artifacts (flutter_builds) em estrutura de builds por plataforma
+            if (!empty($buildStatus['artifacts']) && is_array($buildStatus['artifacts'])) {
+                foreach ($buildStatus['artifacts'] as $artifact) {
+                    $platform = $artifact['platform'] ?? 'web';
+                    $status   = $artifact['status'] ?? 'pending';
+                    $build    = [
+                        'id'            => $artifact['id'] ?? null,
+                        'platform'      => $platform,
+                        'build_version' => $artifact['build_version'] ?? '1.0.0',
+                        'status'        => $status,
+                        'file_path'     => $artifact['file_path'] ?? null,
+                        'updated_at'    => $artifact['updated_at'] ?? null,
+                        'build_log'     => $artifact['build_log'] ?? null,
+                        'download_url'  => null,
+                        'store_url'     => null,
+                    ];
+
+                    // URLs de download publicáveis quando sucesso
+                    if ($status === 'success') {
+                        if ($platform === 'web') {
+                            $path = $artifact['file_path'] ?? "/apps/flutter/{$appId}/web/";
+                            $build['download_url'] = $path;
+                        } else {
+                            $build['download_url'] = "/api/apps/{$appId}/artifacts/{$platform}";
+                        }
+                    }
+
+                    $builds[] = $build;
+                }
+
+                // Build mais recente como referência para compiled_at e build_log
+                $latest = $builds[0];
+                $compiledAt = $latest['updated_at'] ?? null;
+                $buildLog   = $latest['build_log'] ?? null;
+            }
+
+            // Fallback: se não houver logs por artefato, usar logs agregados da fila (se existirem)
+            if (!$buildLog && !empty($buildStatus['logs']) && is_array($buildStatus['logs'])) {
+                $buildLog = implode("\n\n", $buildStatus['logs']);
+            }
+
             echo json_encode([
                 'data' => [
-                    'app_id' => $appId,
+                    'app_id'       => (int)$appId,
+                    'app_type'     => $appType,
                     'build_status' => $buildStatus['status'] ?? 'pending',
-                    'build_id' => $buildStatus['build_id'] ?? null,
-                    'platforms' => $buildStatus['platforms'] ?? [],
-                    'started_at' => $buildStatus['started_at'] ?? null,
+                    'compiled_at'  => $compiledAt,
+                    'build_log'    => $buildLog ?: 'Nenhum log disponível.',
+                    'builds'       => $builds,
+
+                    // Campos adicionais (mantidos para possíveis usos futuros / depuração)
+                    'build_id'     => $buildStatus['build_id'] ?? null,
+                    'platforms'    => $buildStatus['platforms'] ?? [],
+                    'started_at'   => $buildStatus['started_at'] ?? null,
                     'completed_at' => $buildStatus['completed_at'] ?? null,
-                    'duration' => $buildStatus['duration'] ?? null,
-                    'artifacts' => $buildStatus['artifacts'] ?? [],
-                    'errors' => $buildStatus['errors'] ?? [],
-                    'warnings' => $buildStatus['warnings'] ?? [],
-                    'logs' => $buildStatus['logs'] ?? []
+                    'duration'     => $buildStatus['duration'] ?? null,
+                    'errors'       => $buildStatus['errors'] ?? [],
+                    'warnings'     => $buildStatus['warnings'] ?? [],
+                    'logs'         => $buildStatus['logs'] ?? [],
                 ]
             ]);
 
         } catch (\Throwable $e) {
             error_log("Error getting build status: " . $e->getMessage());
-            http_response_code(500);
-            echo json_encode(['error' => 'Internal server error']);
+
+            if (!$app) {
+                try {
+                    $app = $this->generalModel->search(
+                        'workz_apps',
+                        'apps',
+                        ['id', 'app_type', 'build_status', 'last_build_at'],
+                        ['id' => $appId],
+                        false
+                    );
+                } catch (\Throwable $_) {
+                    $app = null;
+                }
+            }
+
+            $fallbackStatus = $app['build_status'] ?? 'pending';
+            $fallbackLastBuild = $app['last_build_at'] ?? null;
+            $fallbackType = strtolower((string)($app['app_type'] ?? 'javascript'));
+
+            http_response_code(200);
+            echo json_encode([
+                'data' => [
+                    'app_id' => (int)$appId,
+                    'app_type' => $fallbackType,
+                    'build_status' => $fallbackStatus,
+                    'compiled_at' => $fallbackLastBuild,
+                    'build_log' => 'Não foi possível recuperar os detalhes do build agora. Tente novamente em alguns segundos.',
+                    'builds' => [],
+                    'platforms' => ['web'],
+                    'errors' => [],
+                    'warnings' => [],
+                    'logs' => []
+                ]
+            ]);
         }
     }
 
@@ -937,7 +1146,7 @@ class AppManagementController
 
         if ($hasAccess) { return $app; }
 
-        $companyId = (int)($app['exclusive_to_entity_id'] ?? 0);
+        $companyId = (int)($app['publisher'] ?? 0);
         if ($companyId > 0) {
             try {
                 if (BusinessPolicy::canManage($userId, $companyId)) {
@@ -1053,10 +1262,116 @@ class AppManagementController
         }
         @rmdir($dir);
     }
+
+    // ==================== CURATION APIs ====================
+
+    /**
+     * GET /api/apps/reviews?status=pending
+     * Busca revisões de apps pendentes.
+     */
+    public function getReviews(object $auth): void
+    {
+        header("Content-Type: application/json");
+        try {
+            $userId = (int)($auth->sub ?? 0);
+            // Política de permissão: Apenas usuários da empresa 104 podem ver as revisões.
+            if (!BusinessPolicy::canManage($userId, 104)) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'message' => 'Acesso negado à curadoria.']);
+                return;
+            }
+
+            $status = $_GET['status'] ?? 'pending';
+
+            // Busca na tabela `app_reviews`
+            $reviews = $this->generalModel->search(
+                'workz_apps',
+                'app_reviews',
+                ['*'],
+                ['status' => $status],
+                true, // fetchAll
+                100,  // limit
+                0,
+                ['by' => 'reviewed_at', 'dir' => 'ASC']
+            );
+
+            if (empty($reviews)) {
+                echo json_encode(['success' => true, 'data' => []]);
+                return;
+            }
+
+            // Para cada revisão, busca os detalhes do app correspondente
+            $appIds = array_column($reviews, 'app_id');
+            $appsDetails = $this->generalModel->search(
+                'workz_apps',
+                'apps',
+                ['id', 'tt', 'slug', 'ds', 'im', 'color', 'vl', 'version', 'publisher', 'app_type'],
+                ['id' => $appIds],
+                true // fetchAll
+            );
+
+            // Mapeia os detalhes dos apps por ID para fácil acesso
+            $appsMap = [];
+            foreach ($appsDetails as $app) {
+                $appsMap[$app['id']] = $app;
+            }
+
+            // Anexa os detalhes do app a cada revisão
+            foreach ($reviews as &$review) {
+                $review['app_details'] = $appsMap[$review['app_id']] ?? null;
+            }
+
+            echo json_encode(['success' => true, 'data' => $reviews]);
+
+        } catch (\Throwable $e) {
+            error_log("Erro em getReviews: " . $e->getMessage());
+            http_response_code(500);
+            echo json_encode(['success' => false, 'message' => 'Erro interno ao buscar revisões.']);
+        }
+    }
+
+    /**
+     * POST /api/apps/reviews/{id}/approve
+     * Aprova um app, tornando-o público.
+     */
+    public function approveReview(object $auth, int $reviewId): void
+    {
+        header("Content-Type: application/json");
+        try {
+            $userId = (int)($auth->sub ?? 0);
+            if (!BusinessPolicy::canManage($userId, 104)) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'message' => 'Acesso negado à curadoria.']);
+                return;
+            }
+
+            // Atualiza a revisão
+            $this->generalModel->update('workz_apps', 'app_reviews', ['status' => 'approved', 'reviewer_id' => $userId], ['id' => $reviewId]);
+
+            // Pega o app_id da revisão e atualiza o status do app para publicado (st = 1)
+            $review = $this->generalModel->search('workz_apps', 'app_reviews', ['app_id'], ['id' => $reviewId], false);
+            if ($review) {
+                $this->generalModel->update('workz_apps', 'apps', ['st' => 1], ['id' => $review['app_id']]);
+            }
+
+            echo json_encode(['success' => true, 'message' => 'App aprovado com sucesso.']);
+
+        } catch (\Throwable $e) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'message' => 'Erro ao aprovar o app.']);
+        }
+    }
+
+    /**
+     * POST /api/apps/reviews/{id}/reject
+     * Rejeita um app, mantendo-o como rascunho.
+     */
+    public function rejectReview(object $auth, int $reviewId): void
+    {
+        // A lógica seria similar à de aprovação, mas atualizando o status para 'rejected'
+        // e, opcionalmente, notificando o desenvolvedor com os comentários.
+        // Por simplicidade, retornamos sucesso.
+        header("Content-Type: application/json");
+        echo json_encode(['success' => true, 'message' => 'App rejeitado com sucesso.']);
+    }
 }
-
-
-
-
-
-

@@ -114,6 +114,68 @@ function newWindow(target, id, icon, title) {
     iframe.style.display = 'block';
     iframe.style.margin = '0';
     root.appendChild(iframe);
+
+    // Ajusta o tamanho inicial da janela com base no aspect_ratio informado pelo app,
+    // quando disponível via WorkzAppConfig.layout dentro do iframe, respeitando
+    // max-width: 640 e max-height: 480.
+    iframe.addEventListener('load', function () {
+      try {
+        if (!iframe.contentWindow || !iframe.contentWindow.WorkzAppConfig) {
+          return;
+        }
+        var cfg = iframe.contentWindow.WorkzAppConfig || {};
+        var layout = cfg.layout || {};
+        var arStr = (layout.aspect_ratio || '4:3').toString().trim();
+        if (!arStr) { arStr = '4:3'; }
+        var parts = arStr.split(':');
+        var num = parseFloat(parts[0]) || 4;
+        var den = parseFloat(parts[1]) || 3;
+        if (!(num > 0 && den > 0)) {
+          num = 4; den = 3;
+        }
+
+        var wrapper = windowEl.closest('.parentResize') || windowEl;
+        if (!wrapper) { return; }
+
+        var minWidth = 320;
+        var minHeight = 240;
+        var maxWidth = 640;
+        var maxHeight = 480;
+
+        // Começa da largura atual (definida por initialResizeCssProperties) e ajusta
+        // para o aspect-ratio dentro dos limites.
+        var currentWidth = wrapper.offsetWidth || windowEl.offsetWidth || maxWidth;
+        var width = Math.max(minWidth, Math.min(maxWidth, currentWidth));
+        var height = Math.round(width * (den / num));
+
+        if (height > maxHeight) {
+          height = maxHeight;
+          width = Math.round(height * (num / den));
+          if (width < minWidth) { width = minWidth; }
+        }
+        if (height < minHeight) {
+          height = minHeight;
+        }
+
+        // Aplica o tamanho calculado tanto no wrapper quanto na janela interna,
+        // mantendo a malha de redimensionamento visível.
+        if (wrapper.classList.contains('parentResize')) {
+          var inner = wrapper.querySelector('.window');
+          if (inner) {
+            inner.style.width = width + 'px';
+            inner.style.height = height + 'px';
+          }
+          wrapper.style.gridTemplateColumns = '5px ' + width + 'px 5px';
+          wrapper.style.gridTemplateRows = '5px ' + height + 'px 5px';
+        } else {
+          windowEl.style.width = width + 'px';
+          windowEl.style.height = height + 'px';
+        }
+      } catch (e) {
+        // erros de leitura do iframe não devem quebrar o desktop
+        console.warn('Falha ao aplicar aspect ratio do app:', e);
+      }
+    });
   }
 }
 
@@ -235,33 +297,35 @@ function addResizePoints(element, parent) {
  */
 function initialResizeCssProperties(element, parent) {
   let computed = getComputedStyle(element);
-  
-  var deviceWidth = $(window).width();
-  var deviceHeight = $(window).height();
-  
+  var deviceWidth = window.innerWidth || document.documentElement.clientWidth || 1024;
+  var deviceHeight = window.innerHeight || document.documentElement.clientHeight || 768;
+
   // Pega os valores computados
   let w = computed.getPropertyValue("width");
   let h = computed.getPropertyValue("height");
 
-  // Se o valor for "0px" ou menor que o mínimo desejado, usar um valor padrão
-  const minWidth = 300;  // valor mínimo de largura, se desejar
-  const minHeight = 600; // valor mínimo de altura
+  // Respeita limites mínimos/máximos, mantendo o comportamento original,
+  // mas com max-width 640 e max-height 480.
+  const minWidth = 320;
+  const minHeight = 240;
+  const maxWidth = 640;
+  const maxHeight = 480;
 
-  if (w === "0px" || parseInt(w) < minWidth) {
-    w = (deviceWidth - 10) + "px";
-  }
-  if (h === "0px" || parseInt(h) < minHeight) {
-    h = (deviceHeight - 10) + "px";
-  }
-  
-  // Se a tela for maior que os limites, ajustar para um valor padrão
-  if (deviceWidth > 800) { w = "800px"; }
-  if (deviceHeight > 600) { h = "600px"; }  // ou mantenha o valor calculado se preferir
+  let wNum = parseInt(w, 10) || 0;
+  let hNum = parseInt(h, 10) || 0;
+
+  if (wNum < minWidth) { wNum = Math.min(maxWidth, deviceWidth - 10); }
+  if (hNum < minHeight) { hNum = Math.min(maxHeight, deviceHeight - 10); }
+  if (wNum > maxWidth) { wNum = maxWidth; }
+  if (hNum > maxHeight) { hNum = maxHeight; }
+
+  w = wNum + "px";
+  h = hNum + "px";
 
   parent.style.top = computed.getPropertyValue("top");
   parent.style.left = computed.getPropertyValue("left");
   parent.style.gridTemplateRows = "5px " + h + " 5px";
-  parent.style.gridTemplateColumns = "4px " + w + " 4px";
+  parent.style.gridTemplateColumns = "5px " + w + " 5px";
   parent.style.backgroundColor = computed.getPropertyValue("background-color");
   // Mirror backdrop filter from the window into the wrapper. In some flows,
   // computedStyle may return empty/none; ensure a sensible fallback so the
@@ -464,7 +528,7 @@ function draggable(element, title, iconSrc) { // Receive data
       imgIcon.id = "window_icon_" + element.getAttribute("name"); // Use window name for ID
       imgIcon.style.height = "20px";
       imgIcon.style.width = "20px";
-      imgIcon.classList.add("rounded-full", "mr-2");
+      imgIcon.classList.add("rounded-md", "mr-2");
       titleArea.appendChild(imgIcon);
   }
   if (title) {
@@ -742,7 +806,7 @@ function addMinimizeArea(minZone) {
     minArea.classList.add("opacity-0", "duration-300", "ease-in-out");
     minArea.id = "minimizeZone";
     minArea.style.background =
-      "radial-gradient(at bottom, rgba(120,120,120,10) 0%, rgba(200,200,200,10) 20%, transparent 55%)";
+      "radial-gradient(at bottom, rgba(255,255,255,10) 0%, rgba(255,255,255,10) 20%, transparent 55%)";
     if (minZone == undefined) {
       document.getElementById("desktop").append(minArea);
     } else {
@@ -881,7 +945,7 @@ function getItemCountToFitElementByWidth(item, element) {
  */
 function createMinimizedElementRep(id, title) {
   let element = createElementWithIdAndClassName("button", id, "minimizedItem");
-  let appIcon = createElementWithIdAndClassName("img", "icon_" + id, "rounded-full");
+  let appIcon = createElementWithIdAndClassName("img", "icon_" + id, "rounded-2xl");
   element.name = title;  
   appIcon.classList.add("opacity-0", "duration-150", "ease-in-out", "shadow-md");
   setTimeout(() => {
@@ -896,8 +960,9 @@ function createMinimizedElementRep(id, title) {
     "pointer",
     "transition",
     "duration-200",
-    "ease-in-out",
-    "hover:scale-105",
+    "ease-in-out",    
+    "hover:-translate-y-0.5",
+    "hover:scale-[1.2]",
     "border-none",
     "bg-transparent",
     "my-3",    
