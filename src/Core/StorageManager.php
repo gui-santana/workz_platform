@@ -1208,6 +1208,61 @@ class StorageManager
     /**
      * Create initial files for filesystem storage
      */
+    private function buildWorkzManifestFromAppData(array $appData): array
+    {
+        $name = (string)($appData['tt'] ?? $appData['title'] ?? 'Workz App');
+        $slug = (string)($appData['slug'] ?? 'workz-app');
+        $version = (string)($appData['version'] ?? '1.0.0');
+        $appType = strtolower((string)($appData['app_type'] ?? 'javascript'));
+        $color = (string)($appData['color'] ?? '#3b82f6');
+
+        $entityType = isset($appData['entity_type']) ? (int)$appData['entity_type'] : 1;
+        $contextMode = $entityType === 2 ? 'business' : 'user';
+
+        $scopes = $appData['scopes'] ?? [];
+        if (is_string($scopes)) {
+            $decoded = json_decode($scopes, true);
+            $scopes = is_array($decoded) ? $decoded : [];
+        }
+        $storage = [];
+        foreach ((array)$scopes as $scope) {
+            if (strpos($scope, 'storage.kv') === 0) $storage[] = 'kv';
+            if (strpos($scope, 'storage.docs') === 0) $storage[] = 'docs';
+            if (strpos($scope, 'storage.blobs') === 0) $storage[] = 'blobs';
+        }
+        $storage = array_values(array_unique($storage));
+
+        $price = (float)($appData['vl'] ?? $appData['price'] ?? 0);
+        $entitlements = [
+            'type' => ($price > 0) ? 'paid' : 'free',
+            'price' => $price
+        ];
+
+        return [
+            'id' => $slug,
+            'name' => $name,
+            'version' => $version,
+            'appType' => $appType,
+            'entry' => 'dist/index.html',
+            'contextRequirements' => [
+                'mode' => $contextMode,
+                'allowContextSwitch' => true
+            ],
+            'permissions' => [
+                'view' => [],
+                'scopes' => $scopes,
+                'storage' => $storage,
+                'externalApi' => []
+            ],
+            'uiShell' => [
+                'layout' => 'standard',
+                'theme' => ['primary' => $color]
+            ],
+            'routes' => [],
+            'entitlements' => $entitlements
+        ];
+    }
+
     private function createInitialFiles(string $path, array $appData): void
     {
         $appType = $appData['app_type'] ?? 'javascript';
@@ -1241,6 +1296,23 @@ class StorageManager
                     file_put_contents($full, (string)$content);
                 }
             }
+        }
+
+        // Write Workz manifest (workz.app.json)
+        $manifestPayload = null;
+        if (!empty($appData['manifest_json'])) {
+            $manifestPayload = is_array($appData['manifest_json'])
+                ? $appData['manifest_json']
+                : json_decode((string)$appData['manifest_json'], true);
+        }
+        if (!is_array($manifestPayload)) {
+            $manifestPayload = $this->buildWorkzManifestFromAppData($appData);
+        }
+        $manifestDir = $path . '/manifest';
+        if (!is_dir($manifestDir)) { mkdir($manifestDir, 0755, true); }
+        $manifestPath = $manifestDir . '/workz.app.json';
+        if (!file_exists($manifestPath)) {
+            file_put_contents($manifestPath, json_encode($manifestPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
         }
 
         // Create initial source files when nothing was provided

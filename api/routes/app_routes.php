@@ -3,6 +3,7 @@
 
 use Workz\Platform\Core\Router;
 use Workz\Platform\Controllers\AppsController;
+use Workz\Platform\Controllers\PublicController;
 use Workz\Platform\Middleware\AuthMiddleware;
 
 return function(Router $router) {
@@ -15,4 +16,8 @@ return function(Router $router) {
     $router->add('GET', '/api/apps/catalog', [AppsController::class, 'catalog']);
     $router->add('GET', '/api/apps/manifest/([a-z0-9-]+)', [AppsController::class, 'manifest']);
     $router->add('POST', '/api/apps/sso', [AppsController::class, 'sso'], [AuthMiddleware::class, 'handle']);    
+
+    // Rotas públicas de entidades (sem middleware)
+    $router->add('GET', '/api/public/profile/(\d+)', [PublicController::class, 'profile']);
+    $router->add('GET', '/api/public/business/(\d+)', [PublicController::class, 'business']);
 };

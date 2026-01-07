@@ -25,12 +25,13 @@
 
   // Authentication Module
   class AuthenticationModule {
-    constructor() {
+    constructor(options = {}) {
       this.token = null;
       this.user = null;
       this.context = null;
       this.isAppToken = false;
       this.ready = false;
+      this.onAuthUpdate = typeof options.onAuthUpdate === 'function' ? options.onAuthUpdate : null;
     }
 
     decodeJwtPayload(token) {
@@ -55,6 +56,24 @@
       const payload = this.decodeJwtPayload(token);
       const aud = payload?.aud || '';
       return (typeof aud === 'string') && aud.startsWith('app:');
+    }
+
+    getContextFromToken(token) {
+      const payload = this.decodeJwtPayload(token);
+      const rawCtx = payload?.ctx || payload?.context;
+      if (!rawCtx || typeof rawCtx !== 'object') return null;
+      const type = String(rawCtx.type || '').toLowerCase();
+      const id = parseInt(rawCtx.id, 10);
+      if (!type || !Number.isFinite(id) || id <= 0) return null;
+      return Object.assign({}, rawCtx, { type, id });
+    }
+
+    notifyAuthUpdate() {
+      if (this.onAuthUpdate) {
+        try {
+          this.onAuthUpdate({ token: this.token, user: this.user, context: this.context });
+        } catch (_) {}
+      }
     }
 
     parseTokenFromUrl() {
@@ -88,6 +107,10 @@
         this.token = localStorage.getItem('jwt_token');
         this.isAppToken = this.isAppScopedToken(this.token);
       }
+
+      if (!this.context && this.token) {
+        this.context = this.getContextFromToken(this.token);
+      }
       
       if (this.token && !this.user) {
         try {
@@ -98,6 +121,7 @@
       }
       
       this.ready = true;
+      this.notifyAuthUpdate();
       return true;
     }
 
@@ -108,6 +132,9 @@
         if (!this.isAppToken) {
           localStorage.setItem('jwt_token', this.token);
         }
+      }
+      if (!this.context && this.token) {
+        this.context = this.getContextFromToken(this.token);
       }
 
       return new Promise((resolve) => {
@@ -125,7 +152,8 @@
             if (this.token && !this.isAppToken) {
               localStorage.setItem('jwt_token', this.token);
             }
-            
+
+            this.notifyAuthUpdate();
             this.finishInit(apiClient, resolve);
           }
         };
@@ -156,6 +184,7 @@
         }
       }
       this.ready = true;
+      this.notifyAuthUpdate();
       resolve(true);
     }
 
@@ -186,6 +215,7 @@
     constructor(config = {}) {
       this.baseUrl = config.baseUrl || '/api';
       this.authModule = config.authModule;
+      this.guard = config.guard || null;
     }
 
     buildUrl(path) {
@@ -207,6 +237,21 @@
 
     async request(method, path, body = null) {
       const url = this.buildUrl(path);
+      if (typeof this.guard === 'function') {
+        try {
+          const guardResult = this.guard({ method, path, body });
+          if (guardResult && guardResult.blocked) {
+            return {
+              success: false,
+              status: guardResult.status || 403,
+              code: guardResult.code || 'blocked',
+              message: guardResult.message || 'Request blocked by SDK guard'
+            };
+          }
+        } catch (e) {
+          return { success: false, status: 500, code: 'guard_error', message: e?.message || 'Guard error' };
+        }
+      }
       const options = {
         method: method.toUpperCase(),
         headers: this.getHeaders(body !== null)
@@ -284,6 +329,21 @@
       this.authModule = authModule;
     }
 
+    getContextScope() {
+      const ctx = this.authModule.getContext ? this.authModule.getContext() : null;
+      if (ctx && typeof ctx === 'object') {
+        const rawType = String(ctx.type || '').toLowerCase();
+        const id = parseInt(ctx.id, 10);
+        const scopeType = rawType === 'business' || rawType === 'team' || rawType === 'user'
+          ? rawType
+          : null;
+        if (scopeType && Number.isFinite(id) && id > 0) {
+          return { scopeType, scopeId: id };
+        }
+      }
+      return this.getUserScope();
+    }
+
     getUserScope() {
       const user = this.authModule.getUser();
       return {
@@ -300,14 +360,14 @@
             key: data.key,
             value: data.value,
             ttl: data.ttl,
-            ...this.getUserScope()
+            ...this.getContextScope()
           });
         },
 
         get: async (key) => {
           const params = new URLSearchParams({
             key: key,
-            ...this.getUserScope()
+            ...this.getContextScope()
           });
           return this.apiClient.get(`/appdata/kv?${params}`);
         },
@@ -315,7 +375,7 @@
         delete: async (key) => {
           const params = new URLSearchParams({
             key: key,
-            ...this.getUserScope()
+            ...this.getContextScope()
           });
           const url = this.apiClient.buildUrl(`/appdata/kv?${params}`);
           const response = await fetch(url, {
@@ -326,7 +386,7 @@
         },
 
         list: async () => {
-          const params = new URLSearchParams(this.getUserScope());
+          const params = new URLSearchParams(this.getContextScope());
           return this.apiClient.get(`/appdata/kv?${params}`);
         }
       };
@@ -340,7 +400,7 @@
             docType: 'user_data',
             docId: id,
             document: document,
-            ...this.getUserScope()
+            ...this.getContextScope()
           });
         },
 
@@ -348,12 +408,12 @@
           return this.apiClient.post('/appdata/docs/query', {
             docType: 'user_data',
             filters: { docId: id },
-            ...this.getUserScope()
+            ...this.getContextScope()
           });
         },
 
         delete: async (id) => {
-          const params = new URLSearchParams(this.getUserScope());
+          const params = new URLSearchParams(this.getContextScope());
           const url = this.apiClient.buildUrl(`/appdata/docs/user_data/${encodeURIComponent(id)}?${params}`);
           const response = await fetch(url, {
             method: 'DELETE',
@@ -366,7 +426,7 @@
           return this.apiClient.post('/appdata/docs/query', {
             docType: 'user_data',
             filters: {},
-            ...this.getUserScope()
+            ...this.getContextScope()
           });
         },
 
@@ -374,7 +434,7 @@
           return this.apiClient.post('/appdata/docs/query', {
             docType: 'user_data',
             filters: query,
-            ...this.getUserScope()
+            ...this.getContextScope()
           });
         }
       };
@@ -387,7 +447,7 @@
           const formData = new FormData();
           formData.append('name', name);
           formData.append('file', file);
-          const scope = this.getUserScope();
+          const scope = this.getContextScope();
           formData.append('scopeType', scope.scopeType);
           formData.append('scopeId', scope.scopeId);
 
@@ -403,7 +463,7 @@
         },
 
         get: async (id) => {
-          const params = new URLSearchParams(this.getUserScope());
+          const params = new URLSearchParams(this.getContextScope());
           if (this.authModule.getToken()) {
             params.set('token', this.authModule.getToken());
           }
@@ -419,7 +479,7 @@
         },
 
         delete: async (id) => {
-          const params = new URLSearchParams(this.getUserScope());
+          const params = new URLSearchParams(this.getContextScope());
           const url = this.apiClient.buildUrl(`/appdata/blobs/delete/${encodeURIComponent(id)}?${params}`);
           const response = await fetch(url, {
             method: 'DELETE',
@@ -429,7 +489,7 @@
         },
 
         list: async () => {
-          const params = new URLSearchParams(this.getUserScope());
+          const params = new URLSearchParams(this.getContextScope());
           return this.apiClient.get(`/appdata/blobs/list?${params}`);
         }
       };
@@ -520,6 +580,11 @@
       this.payments = null;
       this.listeners = {};
       this.initialized = false;
+      this.appConfig = null;
+      this.manifest = null;
+      this.contextAllowed = true;
+      this.contextDenyReason = null;
+      this._postMessageHandler = null;
     }
 
     async init(config = {}) {
@@ -532,7 +597,13 @@
       this.platform = PlatformDetector.detect();
       
       // Initialize authentication module
-      this.auth = new AuthenticationModule();
+      this.auth = new AuthenticationModule({
+        onAuthUpdate: () => {
+          if (this.manifest) {
+            this.refreshContextAccess();
+          }
+        }
+      });
       
       // Initialize API client
       this.apiClient = new ApiClient({
@@ -620,8 +691,36 @@
       } else {
         authResult = await this.auth.initStandalone(this.apiClient);
       }
-      
+
+      this.appConfig = config.appConfig || global.WorkzAppConfig || {};
+      this.manifest = this.resolveManifest(this.appConfig.manifest || this.appConfig.workzManifest || null);
+      this.refreshContextAccess();
+      this.apiClient.guard = () => {
+        if (this.contextAllowed) return null;
+        const required = this.contextDenyReason?.required || 'unknown';
+        const received = this.contextDenyReason?.received || 'unknown';
+        return {
+          blocked: true,
+          status: 403,
+          code: 'context_not_allowed',
+          message: `Contexto inválido para o app (necessário: ${required}, recebido: ${received}).`
+        };
+      };
+
       this.initialized = true;
+
+      if (!this._postMessageHandler && typeof window !== 'undefined') {
+        this._postMessageHandler = (ev) => {
+          const data = ev?.data || {};
+          if (!data || typeof data !== 'object') return;
+          const type = data.type;
+          if (!type || typeof type !== 'string') return;
+          if (type === 'workz-sdk:init' || type === 'workz-sdk:auth') return;
+          const payload = (data.payload !== undefined) ? data.payload : data;
+          this.dispatchLocal(type, payload);
+        };
+        window.addEventListener('message', this._postMessageHandler, false);
+      }
       
       // Emit ready event
       this.emit('sdk:ready', {
@@ -631,6 +730,50 @@
       });
       
       return authResult;
+    }
+
+    resolveManifest(raw) {
+      if (raw && typeof raw === 'object') return raw;
+      if (typeof raw === 'string' && raw.trim() !== '') {
+        try {
+          const parsed = JSON.parse(raw);
+          return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (_) {
+          return null;
+        }
+      }
+      return null;
+    }
+
+    enforceContextRequirements() {
+      if (!this.manifest || !this.manifest.contextRequirements) {
+        this.contextDenyReason = null;
+        return true;
+      }
+      const mode = String(this.manifest.contextRequirements.mode || '').toLowerCase();
+      if (!mode || mode === 'hybrid') {
+        this.contextDenyReason = null;
+        return true;
+      }
+      const ctx = this.getContext() || {};
+      const ctxType = String(ctx.type || '').toLowerCase();
+      const allowed = (ctxType === mode);
+      if (!allowed) {
+        this.contextDenyReason = { required: mode, received: ctxType || 'none' };
+        this.emit('app:context_denied', {
+          required: mode,
+          received: ctxType || 'none',
+          context: ctx
+        });
+      } else {
+        this.contextDenyReason = null;
+      }
+      return allowed;
+    }
+
+    refreshContextAccess() {
+      this.contextAllowed = this.enforceContextRequirements();
+      return this.contextAllowed;
     }
 
     loadAdapter() {
@@ -660,7 +803,7 @@
       }
     }
 
-    emit(type, payload) {
+    dispatchLocal(type, payload) {
       if (this.listeners[type]) {
         this.listeners[type].forEach(callback => {
           try {
@@ -670,7 +813,10 @@
           }
         });
       }
-      
+    }
+
+    emit(type, payload) {
+      this.dispatchLocal(type, payload);
       // Also emit to parent if in iframe
       if (this.adapter) {
         this.adapter.postMessage(type, payload);
@@ -692,6 +838,10 @@
 
     getPlatform() {
       return this.platform;
+    }
+
+    getManifest() {
+      return this.manifest;
     }
 
     isReady() {

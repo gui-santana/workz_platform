@@ -43,6 +43,16 @@ window.StoreApp = {
         accessLevel: 1,
         version: "1.0.0",
         entityType: 1,
+        contextMode: "user",
+        allowContextSwitch: true,
+        usesSdk: true,
+        shellHeader: true,
+        shellSidebar: true,
+        shellFooterMenu: false,
+        shellHeaderActions: "",
+        shellSidebarItems: "",
+        shellSidebarForms: "",
+        shellFooterItems: "",
         termsAccepted: false,
         price: 0,
         scopes: [],
@@ -1054,6 +1064,15 @@ window.StoreApp = {
                                     <li><i class="fas fa-lock text-secondary"></i> <strong>Exlusiva:</strong> Disponibilizado para negócios com permissão explícita. Membros do negócio recebem acesso direto via Área de Trabalho.</li>
                                 </ul>
                             </div>
+                            <div class="form-check mt-2" id="sdk-required-container">
+                                <input class="form-check-input" type="checkbox" id="uses-sdk" checked>
+                                <label class="form-check-label" for="uses-sdk">
+                                    <i class="fas fa-plug text-primary"></i> Este app usa WorkzSDK (requer login)
+                                </label>
+                                <div class="form-text small">
+                                    Ative quando seu app precisa de usuário/contexto, storage ou APIs protegidas.
+                                </div>
+                            </div>
                         </div>
                         <!-- Seletor de negócio (apenas quando Privado) -->
                         <div class="mb-3" id="private-company-container" style="display:none;">
@@ -1078,6 +1097,24 @@ window.StoreApp = {
                                 <option value="1">Usuários</option>
                                 <option value="2">Negócios</option>
                             </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="context-mode" class="form-label">Contexto do App (Workz)</label>
+                            <select class="form-select" id="context-mode">
+                                <option value="user">Usuários</option>
+                                <option value="business">Negócios</option>
+                                <option value="team">Equipes</option>
+                                <option value="hybrid">Híbrido (user + business + team)</option>
+                            </select>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="context-switch" checked>
+                                <label class="form-check-label" for="context-switch">
+                                    Permitir troca de contexto dentro do app
+                                </label>
+                            </div>
+                            <div class="form-text small">
+                                Define qual entidade será usada como contexto do WorkzSDK.
+                            </div>
                         </div>
                         <!-- Plataformas alvo para build (apenas apps Flutter) -->
                         <div class="mb-3" id="build-platforms-container" style="display:none;">
@@ -1181,6 +1218,57 @@ window.StoreApp = {
                     <div class="form-text mt-2">
                         <i class="fas fa-info-circle"></i> 
                         Seu app só poderá acessar os recursos marcados aqui. Você pode alterar essas permissões depois.
+                    </div>
+                </div>
+
+                <!-- Shell padrão Workz -->
+                <div class="mb-4">
+                    <label class="form-label">Shell padrão Workz</label>
+                    <p class="text-muted small">Ative o layout padrão e configure ações básicas para o seu app.</p>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="shell-header" checked>
+                                <label class="form-check-label" for="shell-header">
+                                    Header padrão
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="shell-sidebar" checked>
+                                <label class="form-check-label" for="shell-sidebar">
+                                    Menu lateral padrão
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="shell-footer">
+                                <label class="form-check-label" for="shell-footer">
+                                    Menu de rodapé (mobile)
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="shell-header-actions" class="form-label">Botões do header</label>
+                                    <textarea class="form-control" id="shell-header-actions" rows="3" placeholder="Ex: Novo pedido | action:new-order"></textarea>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="shell-sidebar-items" class="form-label">Itens do menu lateral</label>
+                                    <textarea class="form-control" id="shell-sidebar-items" rows="3" placeholder="Ex: Dashboard | route:/dashboard"></textarea>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="shell-sidebar-forms" class="form-label">Formulários rápidos</label>
+                                    <textarea class="form-control" id="shell-sidebar-forms" rows="3" placeholder="Ex: Solicitar suporte | form:support"></textarea>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="shell-footer-items" class="form-label">Itens do menu de rodapé</label>
+                                    <textarea class="form-control" id="shell-footer-items" rows="3" placeholder="Ex: Início | route:/inicio"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-text small">
+                        Use uma linha por item. Formato sugerido: <code>Título | ação</code>.
                     </div>
                 </div>
 
@@ -1326,6 +1414,8 @@ window.StoreApp = {
                                         <ul class="list-unstyled mt-2">
                                             <li><i class="fas fa-lock"></i> Acesso: <span id="final-access">Público</span></li>
                                             <li><i class="fas fa-users"></i> Entidade: <span id="final-entity">Geral</span></li>
+                                            <li><i class="fas fa-project-diagram"></i> Contexto: <span id="final-context">Usuários</span></li>
+                                            <li><i class="fas fa-layer-group"></i> Shell: <span id="final-shell">Padrão</span></li>
                                         </ul>
                                     </div>
                                     <div class="col-12 mt-2">
@@ -2465,6 +2555,14 @@ window.StoreApp = {
             }
         }
 
+        if (type === 'flutter') {
+            this.appData.usesSdk = true;
+        }
+        this.enforceAccessLevelConsistency();
+        if (this.currentStep === 4) {
+            setTimeout(() => this.applyStep4State(), 50);
+        }
+
         // Show/hide token field based on app type
         this.toggleTokenField();
 
@@ -3220,6 +3318,52 @@ if (document.readyState === 'loading') {
         this.appData.color = appData.color || '#3b82f6';
         this.appData.scopes = appData.scopes ? (Array.isArray(appData.scopes) ? appData.scopes : JSON.parse(appData.scopes)) : [];
 
+        this.appData.contextMode = 'user';
+        this.appData.allowContextSwitch = true;
+        this.appData.shellHeader = true;
+        this.appData.shellSidebar = true;
+        this.appData.shellFooterMenu = false;
+        this.appData.shellHeaderActions = '';
+        this.appData.shellSidebarItems = '';
+        this.appData.shellSidebarForms = '';
+        this.appData.shellFooterItems = '';
+
+        const manifestRaw = appData.manifest || appData.manifest_json;
+        let manifest = null;
+        if (manifestRaw && typeof manifestRaw === 'object') {
+            manifest = manifestRaw;
+        } else if (typeof manifestRaw === 'string' && manifestRaw.trim()) {
+            try { manifest = JSON.parse(manifestRaw); } catch (_) { manifest = null; }
+        }
+        if (manifest && typeof manifest === 'object') {
+            const ctxMode = manifest.contextRequirements?.mode;
+            if (ctxMode) this.appData.contextMode = String(ctxMode).toLowerCase();
+            if (typeof manifest.contextRequirements?.allowContextSwitch === 'boolean') {
+                this.appData.allowContextSwitch = manifest.contextRequirements.allowContextSwitch;
+            }
+            const shell = manifest.uiShell || {};
+            if (typeof shell.header?.enabled === 'boolean') {
+                this.appData.shellHeader = shell.header.enabled;
+            }
+            if (typeof shell.sidebar?.enabled === 'boolean') {
+                this.appData.shellSidebar = shell.sidebar.enabled;
+            }
+            const footerShell = shell.footerMenu || shell.footer || {};
+            if (typeof footerShell.enabled === 'boolean') {
+                this.appData.shellFooterMenu = footerShell.enabled;
+            }
+            this.appData.shellHeaderActions = this.serializeShellItems(shell.header?.buttons || shell.header?.actions || []);
+            this.appData.shellSidebarItems = this.serializeShellItems(shell.sidebar?.items || shell.sidebar?.menu || []);
+            this.appData.shellSidebarForms = this.serializeShellItems(shell.sidebar?.forms || []);
+            this.appData.shellFooterItems = this.serializeShellItems(footerShell.items || []);
+        }
+
+        if (appData.context_mode || appData.contextMode) {
+            this.appData.contextMode = String(appData.context_mode || appData.contextMode).toLowerCase();
+        }
+
+        this.appData.usesSdk = (this.appType === 'flutter') || this.appData.scopes.length > 0 || this.appData.accessLevel > 0;
+
         // Set company data
         if (appData.company_id || appData.exclusive_to_entity_id) {
             const companyId = appData.company_id || appData.exclusive_to_entity_id;
@@ -3381,6 +3525,16 @@ if (document.readyState === 'loading') {
             accessLevel: 1,
             version: "1.0.0",
             entityType: 1,
+            contextMode: "user",
+            allowContextSwitch: true,
+            usesSdk: true,
+            shellHeader: true,
+            shellSidebar: true,
+            shellFooterMenu: false,
+            shellHeaderActions: "",
+            shellSidebarItems: "",
+            shellSidebarForms: "",
+            shellFooterItems: "",
             termsAccepted: false,
             price: 0,
             scopes: [],
@@ -3833,6 +3987,9 @@ if (document.readyState === 'loading') {
             formData.entity_type = parseInt(entityField.value);
         }
 
+        formData.context_mode = String(this.appData.contextMode || (formData.entity_type === 2 ? 'business' : 'user')).toLowerCase();
+        formData.allow_context_switch = !!this.appData.allowContextSwitch;
+
         // Se nível de acesso for 0 (Toda a Internet), força entity_type = 0 e ignora o select
         if (formData.access_level === 0) {
             formData.entity_type = 0;
@@ -3852,9 +4009,14 @@ if (document.readyState === 'loading') {
         formData.scopes = selectedScopes; // Sempre incluir scopes, mesmo que vazio, para permitir limpar
 
         // Regra: se houver scopes selecionados, não permitir "Toda a Internet"
-        if (formData.access_level === 0 && formData.scopes.length > 0) {
+        const requiresLogin = formData.scopes.length > 0 || !!this.appData.usesSdk || this.appType === 'flutter';
+        if (formData.access_level === 0 && requiresLogin) {
             formData.access_level = 1;
         }
+
+        formData.manifest = {
+            uiShell: this.buildUiShellPayload()
+        };
 
         // Adicionado: Tratamento de upload de ícone
         if (this.appData.icon) { // this.appData.icon should hold the base64 string or the existing URL
@@ -4076,6 +4238,91 @@ if (document.readyState === 'loading') {
                 }
                 this.validateCurrentStep();
             });
+        }
+
+        const contextMode = document.getElementById('context-mode');
+        if (contextMode && !contextMode.dataset.listenerAttached) {
+            contextMode.addEventListener('change', (e) => {
+                this.appData.contextMode = String(e.target.value || 'user');
+                this.applyStep4State();
+            });
+            contextMode.dataset.listenerAttached = '1';
+        }
+
+        const contextSwitch = document.getElementById('context-switch');
+        if (contextSwitch && !contextSwitch.dataset.listenerAttached) {
+            contextSwitch.addEventListener('change', (e) => {
+                this.appData.allowContextSwitch = !!e.target.checked;
+            });
+            contextSwitch.dataset.listenerAttached = '1';
+        }
+
+        const usesSdkToggle = document.getElementById('uses-sdk');
+        if (usesSdkToggle && !usesSdkToggle.dataset.listenerAttached) {
+            usesSdkToggle.addEventListener('change', (e) => {
+                this.appData.usesSdk = !!e.target.checked;
+                this.enforceAccessLevelConsistency();
+            });
+            usesSdkToggle.dataset.listenerAttached = '1';
+        }
+
+        const shellHeader = document.getElementById('shell-header');
+        if (shellHeader && !shellHeader.dataset.listenerAttached) {
+            shellHeader.addEventListener('change', (e) => {
+                this.appData.shellHeader = !!e.target.checked;
+                this.updateShellInputsState();
+            });
+            shellHeader.dataset.listenerAttached = '1';
+        }
+
+        const shellSidebar = document.getElementById('shell-sidebar');
+        if (shellSidebar && !shellSidebar.dataset.listenerAttached) {
+            shellSidebar.addEventListener('change', (e) => {
+                this.appData.shellSidebar = !!e.target.checked;
+                this.updateShellInputsState();
+            });
+            shellSidebar.dataset.listenerAttached = '1';
+        }
+
+        const shellFooter = document.getElementById('shell-footer');
+        if (shellFooter && !shellFooter.dataset.listenerAttached) {
+            shellFooter.addEventListener('change', (e) => {
+                this.appData.shellFooterMenu = !!e.target.checked;
+                this.updateShellInputsState();
+            });
+            shellFooter.dataset.listenerAttached = '1';
+        }
+
+        const headerActions = document.getElementById('shell-header-actions');
+        if (headerActions && !headerActions.dataset.listenerAttached) {
+            headerActions.addEventListener('input', (e) => {
+                this.appData.shellHeaderActions = e.target.value;
+            });
+            headerActions.dataset.listenerAttached = '1';
+        }
+
+        const sidebarItems = document.getElementById('shell-sidebar-items');
+        if (sidebarItems && !sidebarItems.dataset.listenerAttached) {
+            sidebarItems.addEventListener('input', (e) => {
+                this.appData.shellSidebarItems = e.target.value;
+            });
+            sidebarItems.dataset.listenerAttached = '1';
+        }
+
+        const sidebarForms = document.getElementById('shell-sidebar-forms');
+        if (sidebarForms && !sidebarForms.dataset.listenerAttached) {
+            sidebarForms.addEventListener('input', (e) => {
+                this.appData.shellSidebarForms = e.target.value;
+            });
+            sidebarForms.dataset.listenerAttached = '1';
+        }
+
+        const footerItems = document.getElementById('shell-footer-items');
+        if (footerItems && !footerItems.dataset.listenerAttached) {
+            footerItems.addEventListener('input', (e) => {
+                this.appData.shellFooterItems = e.target.value;
+            });
+            footerItems.dataset.listenerAttached = '1';
         }
 
         // Build platforms (step 4 – only relevant for Flutter apps)
@@ -4310,24 +4557,25 @@ if (document.readyState === 'loading') {
             const accessSelect = document.getElementById('access-level');
             if (!accessSelect) return;
             const hasScopes = Array.isArray(this.appData.scopes) && this.appData.scopes.length > 0;
+            const requiresLogin = hasScopes || !!this.appData.usesSdk || this.appType === 'flutter';
             // Desabilita a opção 0 quando houver scopes
             Array.from(accessSelect.options).forEach(opt => {
                 if (String(opt.value) === '0') {
-                    opt.disabled = !!hasScopes;
+                    opt.disabled = !!requiresLogin;
                 }
             });
 
-            if (hasScopes && String(accessSelect.value) === '0') {
+            if (requiresLogin && String(accessSelect.value) === '0') {
                 // Força para "Usuários Logados"
                 accessSelect.value = '1';
                 this.appData.accessLevel = 1;
                 const accessHelp = document.getElementById('access-level-help');
                 if (accessHelp) {
-                    accessHelp.insertAdjacentHTML('beforeend', '<div id="access-level-warning" class="form-text text-warning mt-2"><i class="fas fa-info-circle"></i> Nível de acesso ajustado pois apps com permissões requerem login.</div>');
+                    accessHelp.insertAdjacentHTML('beforeend', '<div id="access-level-warning" class="form-text text-warning mt-2"><i class="fas fa-info-circle"></i> Nível de acesso ajustado pois apps com WorkzSDK/permissões requerem login.</div>');
                     setTimeout(() => document.getElementById('access-level-warning')?.remove(), 5000);
                 }
                 if (typeof this.showToast === 'function') {
-                    this.showToast('Apps com permissões do SDK exigem login e instalação. Nível "Toda a Internet" foi ajustado.', 'warning');
+                    this.showToast('Apps com WorkzSDK/permissões exigem login e instalação. Nível "Toda a Internet" foi ajustado.', 'warning');
                 }
             }
             // Regra: Privado (2) é exclusivo para Negócios (entity_type = 2)
@@ -4538,6 +4786,102 @@ if (document.readyState === 'loading') {
         } catch (_) { /* ignore summary errors */ }
     },
 
+    applyStep4State() {
+        const contextSelect = document.getElementById('context-mode');
+        const contextSwitch = document.getElementById('context-switch');
+        const sdkToggle = document.getElementById('uses-sdk');
+        if (contextSelect) {
+            contextSelect.value = this.appData.contextMode || 'user';
+        }
+        if (contextSwitch) {
+            const isHybrid = (this.appData.contextMode || '').toLowerCase() === 'hybrid';
+            const allowSwitch = isHybrid ? true : (this.appData.allowContextSwitch !== false);
+            contextSwitch.checked = allowSwitch;
+            contextSwitch.disabled = isHybrid;
+            this.appData.allowContextSwitch = allowSwitch;
+        }
+        if (sdkToggle) {
+            const forceSdk = this.appType === 'flutter';
+            const shouldUseSdk = forceSdk ? true : !!this.appData.usesSdk;
+            sdkToggle.checked = shouldUseSdk;
+            sdkToggle.disabled = forceSdk;
+            this.appData.usesSdk = shouldUseSdk;
+        }
+
+        const headerToggle = document.getElementById('shell-header');
+        const sidebarToggle = document.getElementById('shell-sidebar');
+        const footerToggle = document.getElementById('shell-footer');
+        if (headerToggle) headerToggle.checked = !!this.appData.shellHeader;
+        if (sidebarToggle) sidebarToggle.checked = !!this.appData.shellSidebar;
+        if (footerToggle) footerToggle.checked = !!this.appData.shellFooterMenu;
+
+        const headerActions = document.getElementById('shell-header-actions');
+        const sidebarItems = document.getElementById('shell-sidebar-items');
+        const sidebarForms = document.getElementById('shell-sidebar-forms');
+        const footerItems = document.getElementById('shell-footer-items');
+        if (headerActions) headerActions.value = this.appData.shellHeaderActions || '';
+        if (sidebarItems) sidebarItems.value = this.appData.shellSidebarItems || '';
+        if (sidebarForms) sidebarForms.value = this.appData.shellSidebarForms || '';
+        if (footerItems) footerItems.value = this.appData.shellFooterItems || '';
+
+        this.updateShellInputsState();
+        this.enforceAccessLevelConsistency();
+    },
+
+    updateShellInputsState() {
+        const headerActions = document.getElementById('shell-header-actions');
+        const sidebarItems = document.getElementById('shell-sidebar-items');
+        const sidebarForms = document.getElementById('shell-sidebar-forms');
+        const footerItems = document.getElementById('shell-footer-items');
+        if (headerActions) headerActions.disabled = !this.appData.shellHeader;
+        if (sidebarItems) sidebarItems.disabled = !this.appData.shellSidebar;
+        if (sidebarForms) sidebarForms.disabled = !this.appData.shellSidebar;
+        if (footerItems) footerItems.disabled = !this.appData.shellFooterMenu;
+    },
+
+    parseShellItems(raw) {
+        const lines = String(raw || '').split('\n').map(line => line.trim()).filter(Boolean);
+        return lines.map((line) => {
+            const parts = line.split('|').map(p => p.trim()).filter(Boolean);
+            const label = parts[0] || '';
+            const action = parts[1] || '';
+            const item = { label };
+            if (action) item.action = action;
+            return item;
+        }).filter(item => item.label);
+    },
+
+    serializeShellItems(items) {
+        if (!Array.isArray(items)) return '';
+        return items.map((item) => {
+            if (typeof item === 'string') return item;
+            if (!item || typeof item !== 'object') return '';
+            const label = String(item.label || '').trim();
+            const action = String(item.action || '').trim();
+            return action ? `${label} | ${action}` : label;
+        }).filter(Boolean).join('\n');
+    },
+
+    buildUiShellPayload() {
+        return {
+            layout: 'standard',
+            header: {
+                enabled: !!this.appData.shellHeader,
+                buttons: this.parseShellItems(this.appData.shellHeaderActions)
+            },
+            sidebar: {
+                enabled: !!this.appData.shellSidebar,
+                items: this.parseShellItems(this.appData.shellSidebarItems),
+                forms: this.parseShellItems(this.appData.shellSidebarForms)
+            },
+            footerMenu: {
+                enabled: !!this.appData.shellFooterMenu,
+                items: this.parseShellItems(this.appData.shellFooterItems)
+            },
+            theme: { primary: this.appData.color || '#3b82f6' }
+        };
+    },
+
     // Utility functions
     formatCNPJ(cnpj) {
         if (!cnpj) return "";
@@ -4649,7 +4993,10 @@ if (document.readyState === 'loading') {
 
         // Update token field visibility when on step 4
         if (this.currentStep === 4) {
-            setTimeout(() => this.toggleTokenField(), 100);
+            setTimeout(() => {
+                this.toggleTokenField();
+                this.applyStep4State();
+            }, 100);
         }
 
         // Load code template when on step 5
@@ -4721,6 +5068,27 @@ if (document.readyState === 'loading') {
         if (entityElement) {
             const entityTypes = { 0: "Geral", 1: "Usuários", 2: "Negócios" };
             entityElement.textContent = entityTypes[this.appData.entityType] || "Usuários";
+        }
+
+        const contextElement = document.getElementById("final-context");
+        if (contextElement) {
+            const contextLabels = {
+                user: "Usuários",
+                business: "Negócios",
+                team: "Equipes",
+                hybrid: "Híbrido"
+            };
+            const ctxKey = String(this.appData.contextMode || 'user').toLowerCase();
+            contextElement.textContent = contextLabels[ctxKey] || "Usuários";
+        }
+
+        const shellElement = document.getElementById("final-shell");
+        if (shellElement) {
+            const parts = [];
+            if (this.appData.shellHeader) parts.push('Header');
+            if (this.appData.shellSidebar) parts.push('Sidebar');
+            if (this.appData.shellFooterMenu) parts.push('Rodapé');
+            shellElement.textContent = parts.length ? parts.join(' + ') : 'Sem shell';
         }
 
         // Update icon

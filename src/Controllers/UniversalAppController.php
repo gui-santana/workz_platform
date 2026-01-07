@@ -475,8 +475,10 @@ class UniversalAppController
             }
 
             $generalModel = new General();
-            
-            // Buscar empresas do usuário
+
+            $companyIds = [];
+
+            // Buscar empresas do usuário (vínculo direto)
             $userCompanies = $generalModel->search(
                 'workz_companies',
                 'employees',
@@ -485,7 +487,52 @@ class UniversalAppController
             );
 
             if (!empty($userCompanies)) {
-                $companyIds = array_column($userCompanies, 'em');
+                foreach ($userCompanies as $row) {
+                    if (isset($row['em']) && is_numeric($row['em'])) {
+                        $companyIds[] = (int)$row['em'];
+                    }
+                }
+            }
+
+            // Incluir empresas onde o usuário é o proprietário
+            $ownedCompanies = $generalModel->search(
+                'workz_companies',
+                'companies',
+                ['id'],
+                ['us' => $userId, 'st' => 1],
+                true
+            );
+
+            if (!empty($ownedCompanies)) {
+                foreach ($ownedCompanies as $row) {
+                    if (isset($row['id']) && is_numeric($row['id'])) {
+                        $companyIds[] = (int)$row['id'];
+                    }
+                }
+            }
+
+            $companyIds = array_values(array_unique(array_filter($companyIds, fn($id) => $id > 0)));
+
+            if (!empty($companyIds)) {
+                $companyNames = [];
+                $companyRows = $generalModel->search(
+                    'workz_companies',
+                    'companies',
+                    ['id', 'tt'],
+                    ['id' => $companyIds],
+                    true
+                );
+
+                if (!empty($companyRows)) {
+                    foreach ($companyRows as $row) {
+                        $name = trim((string)($row['tt'] ?? ''));
+                        if ($name !== '') {
+                            $companyNames[] = $name;
+                        }
+                    }
+                }
+
+                $companyNames = array_values(array_unique($companyNames));
 
                 // Buscar apps onde a empresa é a publisher (dona do app)
                 $apps = $generalModel->search(
@@ -515,6 +562,55 @@ class UniversalAppController
                     0,
                     ['by' => 'created_at', 'dir' => 'DESC']
                 );
+
+                $apps = is_array($apps) ? $apps : [];
+                $appsIndex = [];
+                foreach ($apps as $app) {
+                    $id = (int)($app['id'] ?? 0);
+                    if ($id > 0) {
+                        $appsIndex[$id] = true;
+                    }
+                }
+
+                if (!empty($companyNames)) {
+                    $appsByName = $generalModel->search(
+                        'workz_apps',
+                        'apps',
+                        [
+                            'id',
+                            'tt',
+                            'slug',
+                            'ds',
+                            'im',
+                            'color',
+                            'vl',
+                            'st',
+                            'version',
+                            'publisher',
+                            'created_at',
+                            'publisher',
+                            'app_type',
+                            'storage_type',
+                            'js_code',
+                            'dart_code'
+                        ],
+                        ['publisher' => $companyNames],
+                        true,
+                        50,
+                        0,
+                        ['by' => 'created_at', 'dir' => 'DESC']
+                    );
+
+                    if (!empty($appsByName)) {
+                        foreach ($appsByName as $app) {
+                            $id = (int)($app['id'] ?? 0);
+                            if ($id > 0 && empty($appsIndex[$id])) {
+                                $apps[] = $app;
+                                $appsIndex[$id] = true;
+                            }
+                        }
+                    }
+                }
 
                 if (!empty($apps)) {
                     // Adicionar informações de build para cada app (genérico)

@@ -8370,6 +8370,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Normaliza o ID que vai para a query
         const entityId = typeof entity === 'object' && entity !== null ? entity.id : entity;
+        const isAuthed = !!localStorage.getItem('jwt_token');
+        const isPublicEntityView = !isAuthed && (viewType === ENTITY.PROFILE || viewType === ENTITY.BUSINESS);
+
+        const fetchPublicEntity = async () => {
+            const basePath = (viewType === ENTITY.PROFILE) ? '/api/public/profile/' : '/api/public/business/';
+            try {
+                const resp = await fetch(basePath + encodeURIComponent(String(entityId)), {
+                    headers: { 'Accept': 'application/json' }
+                });
+                const payload = await resp.json().catch(() => null);
+                if (!resp.ok || !payload || payload.success === false) return null;
+                return payload.data || null;
+            } catch (_) {
+                return null;
+            }
+        };
         let entityData = [];
 
         // Always-defines
@@ -8404,6 +8420,32 @@ document.addEventListener('DOMContentLoaded', () => {
             entityImage = resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 100 });
 
             // OUTRAS ROTAS: define o que buscar
+        } else if (isPublicEntityView) {
+            const publicEntity = await fetchPublicEntity();
+            if (!publicEntity) {
+                try { window.location.href = '/'; } catch (_) { try { navigateTo('/'); } catch (__) {} }
+                hideLoading({ delay: 250 });
+                return;
+            }
+
+            viewData = publicEntity;
+            applyEntityBackgroundImage(viewData);
+
+            const pp = Number(viewData?.page_privacy ?? 0);
+            pageRestricted = pp !== 1;
+            viewRestricted = true;
+
+            if (pageRestricted) {
+                try { window.location.href = '/'; } catch (_) { try { navigateTo('/'); } catch (__) {} }
+                return;
+            }
+
+            viewData.postsCount = Number(viewData?.postsCount ?? 0);
+            viewData.followersCount = Number(viewData?.followersCount ?? 0);
+            viewData.peopleCount = Number(viewData?.peopleCount ?? 0);
+            viewData.teamsCount = Number(viewData?.teamsCount ?? 0);
+
+            entityImage = resolveImageSrc(viewData.im, viewData.tt, { size: 100 });
         } else {
 
             let entityMap = {};
@@ -8684,7 +8726,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Widgets: para visitantes (sem login), mostrar UI de login no wrapper;
         // usuários logados mantêm widgets, desde que a página não esteja bloqueada
-        const isAuthed = !!localStorage.getItem('jwt_token');
         if (!isAuthed) {
             if (widgetWrapper) {
                 await renderTemplate(widgetWrapper, 'init', null, () => { try { renderLoginUI(); } catch (_) {} });

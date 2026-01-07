@@ -47,6 +47,7 @@ class UserController
             );
 
             $companies = [];
+            $companyMap = [];
             if ($userCompanies) {
                 foreach ($userCompanies as $employeeRecord) {
                     // Buscar dados da empresa
@@ -59,17 +60,50 @@ class UserController
                     );
                     
                     if ($company) {
-                        $companies[] = [
-                            'id' => $company['id'],
-                            'name' => $company['tt'], // tt é o nome da empresa
-                            'cnpj' => $company['national_id'] ?? '', // national_id é o CNPJ
-                            'nv' => $employeeRecord['nv'], // Nível do usuário na empresa
-                            'st' => $employeeRecord['st']  // Status do vínculo
-                        ];
+                        $companyId = (int)($company['id'] ?? 0);
+                        if ($companyId > 0) {
+                            $companyMap[$companyId] = [
+                                'id' => $companyId,
+                                'name' => $company['tt'], // tt é o nome da empresa
+                                'cnpj' => $company['national_id'] ?? '', // national_id é o CNPJ
+                                'nv' => $employeeRecord['nv'], // Nível do usuário na empresa
+                                'st' => $employeeRecord['st']  // Status do vínculo
+                            ];
+                        }
                     }
                 }
             }
 
+            // Incluir empresas onde o usuário é proprietário (mesmo sem vínculo em employees)
+            $ownedCompanies = $this->generalModel->search(
+                'workz_companies',
+                'companies',
+                ['id', 'tt', 'national_id', 'st'],
+                ['us' => $userId, 'st' => 1],
+                true
+            );
+
+            if ($ownedCompanies) {
+                foreach ($ownedCompanies as $company) {
+                    $companyId = (int)($company['id'] ?? 0);
+                    if ($companyId <= 0) {
+                        continue;
+                    }
+                    if (!isset($companyMap[$companyId])) {
+                        $companyMap[$companyId] = [
+                            'id' => $companyId,
+                            'name' => $company['tt'],
+                            'cnpj' => $company['national_id'] ?? '',
+                            'nv' => 4, // Proprietário
+                            'st' => 1
+                        ];
+                    } else {
+                        $companyMap[$companyId]['nv'] = 4;
+                    }
+                }
+            }
+
+            $companies = array_values($companyMap);
             $user['companies'] = $companies;
         } catch (\Throwable $e) {
             // Em caso de erro, continua sem as empresas

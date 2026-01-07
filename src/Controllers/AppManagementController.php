@@ -35,6 +35,101 @@ class AppManagementController
         } catch (\Throwable $e) { return false; }
     }
 
+    private function coerceManifestPayload($raw): ?array
+    {
+        if (is_array($raw)) {
+            return $raw;
+        }
+        if (is_string($raw) && trim($raw) !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+        return null;
+    }
+
+    private function buildWorkzManifest(array $input, array $appData = []): array
+    {
+        $name = (string)($input['tt'] ?? $input['title'] ?? $appData['tt'] ?? 'Workz App');
+        $slug = (string)($input['slug'] ?? $appData['slug'] ?? 'workz-app');
+        $version = (string)($input['version'] ?? $appData['version'] ?? '1.0.0');
+        $appType = strtolower((string)($input['app_type'] ?? $appData['app_type'] ?? 'javascript'));
+        $color = (string)($input['color'] ?? $appData['color'] ?? '#3b82f6');
+
+        $contextMode = strtolower((string)($input['context_mode'] ?? $input['contextMode'] ?? ''));
+        if ($contextMode === '') {
+            $entityType = isset($input['entity_type']) ? (int)$input['entity_type'] : (int)($appData['entity_type'] ?? 1);
+            $contextMode = ($entityType === 2) ? 'business' : 'user';
+        }
+        $allowSwitch = true;
+        if (array_key_exists('context_switch', $input)) {
+            $allowSwitch = (bool)$input['context_switch'];
+        } elseif (array_key_exists('allow_context_switch', $input)) {
+            $allowSwitch = (bool)$input['allow_context_switch'];
+        }
+
+        $viewRoles = [];
+        if (array_key_exists('view_roles', $input)) {
+            $viewRoles = is_array($input['view_roles'])
+                ? $input['view_roles']
+                : (json_decode((string)$input['view_roles'], true) ?: []);
+        }
+
+        $scopes = $input['scopes'] ?? ($appData['scopes'] ?? []);
+        if (is_string($scopes)) {
+            $decoded = json_decode($scopes, true);
+            $scopes = is_array($decoded) ? $decoded : [];
+        }
+        $storage = [];
+        foreach ((array)$scopes as $scope) {
+            if (strpos($scope, 'storage.kv') === 0) $storage[] = 'kv';
+            if (strpos($scope, 'storage.docs') === 0) $storage[] = 'docs';
+            if (strpos($scope, 'storage.blobs') === 0) $storage[] = 'blobs';
+        }
+        $storage = array_values(array_unique($storage));
+
+        $price = (float)($input['vl'] ?? $input['price'] ?? $appData['vl'] ?? 0);
+        $entitlements = [
+            'type' => ($price > 0) ? 'paid' : 'free',
+            'price' => $price
+        ];
+
+        return [
+            'id' => $slug,
+            'name' => $name,
+            'version' => $version,
+            'appType' => $appType,
+            'entry' => 'dist/index.html',
+            'contextRequirements' => [
+                'mode' => $contextMode,
+                'allowContextSwitch' => $allowSwitch
+            ],
+            'permissions' => [
+                'view' => $viewRoles,
+                'scopes' => $scopes,
+                'storage' => $storage,
+                'externalApi' => []
+            ],
+            'uiShell' => [
+                'layout' => 'standard',
+                'theme' => ['primary' => $color]
+            ],
+            'routes' => $input['routes'] ?? [],
+            'entitlements' => $entitlements
+        ];
+    }
+
+    private function resolveWorkzManifest(array $input, array $appData = []): array
+    {
+        $base = $this->buildWorkzManifest($input, $appData);
+        $provided = $this->coerceManifestPayload($input['manifest'] ?? $input['manifest_json'] ?? null);
+        if (!$provided) {
+            return $base;
+        }
+        return array_replace_recursive($base, $provided);
+    }
+
     private function filterColumns(string $table, array $data): array
     {
         $meta = $this->getTableColumns($table);
@@ -525,7 +620,7 @@ class AppManagementController
             $storageType = $this->determineStorageType($appType, $input);
 
             // Defaults derived from context
-            $publisherDefault = $input['publisher'] ?? ($auth->name ?? 'Workz Platform');
+            $publisherInput = $input['publisher'] ?? null;
             $sourceLanguage = ($appType === 'flutter') ? 'dart' : 'javascript';
 
             // Normalize layout metadata (optional)
@@ -539,6 +634,13 @@ class AppManagementController
             $exclusiveTo = null;
             if (isset($input['company_id'])) { $exclusiveTo = (int)$input['company_id']; }
             elseif (isset($input['company']) && is_array($input['company']) && isset($input['company']['id'])) { $exclusiveTo = (int)$input['company']['id']; }
+
+            $publisherId = 0;
+            if (!empty($exclusiveTo)) {
+                $publisherId = (int)$exclusiveTo;
+            } elseif (is_numeric($publisherInput) && (int)$publisherInput > 0) {
+                $publisherId = (int)$publisherInput;
+            }
 
             // Normalize files: textarea (dart_code) must be the source of truth for Flutter
             $filesNormalized = [];
@@ -561,7 +663,7 @@ class AppManagementController
                 'storage_type' => $storageType,
                 'js_code' => $input['js_code'] ?? '',
                 'dart_code' => $input['dart_code'] ?? '',
-                'publisher' => $exclusiveTo,
+                'publisher' => $publisherId,
                 'im' => $iconPath ?? ($input['im'] ?? '/images/no-image.jpg'),
                 'color' => $input['color'] ?? '#3b82f6',
                 'vl' => $input['vl'] ?? 0.00,
@@ -569,7 +671,6 @@ class AppManagementController
                 'entity_type' => $input['entity_type'] ?? 1,
                 'scopes' => json_encode($input['scopes'] ?? []),
                 'version' => $input['version'] ?? '1.0.0',
-                'publisher' => $publisherDefault,
                 'aspect_ratio' => $aspectRatio,
                 'supports_portrait' => $supportsPortrait ? 1 : 0,
                 'supports_landscape' => $supportsLandscape ? 1 : 0,
@@ -579,6 +680,15 @@ class AppManagementController
                 'updated_at' => date('Y-m-d H:i:s')
             ];
             if (!empty($filesNormalized)) { $appData['files'] = json_encode($filesNormalized); }
+
+            // Manifesto Workz (fase 1)
+            if ($this->hasColumn('apps', 'manifest_json')) {
+                $manifestPayload = $this->resolveWorkzManifest($input, $appData);
+                $appData['manifest_json'] = json_encode($manifestPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                if ($this->hasColumn('apps', 'manifest_updated_at')) {
+                    $appData['manifest_updated_at'] = date('Y-m-d H:i:s');
+                }
+            }
 
             // If schema supports source_language/source_code, fill with safe values
             if ($this->hasColumn('apps', 'source_language')) { $appData['source_language'] = $sourceLanguage; }
@@ -611,6 +721,7 @@ class AppManagementController
                 // Seed repo with normalized files metadata for consistency
                 $seedData = $input;
                 if (!empty($filesNormalized)) { $seedData['files'] = $filesNormalized; }
+                if (!empty($appData['manifest_json'])) { $seedData['manifest_json'] = $appData['manifest_json']; }
                 $initResult = $this->storageManager->initializeFilesystemStorage($appId, $seedData);
                 if (!$initResult['success']) {
                     // Rollback app creation
@@ -738,6 +849,29 @@ class AppManagementController
                 return;
             }
 
+            // Manifesto Workz (fase 1)
+            if ($this->hasColumn('apps', 'manifest_json')) {
+                $shouldUpdateManifest = false;
+                $manifestFields = ['manifest', 'manifest_json', 'context_mode', 'contextMode', 'context_switch', 'allow_context_switch', 'view_roles', 'routes'];
+                foreach ($manifestFields as $mf) {
+                    if (array_key_exists($mf, $input)) { $shouldUpdateManifest = true; break; }
+                }
+                if (!$shouldUpdateManifest) {
+                    // Atualiza manifesto quando campos base mudam
+                    foreach (['tt','slug','version','app_type','color','scopes','entity_type','vl'] as $mf) {
+                        if (array_key_exists($mf, $input) || array_key_exists($mf, $updateData)) { $shouldUpdateManifest = true; break; }
+                    }
+                }
+                if ($shouldUpdateManifest) {
+                    $base = array_merge($app, $updateData);
+                    $manifestPayload = $this->resolveWorkzManifest($input, $base);
+                    $updateData['manifest_json'] = json_encode($manifestPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                    if ($this->hasColumn('apps', 'manifest_updated_at')) {
+                        $updateData['manifest_updated_at'] = date('Y-m-d H:i:s');
+                    }
+                }
+            }
+
             $updateData['updated_at'] = date('Y-m-d H:i:s');
 
             // Update app
@@ -801,6 +935,12 @@ class AppManagementController
             // Include storage information
             $appData = $app;
             $appData['scopes'] = json_decode($app['scopes'] ?? '[]', true);
+            if (!empty($app['manifest_json'])) {
+                $decodedManifest = json_decode((string)$app['manifest_json'], true);
+                if (is_array($decodedManifest)) {
+                    $appData['manifest'] = $decodedManifest;
+                }
+            }
             
             // Add storage-specific information
             $appData['storage_info'] = [

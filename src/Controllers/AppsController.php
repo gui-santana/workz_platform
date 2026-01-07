@@ -200,6 +200,84 @@ class AppsController
         return $value;
     }
 
+    private function coerceManifestPayload($raw): ?array
+    {
+        if (is_array($raw)) {
+            return $raw;
+        }
+        if (is_string($raw) && trim($raw) !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+        return null;
+    }
+
+    private function buildWorkzManifestFromApp(array $app): array
+    {
+        $name = (string)($app['tt'] ?? 'Workz App');
+        $slug = (string)($app['slug'] ?? 'workz-app');
+        $version = (string)($app['version'] ?? '1.0.0');
+        $appType = strtolower((string)($app['app_type'] ?? 'javascript'));
+        $color = $this->normalizeColor($app['color'] ?? null);
+
+        $entityType = isset($app['entity_type']) ? (int)$app['entity_type'] : 1;
+        $contextMode = $entityType === 2 ? 'business' : 'user';
+
+        $scopes = $app['scopes'] ?? '[]';
+        if (is_string($scopes)) {
+            $decoded = json_decode($scopes, true);
+            $scopes = is_array($decoded) ? $decoded : [];
+        }
+        $storage = [];
+        foreach ((array)$scopes as $scope) {
+            if (strpos($scope, 'storage.kv') === 0) $storage[] = 'kv';
+            if (strpos($scope, 'storage.docs') === 0) $storage[] = 'docs';
+            if (strpos($scope, 'storage.blobs') === 0) $storage[] = 'blobs';
+        }
+        $storage = array_values(array_unique($storage));
+
+        $entitlements = [
+            'type' => ((float)($app['vl'] ?? 0) > 0) ? 'paid' : 'free',
+            'price' => (float)($app['vl'] ?? 0),
+        ];
+
+        return [
+            'id' => $slug,
+            'name' => $name,
+            'version' => $version,
+            'appType' => $appType,
+            'entry' => 'dist/index.html',
+            'contextRequirements' => [
+                'mode' => $contextMode,
+                'allowContextSwitch' => true
+            ],
+            'permissions' => [
+                'view' => [],
+                'scopes' => $scopes,
+                'storage' => $storage,
+                'externalApi' => []
+            ],
+            'uiShell' => [
+                'layout' => 'standard',
+                'theme' => ['primary' => $color]
+            ],
+            'routes' => [],
+            'entitlements' => $entitlements
+        ];
+    }
+
+    private function resolveWorkzManifest(array $app): array
+    {
+        $base = $this->buildWorkzManifestFromApp($app);
+        $provided = $this->coerceManifestPayload($app['manifest_json'] ?? null);
+        if (!$provided) {
+            return $base;
+        }
+        return array_replace_recursive($base, $provided);
+    }
+
     private function renderEmbedHtml(array $app): ?string
     {
         $templatePath = dirname(__DIR__, 2) . '/public/apps/embed.html';
@@ -235,6 +313,14 @@ class AppsController
             }
         }
 
+        $manifestPayload = $this->resolveWorkzManifest($app);
+        $manifestJson = json_encode($manifestPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($manifestJson) || $manifestJson === '') {
+            $manifestJson = 'null';
+        } else {
+            $manifestJson = str_replace('</script>', '<\\/script>', $manifestJson);
+        }
+
         $replacements = [
             '{{APP_ID}}' => (string)($app['id'] ?? 0),
             '{{APP_NAME}}' => $name,
@@ -253,6 +339,7 @@ class AppsController
             '{{SUPPORTS_LANDSCAPE}}' => ((int)($app['supports_landscape'] ?? 1) === 1) ? 'true' : 'false',
             '{{APP_CONTENT}}' => $appContent,
             '{{FLUTTER_WEB_SCRIPTS}}' => '',
+            '{{APP_MANIFEST}}' => $manifestJson,
         ];
 
         return str_replace(array_keys($replacements), array_values($replacements), $tpl);
@@ -497,9 +584,44 @@ class AppsController
             return;
         }
 
-        // Buscar dados mínimos do app (para aud/slug futuramente)
-        $app = $this->generalModel->search('workz_apps', 'apps', ['id','tt'], ['id' => $appId], false);
-        if (!$app) { http_response_code(404); echo json_encode(['error' => 'App não encontrado.']); return; }
+        // Buscar dados do app (para manifesto/escopos)
+        $app = $this->generalModel->search(
+            'workz_apps',
+            'apps',
+            ['id','tt','slug','app_type','entity_type','vl','scopes','color','manifest_json'],
+            ['id' => $appId],
+            false
+        );
+        if (!$app) {
+            echo json_encode([
+                'success' => false,
+                'error' => 'App não encontrado.',
+                'code' => 'app_not_found'
+            ]);
+            return;
+        }
+
+        // Enforce contexto do manifesto (fase 1)
+        $manifest = $this->resolveWorkzManifest($app);
+        $reqMode = $manifest['contextRequirements']['mode'] ?? null;
+        if ($reqMode && $reqMode !== 'hybrid') {
+            $reqMode = strtolower((string)$reqMode);
+            if ($reqMode === 'business' && $ctxType !== 'business') {
+                http_response_code(403);
+                echo json_encode(['error' => 'Contexto inválido', 'reason' => 'context_required_business']);
+                return;
+            }
+            if ($reqMode === 'team' && $ctxType !== 'team') {
+                http_response_code(403);
+                echo json_encode(['error' => 'Contexto inválido', 'reason' => 'context_required_team']);
+                return;
+            }
+            if ($reqMode === 'user' && $ctxType !== 'user') {
+                http_response_code(403);
+                echo json_encode(['error' => 'Contexto inválido', 'reason' => 'context_required_user']);
+                return;
+            }
+        }
 
         $issuedAt = time();
         $expire   = $issuedAt + 86400; // 24 horas (alinhado ao token principal)
