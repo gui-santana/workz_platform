@@ -5,3 +5,9 @@
 
 # Ignorar a pasta de dependências do Composer
 /vendor
+
+*.apk
+*.aab
+**/build/
+**/.dart_tool/
+
