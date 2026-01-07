@@ -11,3 +11,9 @@
 **/build/
 **/.dart_tool/
 
+
+*.apk
+*.aab
+**/build/
+**/.dart_tool/
+
