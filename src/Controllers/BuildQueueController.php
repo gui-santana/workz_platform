@@ -158,7 +158,10 @@ class BuildQueueController
 
             echo json_encode(['success' => true, 'data' => $payload]);
         } catch (\Throwable $e) {
-            if (method_exists($pdo ?? null, 'rollBack')) { $pdo->rollBack(); }
+
+	    if(isset($pdo) && is_object($pdo) && method_exists($pdo, 'inTransaction') && $pdo->inTransaction()){
+		try{ $pdo->rollback(); } catch (\Throwable $_) {}
+	    }
             http_response_code(500);
             echo json_encode(['success' => false, 'message' => 'Erro ao reivindicar job', 'error' => $e->getMessage()]);
         }

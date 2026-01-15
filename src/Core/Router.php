@@ -71,6 +71,10 @@ class Router
             }
         }
 
+        $debug = $_ENV['ROUTER_DEBUG'] ?? '';
+        if ($debug === '1' || strtolower((string)$debug) === 'true') {
+            error_log(sprintf('[Router] no match method=%s uri=%s', $method, $uri));
+        }
         http_response_code(404);
         echo json_encode(['error' => 'Endpoint Not Found']);
     }

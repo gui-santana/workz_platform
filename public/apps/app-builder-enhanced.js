@@ -941,13 +941,13 @@ window.StoreApp = {
                         </div>
                     </div>
                     <div class="col-md-6">
-                        <div class="card app-type-card h-100" id="flutter-type-card" onclick="StoreApp.selectAppType('flutter')">
+                        <div class="card app-type-card h-100 opacity-50" id="flutter-type-card" aria-disabled="true">
                             <div class="card-body text-center">
                                 <div class="mb-3">
-                                    <i class="fas fa-mobile-alt fa-4x text-primary"></i>
+                                    <i class="fas fa-mobile-alt fa-4x text-muted"></i>
                                 </div>
                                 <h4>Flutter</h4>
-                                <p class="text-muted">Aplicativo Multiplataforma</p>
+                                <p class="text-muted">Indisponível no MVP (Free Tier)</p>
                                 <div class="mb-3">
                                     <span class="badge bg-info me-1"><i class="fas fa-globe"></i> Web</span>
                                     <span class="badge bg-success me-1"><i class="fas fa-mobile-alt"></i> iOS</span>
@@ -957,10 +957,10 @@ window.StoreApp = {
                                     </span>
                                 </div>
                                 <ul class="list-unstyled text-start small">
-                                    <li><i class="fas fa-check text-success"></i> Performance nativa</li>
-                                    <li><i class="fas fa-check text-success"></i> Controle de versão Git</li>
-                                    <li><i class="fas fa-check text-success"></i> Build multiplataforma</li>
-                                    <li><i class="fas fa-check text-success"></i> Colaboração avançada</li>
+                                    <li><i class="fas fa-check text-muted"></i> Performance nativa</li>
+                                    <li><i class="fas fa-check text-muted"></i> Controle de versão Git</li>
+                                    <li><i class="fas fa-check text-muted"></i> Build multiplataforma</li>
+                                    <li><i class="fas fa-check text-muted"></i> Colaboração avançada</li>
                                 </ul>
                             </div>
                         </div>
@@ -2513,6 +2513,10 @@ window.StoreApp = {
     },
 
     selectAppType(type) {
+        if (type === 'flutter') {
+            this.showToast('Flutter desabilitado no MVP (Free Tier). Use JavaScript.', 'warning');
+            return;
+        }
         this.appType = type;
 
         // Update UI to show selection

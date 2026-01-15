@@ -1,0 +1,13 @@
+# Ignorar dados locais/volumes
+.data/
+**/.data/
+**/.data/**
+
+# Git e configs locais
+.git/
+.vscode/
+.idea/
+
+# Dependências/cache (se existirem)
+node_modules/
+vendor/

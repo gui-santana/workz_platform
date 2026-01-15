@@ -1,19 +1,25 @@
-# Arquivo: .gitignore
+# Composer
+/vendor/
 
-# Ignorar o arquivo de variáveis de ambiente local
+# env local
 .env
+.env.*
 
-# Ignorar a pasta de dependências do Composer
-/vendor
+# docker volumes / runtime data
+.data/
+**/.data/
+mysql_data/
+db_data/
+.docker/mysql/
 
+# logs e temporários
+*.log
+logs/
+tmp/
+.cache/
+
+# mobile/flutter build artifacts
 *.apk
 *.aab
 **/build/
 **/.dart_tool/
-
-
-*.apk
-*.aab
-**/build/
-**/.dart_tool/
-

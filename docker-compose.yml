@@ -11,6 +11,7 @@ services:
     depends_on:
       - php-fpm
       - mysql
+      - worker
     networks:
       - workz-network
 
@@ -20,21 +21,24 @@ services:
     container_name: workz_platform_php
     depends_on:
       - mysql
+    env_file:
+      - .env
     volumes:
       - ./:/var/www/html
     networks:
       - workz-network
 
   worker:
-    build:
-      context: .
-      dockerfile: .docker/worker/Dockerfile
+    image: node:18-bookworm-slim
     container_name: workz_platform_worker
+    env_file:
+      - .env
     environment:
       - WORKER_SECRET=${WORKER_SECRET}
     volumes:
       - ./:/app
-    working_dir: /app
+    working_dir: /app/build-worker
+    command: sh -lc "npm ci || npm install; node index.js"
     ports:
       - "9091:9091"
     depends_on:
@@ -62,6 +66,7 @@ services:
       - db_data:/var/lib/mysql
       # Executa scripts .sql de inicialização automática no primeiro boot do volume
       - ./database:/docker-entrypoint-initdb.d:ro
+      - ./.docker/mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -proot_password || exit 1"]
       interval: 5s
@@ -98,5 +103,5 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: D:/DockerData/mysql
+      device: /opt/workz_platform/.data/mysql
 

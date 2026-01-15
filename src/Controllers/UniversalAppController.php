@@ -101,6 +101,31 @@ class UniversalAppController
                 // Allow application/x-www-form-urlencoded or multipart/form-data payloads
                 $input = $_POST;
             }
+            $rawType = strtolower(trim((string)($input['app_type'] ?? $input['appType'] ?? '')));
+            if ($rawType === 'flutter') {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Flutter desabilitado neste ambiente. Use JavaScript.']);
+                return;
+            }
+            $hasFlutterSignals = (
+                (!empty($input['files']) && is_array($input['files'])) ||
+                (isset($input['dart_code']) && is_string($input['dart_code']) && trim($input['dart_code']) !== '')
+            );
+            if ($hasFlutterSignals) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Flutter desabilitado neste ambiente. Use JavaScript.']);
+                return;
+            }
+            if (empty($input['dart_code']) && !empty($input['js_code'])) {
+                $js = (string)$input['js_code'];
+                $looksLikeFlutter = strpos($js, "package:flutter/") !== false
+                    || (preg_match('/void\\s+main\\s*\\(/i', $js) === 1 && strpos($js, 'MaterialApp') !== false);
+                if ($looksLikeFlutter) {
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'message' => 'Flutter desabilitado neste ambiente. Use JavaScript.']);
+                    return;
+                }
+            }
             
             error_log("UpdateApp Universal - App $appId - Dados: " . json_encode($input));
 
@@ -118,6 +143,11 @@ class UniversalAppController
             if (!$existingApp) {
                 http_response_code(404);
                 echo json_encode(['success' => false, 'message' => 'App não encontrado']);
+                return;
+            }
+            if (strtolower((string)($existingApp['app_type'] ?? '')) === 'flutter') {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'Flutter desabilitado neste ambiente.']);
                 return;
             }
 

@@ -695,8 +695,17 @@
       this.appConfig = config.appConfig || global.WorkzAppConfig || {};
       this.manifest = this.resolveManifest(this.appConfig.manifest || this.appConfig.workzManifest || null);
       this.refreshContextAccess();
-      this.apiClient.guard = () => {
+      this.apiClient.guard = ({ method, path }) => {
         if (this.contextAllowed) return null;
+        const p = String(path || '');
+        const m = String(method || '').toUpperCase();
+        // Allow bootstrapping endpoints before context is chosen.
+        const allowlist = [
+          'GET /me',
+          'GET /apps/my-apps',
+          'GET /apps/storage/stats'
+        ];
+        if (allowlist.includes(`${m} ${p}`)) return null;
         const required = this.contextDenyReason?.required || 'unknown';
         const received = this.contextDenyReason?.received || 'unknown';
         return {

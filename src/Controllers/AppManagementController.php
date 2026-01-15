@@ -509,11 +509,21 @@ class AppManagementController
             $input['js_code'] = $input['js_code'] ?? '';
             // Robustly resolve app_type (favor Flutter if signals are present)
             $rawType = strtolower(trim((string)($input['app_type'] ?? $input['appType'] ?? '')));
+            if ($rawType === 'flutter') {
+                http_response_code(400);
+                echo json_encode(['error' => 'Flutter desabilitado neste ambiente. Use JavaScript.']);
+                return;
+            }
             $hasFlutterSignals = (
                 !empty($input['files']) && is_array($input['files'])
             ) || (
                 isset($input['dart_code']) && is_string($input['dart_code']) && trim($input['dart_code']) !== ''
             );
+            if ($hasFlutterSignals) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Flutter desabilitado neste ambiente. Use JavaScript.']);
+                return;
+            }
             // Heuristic: textarea enviado em js_code mas com Dart/Flutter
             $jsLooksLikeDart = false;
             if ($rawType !== 'flutter' && empty($input['dart_code']) && !empty($input['js_code'])) {
@@ -523,16 +533,12 @@ class AppManagementController
                 $needle3 = strpos($js, 'MaterialApp') !== false;
                 $jsLooksLikeDart = ($needle1 || ($needle2 && $needle3));
                 if ($jsLooksLikeDart) {
-                    $input['dart_code'] = $js;
-                    $input['js_code'] = '';
-                    $hasFlutterSignals = true;
+                    http_response_code(400);
+                    echo json_encode(['error' => 'Flutter desabilitado neste ambiente. Use JavaScript.']);
+                    return;
                 }
             }
-            if ($rawType !== 'flutter' && $hasFlutterSignals) {
-                $input['app_type'] = 'flutter';
-            } else {
-                $input['app_type'] = $rawType ?: 'javascript';
-            }
+            $input['app_type'] = $rawType ?: 'javascript';
             if (empty($input['slug']) && !empty($input['tt'])) {
                 $slug = strtolower(trim(preg_replace('/[^a-z0-9]+/i','-', $input['tt']), '-'));
                 $input['slug'] = $slug ?: null;

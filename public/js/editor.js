@@ -41,6 +41,110 @@ const init = () => {
       el[key] = handler;
     };
     const editor = document.getElementById('editor');
+    const EDITOR_MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+    const EDITOR_MAX_VIDEO_BYTES = 15 * 1024 * 1024;
+    const VIDEO_EXPORT_MAX_SECONDS = 60;
+    const VIDEO_EXPORT_MIN_FPS = 12;
+    const VIDEO_EXPORT_MAX_FPS = 20;
+    const VIDEO_EXPORT_MAX_SIDE = 480;
+    const VIDEO_EXPORT_BITRATE = 700000;
+    const notifyEditor = (type, message) => {
+      if (type === 'error' && typeof window.notifyError === 'function') {
+        window.notifyError(message);
+        return;
+      }
+      if (type === 'success' && typeof window.notifySuccess === 'function') {
+        window.notifySuccess(message);
+        return;
+      }
+      alert(message);
+    };
+    const formatBytes = (bytes) => {
+      if (!Number.isFinite(bytes)) return 'N/A';
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let size = bytes;
+      let idx = 0;
+      while (size >= 1024 && idx < units.length - 1) {
+        size /= 1024;
+        idx += 1;
+      }
+      return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[idx]}`;
+    };
+    const validateMediaPayload = (payload, label = 'Arquivo') => {
+      if (!payload || !Number.isFinite(payload.size)) return { ok: false, message: `${label} inválido.` };
+      const type = String(payload.type || '').toLowerCase();
+      const isVideo = type.startsWith('video');
+      if (isVideo) return { ok: true };
+      const maxBytes = EDITOR_MAX_IMAGE_BYTES;
+      if (payload.size > maxBytes) {
+        return {
+          ok: false,
+          message: `${label} muito grande (${formatBytes(payload.size)}). Limite: ${formatBytes(maxBytes)}.`
+        };
+      }
+      return { ok: true };
+    };
+    const markBlobUrl = (el, url) => {
+      if (!el) return;
+      if (url && String(url).startsWith('blob:')) {
+        el.dataset.blobUrl = String(url);
+      }
+    };
+    const revokeBlobUrl = (el) => {
+      if (!el) return;
+      const blobUrl = el.dataset ? el.dataset.blobUrl : null;
+      if (blobUrl && blobUrl.startsWith('blob:')) {
+        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+      }
+      if (el.dataset) delete el.dataset.blobUrl;
+    };
+
+    const EditorAssetStore = window.EditorAssetStore || {
+      map: new Map(),
+      urlMap: new Map(),
+      reverseMap: new Map(),
+      register(blob) {
+        const assetId = `asset_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        this.map.set(assetId, blob);
+        if (window.__EXPORT_DEBUG) {
+          console.log('[EXPORT_DEBUG] asset register', assetId, blob?.size || 0);
+        }
+        return assetId;
+      },
+      get(assetId) {
+        return this.map.get(assetId) || null;
+      },
+      addPreview(assetId, url) {
+        if (!assetId || !url) return;
+        let set = this.urlMap.get(assetId);
+        if (!set) { set = new Set(); this.urlMap.set(assetId, set); }
+        set.add(url);
+        this.reverseMap.set(url, assetId);
+        if (window.__EXPORT_DEBUG) {
+          console.log('[EXPORT_DEBUG] asset preview', assetId, url);
+        }
+      },
+      resolveByUrl(url) {
+        return this.reverseMap.get(url) || null;
+      },
+      revokePreview(assetId, url) {
+        if (url && url.startsWith('blob:')) {
+          try { URL.revokeObjectURL(url); } catch (_) {}
+        }
+        if (assetId) {
+          const set = this.urlMap.get(assetId);
+          if (set) {
+            set.delete(url);
+            if (!set.size) this.urlMap.delete(assetId);
+          }
+        }
+        if (url) this.reverseMap.delete(url);
+        if (window.__EXPORT_DEBUG) {
+          console.log('[EXPORT_DEBUG] asset preview revoked', assetId, url);
+        }
+      }
+    };
+    window.EditorAssetStore = EditorAssetStore;
     const gridCanvas = document.getElementById('gridCanvas');
     const gctx = gridCanvas.getContext('2d');
     if (gridCanvas) gridCanvas.style.zIndex = '5';
@@ -48,6 +152,22 @@ const init = () => {
     const guideY = document.getElementById('guideY');
   
     const bgUpload = document.getElementById('bgUpload');
+    const bgUploadLabel = document.querySelector('#editorViewport > section > div > label:nth-child(1)');
+    if (bgUploadLabel) {
+      bgUploadLabel.style.pointerEvents = 'auto';
+      bgUploadLabel.removeAttribute('for');
+      bgUploadLabel.addEventListener('click', (ev) => {
+        if (window.__CAPTURE_DEBUG) {
+          console.log('[CAPTURE_DEBUG] bgUploadLabel click', ev.target);
+        }
+        const path = typeof ev.composedPath === 'function' ? ev.composedPath() : [];
+        if (path.some(el => el && el.id === 'captureButton')) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+        try { bgUpload?.click?.(); } catch (_) {}
+      }, true);
+    }
     const btnAddText = document.getElementById('btnAddText');
     const btnAddImg = document.getElementById('btnAddImg');
     const itemBar = document.getElementById('itemBar');
@@ -85,6 +205,11 @@ const init = () => {
     const DEFAULT_BG_COLOR = '#222222';
     const GRID_LINE_COLOR = 'rgba(255,255,255,0.1)';
     const STALE_DEFAULTS = ['#ffffff', '#787878']; // antigos padrões que deixam o fundo claro
+    const FIXED_VIDEO_WIDTH = 480;
+    const FIXED_VIDEO_HEIGHT = 854;
+    const FIXED_VIDEO_FPS = 20;
+    const FIXED_VIDEO_BITRATE = 900000;
+    const FIXED_AUDIO_BITRATE = 64000;
     let bgSolidColor = DEFAULT_BG_COLOR;
     try {
       const storedBg = (localStorage.getItem('editor.bgColor') || '').toLowerCase();
@@ -224,15 +349,21 @@ const init = () => {
     // ---------- Fundo
     bgUpload.addEventListener('change', e=>{
       const f = e.target.files?.[0]; if (!f) return;
+      const check = validateMediaPayload(f, 'Arquivo de fundo');
+      if (!check.ok) {
+        notifyEditor('error', check.message);
+        return;
+      }
       const el = document.createElement(f.type.startsWith('image') ? 'img' : 'video');
       el.className = 'bg-media'; el.src = URL.createObjectURL(f);
+      markBlobUrl(el, el.src);
       if (el.tagName==='VIDEO'){ 
         el.autoplay=true; el.loop=true; el.muted=true; 
         
         // Atualizar duração do vídeo na interface quando os metadados carregarem
         el.addEventListener('loadedmetadata', () => {
           if (el.duration && !isNaN(el.duration)) {
-            const limitedDuration = Math.min(60, el.duration);
+            const limitedDuration = Math.min(VIDEO_EXPORT_MAX_SECONDS, el.duration);
             vidDur.value = limitedDuration.toFixed(1);
             
             // Mostrar informação para o usuário
@@ -256,7 +387,11 @@ const init = () => {
           }
         });
       }
-      if (bgEl) editor.removeChild(bgEl); bgEl = el;
+      if (bgEl) {
+        editor.removeChild(bgEl);
+        revokeBlobUrl(bgEl);
+      }
+      bgEl = el;
       editor.insertBefore(bgEl, editor.firstChild);
       
       // Redesenhar a grade para garantir que fique visível
@@ -271,30 +406,61 @@ const init = () => {
       const input = document.createElement('input'); input.type='file'; input.accept='image/*';
       input.onchange = e=>{
         const f = e.target.files?.[0]; if(!f) return;
-        const url = URL.createObjectURL(f);
-        createImageItem(url);
+        const check = validateMediaPayload(f, 'Imagem');
+        if (!check.ok) {
+          notifyEditor('error', check.message);
+          return;
+        }
+        createImageItemFromBlob(f);
       };
       input.click();
     });
 
     // ---------- Câmera: Captura Direta no Canvas
     const captureButton = document.getElementById('captureButton');
+    const captureOverlay = document.querySelector('.capture-overlay');
     const hiddenCameraStream = document.getElementById('hiddenCameraStream');
     const captureCanvas = document.getElementById('captureCanvas');
 
+    if (captureButton) {
+      captureButton.style.touchAction = 'none';
+      captureButton.style.pointerEvents = 'auto';
+      captureButton.style.zIndex = '60';
+    }
+    if (captureOverlay) {
+      captureOverlay.style.touchAction = 'none';
+      captureOverlay.style.pointerEvents = 'auto';
+      captureOverlay.style.zIndex = '40';
+    }
+    const toolbar = editorViewport?.querySelector?.('section.absolute.top-0.left-0.right-0');
+    if (toolbar) {
+      toolbar.style.pointerEvents = 'auto';
+      toolbar.style.zIndex = '80';
+    }
     let currentStream = null;
+    let cameraInitPromise = null;
     let mediaRecorder = null;
     let recordedChunks = [];
     let isRecording = false;
+    let recordingDiscard = false;
     let recordingStartTime = 0;
     let recordingTimer = null;
+    let recordingAutoStop = null;
     let currentFacingMode = 'user'; // 'user' para frontal, 'environment' para traseira
     
     // Variáveis para controle de pressão longa
     let pressTimer = null;
     let isLongPress = false;
+    let isPressing = false;
     let pressStartTime = 0;
-    const LONG_PRESS_DURATION = 500; // 500ms para ativar gravação
+    const LONG_PRESS_DURATION = 300; // 300ms para ativar gravação
+
+    const handleRecordingAbort = () => {
+      if (isRecording) stopVideoRecording(true);
+    };
+    const handleVisibilityAbort = () => {
+      if (document.hidden) handleRecordingAbort();
+    };
 
     // Detectar se é dispositivo móvel
     function isMobileDevice() {
@@ -303,50 +469,142 @@ const init = () => {
              window.innerWidth <= 768;
     }
 
-    // Configurar comportamento baseado no dispositivo
-    if (isMobileDevice()) {
-      // Mobile: Captura direta
-      captureButton.addEventListener('pointerdown', handleCaptureStart);
-      captureButton.addEventListener('pointerup', handleCaptureEnd);
-      captureButton.addEventListener('pointerleave', handleCaptureEnd);
-      captureButton.addEventListener('contextmenu', e => e.preventDefault());
-      
-      // Manter dica para mobile
-    } else {
-      // Desktop: Upload de arquivo
-      captureButton.addEventListener('click', handleDesktopCapture);
-      
-      // Atualizar visual para desktop
-      const icon = captureButton.querySelector('.capture-icon');
-      //icon.className = 'fas fa-upload capture-icon';
-      
-      const hint = document.querySelector('.capture-hint');
-      if (hint) {
-        hint.innerHTML = '<i class="fas fa-mouse-pointer"></i>';
-      }
-      
-      // Atualizar tooltip e dica
-      captureButton.title = 'Clique para fazer upload de foto/vídeo';
-      
-      const captureHint = document.getElementById('captureHint');
-      if (captureHint) {
-        captureHint.innerHTML = 'Dica: <strong>Clique</strong> para fazer upload de foto ou vídeo';
-      }
-      
-      // Mostrar botão de câmera como opção alternativa
-      const btnCameraMode = document.getElementById('btnCameraMode');
-      if (btnCameraMode) {
-        btnCameraMode.classList.remove('hidden');
-        btnCameraMode.addEventListener('click', switchToCameraMode);
-      }
+    // Captura direta estilo Stories (tap = foto, segurar = vídeo)
+    const blockCaptureEvent = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+    };
+    const captureDebug = (label, ev) => {
+      if (!window.__CAPTURE_DEBUG) return;
+      try {
+        const path = typeof ev.composedPath === 'function' ? ev.composedPath().slice(0, 4) : [];
+        const pathLabels = path.map((el) => {
+          if (!el) return 'null';
+          if (el.id) return `#${el.id}`;
+          if (el.className) return `.${String(el.className).split(' ')[0]}`;
+          return el.tagName || 'node';
+        });
+        let topEl = null;
+        try {
+          topEl = document.elementFromPoint(ev.clientX, ev.clientY);
+        } catch (_) {}
+        console.log('[CAPTURE_DEBUG]', label, {
+          type: ev.type,
+          target: ev.target,
+          currentTarget: ev.currentTarget,
+          path: pathLabels,
+          elementFromPoint: topEl ? (topEl.id ? `#${topEl.id}` : topEl.className ? `.${String(topEl.className).split(' ')[0]}` : topEl.tagName) : null,
+          x: ev.clientX,
+          y: ev.clientY
+        });
+      } catch (_) {}
+    };
+    if (!editorViewport._captureDebugInstalled) {
+      const debugEventTypes = ['pointerdown', 'pointerup', 'click', 'touchstart', 'touchend', 'mousedown', 'mouseup'];
+      debugEventTypes.forEach((type) => {
+        captureButton.addEventListener(type, (ev) => captureDebug('captureButton', ev), true);
+        editorViewport.addEventListener(type, (ev) => captureDebug('editorViewport', ev), true);
+        const bgLabel = document.querySelector('#editorViewport > section > div > label:nth-child(1)');
+        if (bgLabel) bgLabel.addEventListener(type, (ev) => captureDebug('bgUploadLabel', ev), true);
+      });
+      editorViewport._captureDebugInstalled = true;
     }
+    const blockEvents = ['click', 'mousedown', 'mouseup', 'touchstart', 'touchend', 'contextmenu'];
+    blockEvents.forEach((evt) => captureButton.addEventListener(evt, blockCaptureEvent, true));
+    captureButton.addEventListener('pointerdown', handleCaptureStart, true);
+    captureButton.addEventListener('pointerup', handleCaptureEnd, true);
+    captureButton.addEventListener('pointerleave', handleCaptureEnd, true);
+    captureButton.addEventListener('pointercancel', handleCaptureCancel, true);
+    captureButton.addEventListener('lostpointercapture', handleCaptureCancel, true);
+    captureButton.addEventListener('contextmenu', blockCaptureEvent, true);
+
+
+    captureButton.title = 'Toque para foto, segure para vídeo';
+    const captureHint = document.getElementById('captureHint');
+    if (captureHint) {
+      captureHint.innerHTML = 'Dica: <strong>Toque</strong> para foto, <strong>segure</strong> para vídeo';
+    }
+    function syncToggleButtonDom() {
+      const btn = document.getElementById('btnToggleCamera');
+      if (!btn) return;
+      try {
+        btn.style.pointerEvents = 'auto';
+        btn.style.zIndex = '90';
+      } catch (_) {}
+      try {
+        const section = btn.closest('section');
+        if (section && section.style) {
+          section.style.pointerEvents = 'auto';
+          section.style.zIndex = '80';
+        }
+      } catch (_) {}
+      try {
+        const peNone = btn.closest('.pointer-events-none');
+        if (peNone && peNone.style) peNone.style.pointerEvents = 'auto';
+      } catch (_) {}
+    }
+    function wireCameraToggleButton() {
+      if (document._camToggleDelegated) return;
+      if (window.__CAPTURE_DEBUG) console.log('[CAM_TOGGLE] delegated bind');
+      document._camToggleDelegated = true;
+      const handledByPointer = { ts: 0 };
+      const shouldHandleByPoint = (ev) => {
+        let btn = document.getElementById('btnToggleCamera');
+        if (!btn) return false;
+        const rect = btn.getBoundingClientRect();
+        if (!rect || (rect.width === 0 && rect.height === 0)) return false;
+        return ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom;
+      };
+      const logDebug = (ev, target) => {
+        if (!window.__CAPTURE_DEBUG) return;
+        const path = typeof ev.composedPath === 'function' ? ev.composedPath().slice(0, 5) : [];
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        console.log('[CAM_TOGGLE] delegated', {
+          type: ev.type,
+          target,
+          path,
+          elementFromPoint: el
+        });
+      };
+      const handleToggle = (ev) => {
+        let directTarget = ev.target?.closest?.('#btnToggleCamera, [data-action="toggle-camera"]');
+        const byPoint = !directTarget && shouldHandleByPoint(ev);
+        if (!directTarget) {
+          syncToggleButtonDom();
+          directTarget = ev.target?.closest?.('#btnToggleCamera, [data-action="toggle-camera"]');
+        }
+        const target = directTarget || (byPoint ? document.getElementById('btnToggleCamera') : null);
+        if (!target) return;
+        logDebug(ev, target);
+        ev.preventDefault();
+        if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+        if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+        try { window.__CAM_TOGGLE_LAST_TS = Date.now(); } catch (_) {}
+        window.EditorBridge?.toggleCamera?.('user_toggle');
+      };
+      document.addEventListener('pointerdown', (ev) => {
+        if (handledByPointer.ts && (Date.now() - handledByPointer.ts) < 350) return;
+        if (ev.button != null && ev.button !== 0) return;
+        const directTarget = ev.target?.closest?.('#btnToggleCamera, [data-action="toggle-camera"]');
+        if (!directTarget && !shouldHandleByPoint(ev)) return;
+        handledByPointer.ts = Date.now();
+        handleToggle(ev);
+      }, true);
+      document.addEventListener('click', (ev) => {
+        if (handledByPointer.ts && (Date.now() - handledByPointer.ts) < 350) return;
+        handleToggle(ev);
+      }, true);
+    }
+    wireCameraToggleButton();
+    try { syncToggleButtonDom(); } catch (_) {}
 
     // Função para alternar para modo câmera no desktop
     async function switchToCameraMode() {
       if (isSaving) return; isSaving = true;
       try {
-        // Tentar inicializar câmera
-        await initializeCamera();
+        // Tentar inicializar câmera (ação explícita)
+        await window.EditorBridge?.startCamera?.('user');
         
         // Se sucesso, alterar comportamento do botão principal
         captureButton.removeEventListener('click', handleDesktopCapture);
@@ -358,11 +616,11 @@ const init = () => {
         const icon = captureButton.querySelector('.capture-icon');
         //icon.className = 'fas fa-camera capture-icon';
         
-        captureButton.title = 'Clique para foto, segure para iniciar vídeo, clique novamente para parar';
+        captureButton.title = 'Toque para foto, segure para vídeo';
         
         const captureHint = document.getElementById('captureHint');
         if (captureHint) {
-          captureHint.innerHTML = 'Dica: <strong>Clique</strong> para foto, <strong>segure</strong> para iniciar vídeo, <strong>clique</strong> para parar';
+          captureHint.innerHTML = 'Dica: <strong>Toque</strong> para foto, <strong>segure</strong> para vídeo';
         }
         
         // Esconder botão de câmera
@@ -395,6 +653,11 @@ const init = () => {
       input.onchange = (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
+        const check = validateMediaPayload(file, 'Mídia');
+        if (!check.ok) {
+          notifyEditor('error', check.message);
+          return;
+        }
         
         const url = URL.createObjectURL(file);
         const type = file.type.startsWith('image/') ? 'image' : 'video';
@@ -416,55 +679,222 @@ const init = () => {
     // Variáveis para controle do preview e gravação
     let previewActive = false;
     let previewAnimationId = null;
+    let currentOpenSessionId = Number(window.__EDITOR_OPEN_SESSION?.id || 0);
+    let cameraOnOpenForSession = !!(window.__EDITOR_OPEN_SESSION?.cameraOnOpen);
+    let autoStartAllowed = !(window.__EDITOR_CAMERA_AUTO_DISABLED);
+    let manualStartAllowed = true;
+    if (window.__CAPTURE_DEBUG && window.__EDITOR_CAMERA_AUTO_DISABLED) {
+      console.log('[CAPTURE_DEBUG] autoStartAllowed=false (open-no-camera)');
+    }
+    const hasLiveStream = () => {
+      try {
+        return !!currentStream && currentStream.getTracks().some(t => t.readyState === 'live');
+      } catch (_) {
+        return false;
+      }
+    };
+
+    const showCaptureButton = () => {
+      if (captureButton) captureButton.classList.remove('hidden');
+      if (captureOverlay) captureOverlay.classList.remove('hidden');
+    };
+    const hideCaptureButton = () => {
+      if (captureButton) captureButton.classList.add('hidden');
+      if (captureOverlay) captureOverlay.classList.add('hidden');
+    };
+    const setCameraUiState = (on) => {
+      const toggleBtn = document.getElementById('btnToggleCamera');
+      if (on) {
+        showCaptureButton();
+        if (toggleBtn) {
+          toggleBtn.classList.add('bg-green-200');
+          toggleBtn.classList.remove('bg-gray-200');
+          toggleBtn.title = 'Desligar câmera';
+          const icon = toggleBtn.querySelector('i');
+          if (icon) icon.className = 'fas fa-video';
+        }
+      } else {
+        hideCaptureButton();
+        if (toggleBtn) {
+          toggleBtn.classList.remove('bg-green-200');
+          toggleBtn.classList.add('bg-gray-200');
+          toggleBtn.title = 'Ligar câmera';
+          const icon = toggleBtn.querySelector('i');
+          if (icon) icon.className = 'fas fa-video-slash';
+        }
+      }
+    };
+    setCameraUiState(false);
 
     // Funções para controle do botão de captura único (mobile)
+    function waitForVideoReady(video, timeoutMs = 2500) {
+      if (!video) return Promise.reject(new Error('Vídeo indisponível'));
+      if (video.readyState >= 2 && video.videoWidth) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        let done = false;
+        const finish = (ok) => {
+          if (done) return;
+          done = true;
+          video.removeEventListener('loadedmetadata', onReady);
+          video.removeEventListener('canplay', onReady);
+          ok ? resolve() : reject(new Error('Vídeo não está pronto'));
+        };
+        const onReady = () => finish(true);
+        video.addEventListener('loadedmetadata', onReady, { once: true });
+        video.addEventListener('canplay', onReady, { once: true });
+        setTimeout(() => {
+          if (video.videoWidth) finish(true);
+          else finish(false);
+        }, timeoutMs);
+      });
+    }
+
+    async function ensureCameraReady(sessionId = null, reason = '') {
+      if (reason !== 'user' && reason !== 'user_toggle' && !autoStartAllowed) {
+        if (window.__CAPTURE_DEBUG) {
+          console.log('[CAPTURE_DEBUG] ensureCameraReady blocked (autoStartAllowed=false)');
+        }
+        throw new Error('Camera auto-start blocked');
+      }
+      const desiredSession = (sessionId == null ? currentOpenSessionId : Number(sessionId || 0));
+      if (cameraInitPromise && cameraInitSessionId != null && cameraInitSessionId !== desiredSession) {
+        cameraInitPromise = null;
+      }
+      if ((reason === 'user' || reason === 'user_toggle') && !hasLiveStream()) {
+        cameraInitPromise = null;
+      }
+      if (!cameraInitPromise) {
+        cameraInitSessionId = desiredSession;
+        cameraInitPromise = (async () => {
+          const activeTrack = currentStream?.getVideoTracks?.().find(track => track.readyState === 'live');
+          if (!currentStream || !activeTrack) {
+            await initializeCamera(sessionId, reason, { force: (reason === 'user' || reason === 'user_toggle') });
+            startCameraPreview();
+          }
+          const video = previewVideoElement || hiddenCameraStream;
+          await waitForVideoReady(video);
+          return video;
+        })();
+        cameraInitPromise.finally(() => {
+          cameraInitPromise = null;
+          cameraInitSessionId = null;
+        });
+      }
+      return cameraInitPromise;
+    }
+
+    const ensurePreviewVideoElement = () => {
+      if (previewVideoElement) return previewVideoElement;
+      previewVideoElement = document.createElement('video');
+      previewVideoElement.className = 'bg-media preview-media';
+      previewVideoElement.autoplay = true;
+      previewVideoElement.muted = true;
+      previewVideoElement.playsInline = true;
+      if (bgEl) {
+        editor.removeChild(bgEl);
+        if (bgEl.classList.contains('preview-media')) {
+          try { URL.revokeObjectURL(bgEl.src); } catch (_) {}
+        }
+      }
+      bgEl = previewVideoElement;
+      editor.insertBefore(bgEl, editor.firstChild);
+      return previewVideoElement;
+    };
+
+    function startCameraManualImmediate() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        if (window.__CAPTURE_DEBUG) console.log('[CAM] getUserMedia unavailable');
+        return Promise.reject(new Error('Seu navegador não suporta acesso à câmera'));
+      }
+      if (window.__CAPTURE_DEBUG) console.log('[CAM] getUserMedia called (manual)');
+      cameraInitPromise = null;
+      cameraInitSessionId = null;
+      if (currentStream) {
+        try { stopCameraCompletely('manual-restart'); } catch (_) {}
+      }
+      const constraints = {
+        video: {
+          facingMode: currentFacingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      };
+      return navigator.mediaDevices.getUserMedia(constraints).then(async (stream) => {
+        currentStream = stream;
+        try { window.top?.__workzMediaRegistry?.add?.(currentStream, { source: 'editor', ts: Date.now() }); } catch (_) {}
+        hiddenCameraStream.srcObject = currentStream;
+        const videoEl = ensurePreviewVideoElement();
+        videoEl.srcObject = currentStream;
+        try { await videoEl.play(); } catch (_) {}
+        startCameraPreview();
+        if (window.__CAPTURE_DEBUG) {
+          try { console.log('[CAM] stream tracks live', currentStream.getTracks().map(t => t.readyState)); } catch (_) {}
+        }
+        setCameraUiState(true);
+        return true;
+      }).catch((error) => {
+        if (window.__CAPTURE_DEBUG) console.log('[CAM] getUserMedia error', error);
+        throw error;
+      });
+    }
+
+    let pressStartPos = null;
+    const MAX_PRESS_MOVE = 12;
+
+    function attachPressMoveListener() {
+      if (!captureButton || captureButton._pressMoveAttached) return;
+      const moveHandler = (ev) => {
+        if (!isPressing || !pressStartPos || isLongPress || isRecording) return;
+        const dx = ev.clientX - pressStartPos.x;
+        const dy = ev.clientY - pressStartPos.y;
+        if (Math.hypot(dx, dy) > MAX_PRESS_MOVE) {
+          handleCaptureCancel(ev);
+        }
+      };
+      window.addEventListener('pointermove', moveHandler, true);
+      captureButton._pressMoveAttached = true;
+    }
+
     async function handleCaptureStart(e) {
       e.preventDefault();
-      
-      // Se não há stream ativo, inicializar câmera
-      if (!currentStream) {
-        try {
-          await initializeCamera();
-          startCameraPreview();
-        } catch (error) {
-          console.error('Erro ao inicializar câmera:', error);
-          showCameraError(error);
-          return;
-        }
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
+      if (isPressing) return;
+      isPressing = true;
+      isLongPress = false;
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
       }
-      
-      // Se preview não está ativo (foto foi tirada), reativar câmera
-      if (!previewActive) {
-        if (currentStream) {
-          // Stream ainda existe, apenas reativar preview
-          startCameraPreview();
-        } else {
-          // Stream foi desligado, reinicializar câmera
-          try {
-            await initializeCamera();
-            startCameraPreview();
-          } catch (error) {
-            console.error('Erro ao reinicializar câmera:', error);
-            showCameraError(error);
-            return;
-          }
-        }
+      if (window.__CAPTURE_DEBUG) {
+        const topEl = document.elementFromPoint(e.clientX, e.clientY);
+        const path = typeof e.composedPath === 'function' ? e.composedPath().slice(0, 6) : [];
+        const pathLabels = path.map((el) => (el?.id ? `#${el.id}` : el?.className ? `.${String(el.className).split(' ')[0]}` : el?.tagName || 'node'));
+        const topLabel = topEl ? (topEl.id ? `#${topEl.id}` : topEl.className ? `.${String(topEl.className).split(' ')[0]}` : topEl.tagName) : null;
+        console.log('[CAPTURE_DEBUG] pointerdown topEl', topLabel, 'path', pathLabels);
+      }
+      pressStartPos = { x: e.clientX, y: e.clientY };
+      attachPressMoveListener();
+      try { captureButton.setPointerCapture?.(e.pointerId); } catch (_) {}
+
+      try {
+        await window.EditorBridge?.startCamera?.('user');
+      } catch (error) {
+        console.error('Erro ao inicializar câmera:', error);
+        showCameraError(error);
         return;
       }
       
-      // Se já está gravando, parar gravação com clique simples
-      if (isRecording) {
-        stopVideoRecording();
-        return;
-      }
+      if (isRecording) return;
       
       // Iniciar lógica de pressão longa para gravação
       pressStartTime = Date.now();
-      isLongPress = false;
       
       // Adicionar classe visual para feedback
       captureButton.classList.add('long-press');
       editorViewport.classList.add('capture-mode');
+      captureButton.classList.add('is-pressing');
       
       // Alterar ícone para indicar modo de vídeo em potencial
       const icon = captureButton.querySelector('.capture-icon');
@@ -484,62 +914,85 @@ const init = () => {
 
     async function handleCaptureEnd(e) {
       e.preventDefault();
-      
-      // Se está gravando, não fazer nada no handleCaptureEnd
-      // A gravação será parada no próximo handleCaptureStart
-      if (isRecording) {
-        return;
-      }
-      
-      const pressDuration = Date.now() - pressStartTime;
-      
-      // Limpar timer se ainda estiver ativo
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
+      try { captureButton.releasePointerCapture?.(e.pointerId); } catch (_) {}
+      if (!isPressing) return;
+      isPressing = false;
+      pressStartPos = null;
       if (pressTimer) {
         clearTimeout(pressTimer);
         pressTimer = null;
+      }
+      if (isRecording) {
+        stopVideoRecording(false);
+        captureButton.classList.remove('is-pressing');
+        return;
       }
       
       // Restaurar ícone da câmera
       const icon = captureButton.querySelector('.capture-icon');
       //icon.className = 'fas fa-camera capture-icon';
       
-      // Se não foi pressão longa, tirar foto
-      if (!isLongPress && pressDuration < LONG_PRESS_DURATION) {
-        takeInstantPhoto();
-      }
+      // Se não estava gravando, tirar foto
+      takeInstantPhoto();
       
       // Remover classes visuais
       setTimeout(() => {
         captureButton.classList.remove('long-press');
         editorViewport.classList.remove('capture-mode');
+        captureButton.classList.remove('is-pressing');
       }, 200);
       
       isLongPress = false;
     }
 
+    function handleCaptureCancel(e) {
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      if (e && typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+      try { captureButton.releasePointerCapture?.(e.pointerId); } catch (_) {}
+      isPressing = false;
+      pressStartPos = null;
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+      if (isRecording) {
+        stopVideoRecording(true);
+      }
+      captureButton.classList.remove('long-press');
+      editorViewport.classList.remove('capture-mode');
+      captureButton.classList.remove('is-pressing');
+      isLongPress = false;
+    }
+
     // Variáveis para o preview
     let previewVideoElement = null;
+    let cameraInitSessionId = null;
 
     // Iniciar preview da câmera em tempo real no canvas
     function startCameraPreview() {
-      if (!currentStream || !hiddenCameraStream.videoWidth) {
+      if (!currentStream) {
         setTimeout(startCameraPreview, 100);
         return;
       }
       
       previewActive = true;
+      editorViewport.dataset.cameraMode = '1';
+      setCameraUiState(true);
       
       // Adicionar classe visual para indicar câmera ativa
       captureButton.classList.remove('camera-inactive');
       captureButton.classList.add('camera-active');
       
       // Restaurar tooltip original
-      captureButton.title = 'Clique para foto, segure para iniciar vídeo, clique novamente para parar';
+      captureButton.title = 'Toque para foto, segure para vídeo';
       
       // Restaurar dica de uso
       const captureHint = document.getElementById('captureHint');
       if (captureHint) {
-        captureHint.innerHTML = 'Dica: <strong>Clique</strong> para foto, <strong>segure</strong> para iniciar vídeo, <strong>clique</strong> para parar';
+        captureHint.innerHTML = 'Dica: <strong>Toque</strong> para foto, <strong>segure</strong> para vídeo';
       }
       
       // Criar elemento de vídeo para preview (mais eficiente que canvas)
@@ -564,12 +1017,16 @@ const init = () => {
         
         // Redesenhar a grade
         setTimeout(refreshGrid, 100);
+      } else {
+        previewVideoElement.srcObject = currentStream;
       }
     }
     
     // Parar preview da câmera
     function stopCameraPreview() {
       previewActive = false;
+      delete editorViewport.dataset.cameraMode;
+      setCameraUiState(false);
       
       // Remover classe visual e adicionar classe inativa
       captureButton.classList.remove('camera-active');
@@ -580,7 +1037,7 @@ const init = () => {
       //icon.className = 'fas fa-camera capture-icon';
       
       // Atualizar tooltip
-      captureButton.title = 'Clique para reativar câmera';
+      captureButton.title = 'Toque para reativar câmera';
       
       // Remover elemento de preview se existir
       if (previewVideoElement && bgEl === previewVideoElement) {
@@ -591,20 +1048,47 @@ const init = () => {
     }
 
     // Desligar câmera completamente (para após tirar foto)
-    function stopCameraCompletely() {
+    function stopCameraCompletely(reason = '') {
       previewActive = false;
-      
-      // Parar todas as tracks do stream para desligar a luz da câmera
-      if (currentStream) {
-        currentStream.getTracks().forEach(track => {
-          track.stop();
+      delete editorViewport.dataset.cameraMode;
+      cameraInitPromise = null;
+      cameraInitSessionId = null;
+      setCameraUiState(false);
+      const stopTracks = (stream) => {
+        if (!stream || typeof stream.getTracks !== 'function') return;
+        stream.getTracks().forEach((track) => {
+          try { track.stop(); } catch (_) {}
         });
-        currentStream = null;
+      };
+
+      if (window.__CAPTURE_DEBUG) {
+        console.log('[CAM] stopCameraCompletely', { reason });
       }
+      // Parar todas as tracks conhecidas para garantir desligamento real
+      stopTracks(currentStream);
+      stopTracks(hiddenCameraStream?.srcObject);
+      stopTracks(previewVideoElement?.srcObject);
+      stopTracks(bgEl?.srcObject);
+      if (currentStream) {
+        try { window.top?.__workzMediaRegistry?.remove?.(currentStream); } catch (_) {}
+      }
+      currentStream = null;
       
-      // Limpar elemento de vídeo oculto
       if (hiddenCameraStream) {
+        try { hiddenCameraStream.pause?.(); } catch (_) {}
         hiddenCameraStream.srcObject = null;
+        hiddenCameraStream.onloadedmetadata = null;
+        hiddenCameraStream.onerror = null;
+      }
+      if (previewVideoElement) {
+        try { previewVideoElement.pause?.(); } catch (_) {}
+        previewVideoElement.srcObject = null;
+        try { previewVideoElement.removeAttribute('src'); previewVideoElement.load?.(); } catch (_) {}
+        previewVideoElement.onloadedmetadata = null;
+        previewVideoElement.onerror = null;
+      }
+      if (bgEl && bgEl.tagName === 'VIDEO' && bgEl.srcObject) {
+        bgEl.srcObject = null;
       }
       
       // Remover classe visual e adicionar classe inativa
@@ -616,13 +1100,38 @@ const init = () => {
       //icon.className = 'fas fa-camera capture-icon';
       
       // Atualizar tooltip
-      captureButton.title = 'Clique para reativar câmera';
+      captureButton.title = 'Toque para reativar câmera';
       
       // Remover elemento de preview se existir
       if (previewVideoElement && bgEl === previewVideoElement) {
         editor.removeChild(previewVideoElement);
         previewVideoElement = null;
         bgEl = null;
+      }
+      if (previewAnimationId) {
+        try { cancelAnimationFrame(previewAnimationId); } catch (_) {}
+        previewAnimationId = null;
+      }
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+      isPressing = false;
+      isLongPress = false;
+      recordingDiscard = false;
+      if (recordingTimer) {
+        clearInterval(recordingTimer);
+        recordingTimer = null;
+      }
+      if (recordingAutoStop) {
+        clearTimeout(recordingAutoStop);
+        recordingAutoStop = null;
+      }
+      if (window.__CAPTURE_DEBUG) {
+        console.log('[CAM] hard reset done', {
+          hasStream: !!currentStream,
+          hasInitPromise: !!cameraInitPromise
+        });
       }
     }
 
@@ -642,7 +1151,7 @@ const init = () => {
     }
 
     // Inicializar câmera
-    async function initializeCamera() {
+    async function initializeCamera(sessionId = null, reason = '', opts = {}) {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Seu navegador não suporta acesso à câmera');
       }
@@ -657,7 +1166,29 @@ const init = () => {
       };
 
       try {
+        if (window.__CAPTURE_DEBUG) {
+          console.log('[CAPTURE_DEBUG] getUserMedia', { constraints, reason, force: !!opts.force });
+        }
         currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        if (window.__CAPTURE_DEBUG) {
+          try {
+            console.log('[CAM] got stream tracks', currentStream.getTracks().map(t => t.readyState));
+          } catch (_) {}
+        }
+        const sessionToCheck = (sessionId == null ? currentOpenSessionId : Number(sessionId || 0));
+        if ((sessionToCheck !== currentOpenSessionId && reason !== 'user' && reason !== 'user_toggle') ||
+            (!autoStartAllowed && reason !== 'user' && reason !== 'user_toggle')) {
+          try {
+            currentStream.getTracks().forEach((track) => { try { track.stop(); } catch (_) {} });
+          } catch (_) {}
+          if (window.__CAPTURE_DEBUG) {
+            console.log('[CAPTURE_DEBUG] DISCARDED stream (stale session)', {
+              sessionToCheck, currentOpenSessionId, reason, autoStartAllowed
+            });
+          }
+          throw new Error('Stale camera session');
+        }
+        try { window.top?.__workzMediaRegistry?.add?.(currentStream, { source: 'editor', ts: Date.now() }); } catch (_) {}
         hiddenCameraStream.srcObject = currentStream;
         
         // Aguardar o vídeo estar pronto
@@ -720,201 +1251,178 @@ const init = () => {
       }
     }
 
+    function shouldAutoStartCamera() {
+      const items = window.POST_MEDIA_STATE?.items || [];
+      if (Array.isArray(items) && items.length > 0) return false;
+      if (editorViewport.dataset.cameraMode === '1') return true;
+      return true;
+    }
+
+    async function syncCameraAutoState() {
+      if (shouldAutoStartCamera() && autoStartAllowed) {
+        try {
+          await ensureCameraReady();
+        } catch (error) {
+          console.error('Erro ao iniciar câmera:', error);
+          showCameraError(error);
+        }
+      } else {
+        stopCameraCompletely('auto-blocked');
+      }
+    }
+
     // Tirar foto instantânea
-    function takeInstantPhoto() {
-      if (!currentStream) {
-        console.error('Stream da câmera não está disponível');
+    async function takeInstantPhoto() {
+      let video = null;
+      try {
+        video = await ensureCameraReady(currentOpenSessionId, 'user');
+      } catch (error) {
+        console.error('Câmera indisponível:', error);
+        showCameraError(error);
         return;
       }
 
-      // Usar o elemento de preview se disponível, senão usar o oculto
-      const video = previewVideoElement || hiddenCameraStream;
-      
       if (!video || !video.videoWidth) {
-        console.error('Elemento de vídeo não está pronto');
         return;
       }
-      
-      // Configurar canvas de captura
+
       const canvas = captureCanvas;
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      
       const ctx = canvas.getContext('2d');
-      
-      // Limpar canvas antes de desenhar
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      // Verificar se o vídeo está reproduzindo
-      if (video.readyState >= 2) { // HAVE_CURRENT_DATA
-        try {
-          // Desenhar o frame atual do vídeo
-          ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
-          
-          // Debug: verificar se algo foi desenhado
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const hasContent = imageData.data.some(pixel => pixel !== 0);
-          
-          // Converter para blob e usar como plano de fundo permanente
-          canvas.toBlob((blob) => {
-            if (blob && blob.size > 0) {
-              
-              // Debug: criar uma imagem temporária para verificar o conteúdo
-              const testImg = new Image();
-              testImg.onload = () => {
-                
-                // Se chegou até aqui, a imagem está válida
-                const url = URL.createObjectURL(blob);
-                
-                // Notificar main.js para adicionar à galeria e aplicar foto
-                try { window.dispatchEvent(new CustomEvent('editor:capture', { detail: { blob, type: 'image' } })); } catch(_) {}
-                stopCameraCompletely();
-                setBackgroundMedia(url, 'image', false); // false = permanente
-                
-                // Feedback visual
-                showCaptureSuccess('Foto capturada!');
-                
-                // Atualizar dica de uso
-                const captureHint = document.getElementById('captureHint');
-                if (captureHint) {
-                  captureHint.innerHTML = 'Dica: <strong>Clique</strong> para reativar câmera ou fazer upload';
-                }
-              };
-              
-              testImg.onerror = () => {
-                console.error('Imagem de teste falhou ao carregar - blob pode estar corrompido');
-                showCameraError(new Error('Imagem capturada está corrompida'));
-              };
-              
-              testImg.src = URL.createObjectURL(blob);
-              
-            } else {
-              console.error('Erro: Blob vazio ou inválido');
-              showCameraError(new Error('Falha na captura da foto'));
-            }
-          }, 'image/jpeg', 0.9);
-          
-        } catch (error) {
-          console.error('Erro ao desenhar no canvas:', error);
-          showCameraError(new Error('Erro na captura: ' + error.message));
-        }
-      } else {
-        console.error('Vídeo não está pronto para captura. ReadyState:', video.readyState);
-        showCameraError(new Error('Vídeo não está pronto'));
+
+      try {
+        ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+        canvas.toBlob((blob) => {
+          if (!blob || !blob.size) return;
+          const check = validateMediaPayload(blob, 'Foto capturada');
+          if (!check.ok) {
+            notifyEditor('error', check.message);
+            return;
+          }
+          let layoutSnapshot = null;
+          try { if (window.EditorBridge?.serialize) layoutSnapshot = window.EditorBridge.serialize(); } catch (_) {}
+          try { window.dispatchEvent(new CustomEvent('editor:capture', { detail: { blob, type: 'image', source: 'camera', layout: layoutSnapshot } })); } catch(_) {}
+        }, 'image/jpeg', 0.92);
+      } catch (error) {
+        console.error('Erro ao capturar foto:', error);
+        showCameraError(new Error('Erro ao capturar foto.'));
       }
     }
 
     // Iniciar gravação de vídeo
     function startVideoRecording() {
+      if (typeof MediaRecorder === 'undefined') {
+        showCameraError(new Error('Gravação não suportada neste navegador.'));
+        return;
+      }
       if (!currentStream) {
         console.error('Câmera não está disponível');
+        showCameraError(new Error('Câmera indisponível.'));
         return;
       }
 
-      // Manter preview durante gravação, apenas marcar como gravando
-      previewActive = false;
+      const supportedTypes = [
+        'video/webm;codecs=vp8,opus',
+        'video/webm;codecs=vp9,opus',
+        'video/webm'
+      ];
 
-      // Adicionar áudio para gravação de vídeo
-      navigator.mediaDevices.getUserMedia({
-        video: { facingMode: currentFacingMode },
-        audio: true
-      }).then(stream => {
-        recordedChunks = [];
-        
-        // Verificar formatos suportados
-        const supportedTypes = [
-          'video/webm;codecs=vp8,opus',
-          'video/webm;codecs=vp9,opus',
-          'video/webm',
-          'video/mp4'
-        ];
-
-        let selectedType = null;
-        for (const type of supportedTypes) {
-          if (MediaRecorder.isTypeSupported(type)) {
-            selectedType = type;
-            break;
-          }
+      let selectedType = null;
+      for (const type of supportedTypes) {
+        if (MediaRecorder.isTypeSupported(type)) {
+          selectedType = type;
+          break;
         }
+      }
 
-        const options = {};
-        if (selectedType) {
-          options.mimeType = selectedType;
-          if (selectedType.includes('webm')) {
-            options.videoBitsPerSecond = 2500000;
-            options.audioBitsPerSecond = 128000;
-          }
+      const options = {};
+      if (selectedType) {
+        options.mimeType = selectedType;
+        options.videoBitsPerSecond = 700000;
+      }
+
+      recordedChunks = [];
+      recordingDiscard = false;
+
+      try {
+        mediaRecorder = new MediaRecorder(currentStream, options);
+      } catch (error) {
+        console.error('Erro ao iniciar MediaRecorder:', error);
+        showCameraError(error);
+        return;
+      }
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordedChunks.push(event.data);
         }
+      };
 
-        mediaRecorder = new MediaRecorder(stream, options);
-        
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            recordedChunks.push(event.data);
-          }
-        };
+      mediaRecorder.onstop = () => {
+        if (recordingDiscard) {
+          recordedChunks = [];
+          return;
+        }
+        if (recordedChunks.length === 0) {
+          console.error('Nenhum dado foi gravado');
+          showCameraError(new Error('Nenhum dado foi gravado'));
+          return;
+        }
+        const mimeType = selectedType || 'video/webm';
+        const blob = new Blob(recordedChunks, { type: mimeType });
+        const check = validateMediaPayload(blob, 'Vídeo gravado');
+        if (!check.ok) {
+          notifyEditor('error', check.message);
+          return;
+        }
+        let layoutSnapshot = null;
+        try { if (window.EditorBridge?.serialize) layoutSnapshot = window.EditorBridge.serialize(); } catch (_) {}
+        try { window.dispatchEvent(new CustomEvent('editor:capture', { detail: { blob, type: 'video', source: 'camera', layout: layoutSnapshot } })); } catch(_) {}
+      };
 
-        mediaRecorder.onstop = () => {
-          
-          if (recordedChunks.length === 0) {
-            console.error('Nenhum dado foi gravado');
-            showCameraError(new Error('Nenhum dado foi gravado'));
-            return;
-          }
-          
-          const mimeType = selectedType || 'video/webm';
-          const blob = new Blob(recordedChunks, { type: mimeType });
-          
-          const url = URL.createObjectURL(blob);
-          
-          // Parar stream de áudio/vídeo da gravação
-          stream.getTracks().forEach(track => {
-            track.stop();
-          });
-          
-          // Notificar galeria e aplicar vídeo como fundo
-          try { window.dispatchEvent(new CustomEvent('editor:capture', { detail: { blob, type: 'video' } })); } catch(_) {}
-          stopCameraCompletely();
-          setBackgroundMedia(url, 'video', false); // false = permanente
-          
-          // Atualizar duração do vídeo
-          const videoElement = document.querySelector('.bg-media');
-          if (videoElement && videoElement.tagName === 'VIDEO') {
-            videoElement.addEventListener('loadedmetadata', () => {
-              if (videoElement.duration && !isNaN(videoElement.duration)) {
-                const limitedDuration = Math.min(60, videoElement.duration);
-                vidDur.value = limitedDuration.toFixed(1);
-                updateVideoExportInfo();
-              }
-            });
-          }
-          
-          showCaptureSuccess('Vídeo gravado!');
-          
-          // Atualizar dica de uso
-          const captureHint = document.getElementById('captureHint');
-          if (captureHint) {
-            captureHint.innerHTML = 'Dica: <strong>Clique</strong> para reativar câmera ou fazer upload';
-          }
-        };
-
+      try {
         mediaRecorder.start(100);
-        isRecording = true;
-        recordingStartTime = Date.now();
-        
-        // Atualizar UI
-        captureButton.classList.add('recording');
-      }).catch(error => {
+      } catch (error) {
         console.error('Erro ao iniciar gravação:', error);
         showCameraError(error);
-      });
+        return;
+      }
+
+      isRecording = true;
+      recordingStartTime = Date.now();
+      const captureHint = document.getElementById('captureHint');
+      const maxMs = VIDEO_EXPORT_MAX_SECONDS * 1000;
+      if (recordingTimer) clearInterval(recordingTimer);
+      if (recordingAutoStop) clearTimeout(recordingAutoStop);
+      const formatTime = (totalSeconds) => {
+        const mins = Math.floor(totalSeconds / 60);
+        const secs = totalSeconds % 60;
+        return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      };
+      recordingTimer = setInterval(() => {
+        const elapsed = Math.min(VIDEO_EXPORT_MAX_SECONDS, Math.floor((Date.now() - recordingStartTime) / 1000));
+        if (captureHint) {
+          captureHint.innerHTML = `Gravando ${formatTime(elapsed)} / 01:00`;
+        }
+      }, 500);
+      recordingAutoStop = setTimeout(() => {
+        if (isRecording) stopVideoRecording(false);
+      }, maxMs);
+
+      captureButton.classList.add('recording');
+      captureButton.classList.add('is-recording');
+      window.addEventListener('blur', handleRecordingAbort);
+      document.addEventListener('visibilitychange', handleVisibilityAbort);
     }
 
     // Parar gravação de vídeo
-    function stopVideoRecording() {
+    function stopVideoRecording(discard = false) {
       if (mediaRecorder && isRecording) {
         
         try {
+          recordingDiscard = discard;
           mediaRecorder.stop();
         } catch (error) {
           console.error('Erro ao parar MediaRecorder:', error);
@@ -922,20 +1430,56 @@ const init = () => {
         
         isRecording = false;
         captureButton.classList.remove('recording');
+        if (recordingTimer) {
+          clearInterval(recordingTimer);
+          recordingTimer = null;
+        }
+        if (recordingAutoStop) {
+          clearTimeout(recordingAutoStop);
+          recordingAutoStop = null;
+        }
+        const captureHint = document.getElementById('captureHint');
+        if (captureHint) {
+          captureHint.innerHTML = 'Dica: <strong>Toque</strong> para foto, <strong>segure</strong> para vídeo';
+        }
         
         // Restaurar ícone da câmera
         const icon = captureButton.querySelector('.capture-icon');
         //icon.className = 'fas fa-camera capture-icon';
+        captureButton.classList.remove('is-recording');
+        window.removeEventListener('blur', handleRecordingAbort);
+        document.removeEventListener('visibilitychange', handleVisibilityAbort);
       } else {
       }
     }
 
     // Definir mídia como plano de fundo
-    function setBackgroundMedia(url, type, isPreview = false) {
+    function clearBackgroundMedia({ preserveBlob = false } = {}) {
+      if (!bgEl) return;
+      try { editor.removeChild(bgEl); } catch (_) {}
+      if (bgEl.dataset && bgEl.dataset.preserveBlob === '1') {
+        // Mantém blob URLs para mídias ainda referenciadas pela galeria.
+      } else if (!preserveBlob) {
+        revokeBlobUrl(bgEl);
+      }
+      if (bgEl === previewVideoElement) {
+        previewVideoElement = null;
+      }
+      bgEl = null;
+      setTimeout(refreshGrid, 100);
+      setTimeout(updateEnviarButton, 200);
+    }
+
+    function setBackgroundMedia(url, type, isPreview = false, preserveBlob = false) {
       
       const element = document.createElement(type === 'image' ? 'img' : 'video');
       element.className = 'bg-media';
       element.src = url;
+      element.dataset.preserveBlob = preserveBlob ? '1' : '0';
+      markBlobUrl(element, url);
+      if (!isPreview) {
+        stopCameraCompletely();
+      }
       
       // Marcar como preview se necessário
       if (isPreview) {
@@ -956,7 +1500,7 @@ const init = () => {
         
         element.addEventListener('loadedmetadata', () => {
           if (element.duration && !isNaN(element.duration)) {
-            const limitedDuration = Math.min(60, element.duration);
+            const limitedDuration = Math.min(VIDEO_EXPORT_MAX_SECONDS, element.duration);
             vidDur.value = limitedDuration.toFixed(1);
             updateVideoExportInfo();
           }
@@ -965,18 +1509,7 @@ const init = () => {
       
       // Remover elemento anterior
       if (bgEl) {
-        editor.removeChild(bgEl);
-        
-        // Se o anterior era um preview, limpar adequadamente
-        if (bgEl.classList.contains('preview-media')) {
-          if (bgEl.src && bgEl.src.startsWith('blob:')) {
-            URL.revokeObjectURL(bgEl.src);
-          }
-          // Se era o preview de vídeo, limpar referência
-          if (bgEl === previewVideoElement) {
-            previewVideoElement = null;
-          }
-        }
+        clearBackgroundMedia({ preserveBlob });
       }
       
       bgEl = element;
@@ -1048,11 +1581,12 @@ const init = () => {
       editor.appendChild(box); selectItem(box); startEditingText(box);
     }
   
-    function createImageItem(src){
+    function createImageItem(src, assetId = null){
       // Criar um wrapper div para a imagem (pois img não pode ter filhos)
       const wrapper = document.createElement('div');
       wrapper.className='item draggable image-item';
       wrapper.dataset.type='image';
+      if (assetId) wrapper.dataset.assetId = assetId;
       wrapper.dataset.anim='none'; wrapper.dataset.delay='0'; wrapper.dataset.dur='0.8';
       
       // Forçar posicionamento absoluto independente
@@ -1079,10 +1613,23 @@ const init = () => {
           selectItem(wrapper);
         }, 10);
       };
+      img.onerror = ()=>{};
       
       img.src = src;
+      if (assetId && src && String(src).startsWith('blob:')) {
+        img.dataset.assetId = assetId;
+        img.dataset.previewUrl = src;
+        EditorAssetStore.addPreview(assetId, src);
+      }
       wrapper.appendChild(img);
       editor.appendChild(wrapper);
+    }
+
+    function createImageItemFromBlob(blob) {
+      const assetId = EditorAssetStore.register(blob);
+      const url = URL.createObjectURL(blob);
+      EditorAssetStore.addPreview(assetId, url);
+      createImageItem(url, assetId);
     }
   
     function placeDefaults(el, left, top, w, h, rot){
@@ -1349,6 +1896,12 @@ const init = () => {
     btnDelete.addEventListener('click', ()=>{
       if(!selected) return;
       const toRemove = selected;
+      const assetId = toRemove?.dataset?.assetId || null;
+      const img = toRemove?.querySelector?.('img');
+      const previewUrl = img?.dataset?.previewUrl || null;
+      if (assetId && previewUrl) {
+        EditorAssetStore.revokePreview(assetId, previewUrl);
+      }
       selectItem(null);
       toRemove.remove();
     });
@@ -1575,8 +2128,7 @@ const init = () => {
           const blob = it.getAsFile();
           if (blob){
             e.preventDefault();
-            const url = URL.createObjectURL(blob);
-            const img = createImageItem(url);
+            createImageItemFromBlob(blob);
             return;
           }
         }
@@ -1593,6 +2145,12 @@ const init = () => {
     btnEnviar.addEventListener('click', handleEnviar);
     
     async function handleEnviar() {
+      if (isSaving) return;
+      const publishBtn = document.querySelector('#publishGalleryBtn, #linkSharePublish');
+      if (publishBtn) {
+        publishBtn.click();
+        return;
+      }
       // Detectar tipo de conteúdo automaticamente
       const contentType = detectContentType();
       
@@ -1665,6 +2223,7 @@ const init = () => {
 
     // ---------- Novas funções para salvar no servidor
     async function exportAndSaveImage() {
+      if (isSaving) return; isSaving = true;
       try {
         // Desabilitar botão e mostrar progresso
         btnEnviar.disabled = true;
@@ -1685,6 +2244,10 @@ const init = () => {
         // Se o arquivo ainda for muito grande, redimensionar
         if (blob.size > 2 * 1024 * 1024) { // Se maior que 2MB
           blob = await compressImage(outCanvas, 0.7, 1024); // Reduzir para max 1024px
+        }
+        const check = validateMediaPayload(blob, 'Imagem');
+        if (!check.ok) {
+          throw new Error(check.message);
         }
 
         // Obter dados do usuário atual do contexto global
@@ -1745,11 +2308,7 @@ const init = () => {
       } catch (error) {
         console.error('Erro ao salvar imagem:', error);
         // Usar função de notificação global se disponível
-        if (typeof window.notifyError === 'function') {
-          window.notifyError('Erro ao salvar imagem: ' + error.message);
-        } else {
-          alert('Erro ao salvar imagem: ' + error.message);
-        }
+        notifyEditor('error', 'Erro ao salvar imagem: ' + error.message);
       } finally {
         // Restaurar botão
         btnEnviar.disabled = false;
@@ -1776,6 +2335,10 @@ const init = () => {
 
         if (!videoBlob) {
           throw new Error('Falha na geração do vídeo');
+        }
+        const check = validateMediaPayload(videoBlob, 'Vídeo');
+        if (!check.ok) {
+          throw new Error(check.message + ' Reduza a duração ou FPS.');
         }
 
         // Obter dados do usuário atual do contexto global
@@ -1838,11 +2401,7 @@ const init = () => {
       } catch (error) {
         console.error('Erro ao salvar vídeo:', error);
         // Usar função de notificação global se disponível
-        if (typeof window.notifyError === 'function') {
-          window.notifyError('Erro ao salvar vídeo: ' + error.message);
-        } else {
-          alert('Erro ao salvar vídeo: ' + error.message);
-        }
+        notifyEditor('error', 'Erro ao salvar vídeo: ' + error.message);
       } finally {
         // Restaurar botão
         btnEnviar.disabled = false;
@@ -1857,22 +2416,22 @@ const init = () => {
     // Função para exportar vídeo como blob (para salvamento no servidor)
     async function exportVideoToBlob() {
       return new Promise(async (resolve, reject) => {
+        let wasOriginallyMuted = null;
+        let originalVolume = null;
+        let prevOutW = null;
+        let prevOutH = null;
         try {
-          // FPS um pouco mais alto por padrão para reduzir travamentos na timeline
-          const userFps = Number(vidFPS.value);
-          const fps = Math.max(18, Math.min(30, Number.isFinite(userFps) ? userFps : 24));
+          const fps = FIXED_VIDEO_FPS;
           // Duração: respeita controle do usuário ou duração do vídeo de fundo (até 60s)
           let targetDur = Number(vidDur?.value);
           if (!Number.isFinite(targetDur) || targetDur <= 0) {
             const bgDur = (bgEl && bgEl.tagName === 'VIDEO' && isFinite(bgEl.duration)) ? bgEl.duration : 6;
             targetDur = bgDur;
           }
-          const dur = Math.max(1, Math.min(60, targetDur));
+          const dur = Math.max(1, Math.min(VIDEO_EXPORT_MAX_SECONDS, targetDur));
           const totalFrames = Math.round(fps*dur);
       
           // Para vídeos de fundo, configurar reprodução
-          let wasOriginallyMuted = null;
-          let originalVolume = null;
           if (bgEl && bgEl.tagName === 'VIDEO') {
             bgEl.currentTime = 0;
             bgEl.playbackRate = 1.0;
@@ -1885,12 +2444,14 @@ const init = () => {
           
           // Canvas de gravação reduzido (downscale) para diminuir resolução
           const recordCanvas = document.createElement('canvas');
-          const rw0 = outCanvas.width, rh0 = outCanvas.height;
-          const MAX_SIDE = 480; // lado máximo para gravar
-          const scale = Math.min(1, MAX_SIDE / Math.max(rw0, rh0));
-          const rw = Math.max(1, Math.round(rw0 * scale));
-          const rh = Math.max(1, Math.round(rh0 * scale));
-          recordCanvas.width = rw; recordCanvas.height = rh;
+          prevOutW = outCanvas.width;
+          prevOutH = outCanvas.height;
+          outCanvas.width = FIXED_VIDEO_WIDTH;
+          outCanvas.height = FIXED_VIDEO_HEIGHT;
+          const rw = FIXED_VIDEO_WIDTH;
+          const rh = FIXED_VIDEO_HEIGHT;
+          recordCanvas.width = rw;
+          recordCanvas.height = rh;
           const rctx = recordCanvas.getContext('2d');
 
           // Capturar stream do canvas reduzido no FPS desejado
@@ -1938,12 +2499,9 @@ const init = () => {
           // Configurar MediaRecorder
           let selectedFormat = null;
           const formats = [
-            'video/webm;codecs=vp8,opus',
-            'video/webm;codecs=vp9,opus',
+            'video/webm;codecs=vp9',
             'video/webm;codecs=vp8',
-            'video/webm;codecs=vp9', 
-            'video/webm',
-            'video/mp4'
+            'video/webm'
           ];
           
           for (const format of formats) {
@@ -1955,8 +2513,8 @@ const init = () => {
           
           const rec = new MediaRecorder(finalStream, { 
             mimeType: selectedFormat || 'video/webm',
-            videoBitsPerSecond: 1500000, // bitrate maior para reduzir travamentos
-            audioBitsPerSecond: 128000   // áudio em qualidade melhor
+            videoBitsPerSecond: FIXED_VIDEO_BITRATE,
+            audioBitsPerSecond: FIXED_AUDIO_BITRATE
           });
           
           const chunks = [];
@@ -1982,6 +2540,9 @@ const init = () => {
               }
             }
             
+            // Restaurar canvas original
+            outCanvas.width = prevOutW;
+            outCanvas.height = prevOutH;
             resolve(blob);
           };
           
@@ -2006,6 +2567,10 @@ const init = () => {
             // Copia e reduz para o canvas de gravação
             rctx.clearRect(0,0,rw,rh);
             rctx.drawImage(outCanvas, 0, 0, rw, rh);
+
+            if (i % 6 === 0) {
+              await new Promise(resolve => setTimeout(resolve, 0));
+            }
             
             const targetTime = recordingStartTime + (i + 1) * frameInterval;
             const currentRealTime = Date.now();
@@ -2031,9 +2596,232 @@ const init = () => {
               bgEl.muted = wasOriginallyMuted;
             }
           }
+          try {
+            outCanvas.width = FIXED_VIDEO_WIDTH;
+            outCanvas.height = FIXED_VIDEO_HEIGHT;
+          } catch (_) {}
+          if (prevOutW && prevOutH) {
+            try { outCanvas.width = prevOutW; outCanvas.height = prevOutH; } catch (_) {}
+          }
           reject(error);
         }
       });
+    }
+
+    async function exportImageFromUrl(sourceUrl, layout = null, opts = {}) {
+      if (!sourceUrl) throw new Error('Fonte de imagem ausente');
+      const prevLayout = serializeLayout();
+      if (layout) {
+        try { loadLayout(layout); } catch (_) {}
+      }
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = sourceUrl;
+      if (window.__EXPORT_DEBUG) {
+        console.log('[EXPORT_DEBUG] exportImageFromUrl', sourceUrl);
+      }
+      try {
+        await ensureBackgroundReadyWithRetry(img);
+        if (window.__EXPORT_DEBUG) {
+          console.log('[EXPORT_DEBUG] image ready', { complete: img.complete, naturalWidth: img.naturalWidth, src: img.src });
+        }
+        await renderFrame(null, false, img);
+        const quality = Number.isFinite(opts?.quality) ? opts.quality : 0.9;
+        const blob = await new Promise((res) => outCanvas.toBlob(res, 'image/jpeg', quality));
+        if (!blob || !blob.size) throw new Error('Blob de imagem vazio');
+        return blob;
+      } finally {
+        if (layout) {
+          try { loadLayout(prevLayout); } catch (_) {}
+        }
+      }
+    }
+
+    async function exportVideoFromUrl(sourceUrl, layout = null, opts = {}) {
+      if (!sourceUrl) throw new Error('Fonte de vídeo ausente');
+      const prevLayout = serializeLayout();
+      if (layout) {
+        try { loadLayout(layout); } catch (_) {}
+      }
+      const video = document.createElement('video');
+      video.playsInline = true;
+      video.muted = false;
+      video.preload = 'auto';
+      video.src = sourceUrl;
+      if (window.__EXPORT_DEBUG) {
+        console.log('[EXPORT_DEBUG] exportVideoFromUrl', sourceUrl);
+      }
+      let wasOriginallyMuted = null;
+      let originalVolume = null;
+      let prevOutW = null;
+      let prevOutH = null;
+      try {
+        await ensureBackgroundReadyWithRetry(video);
+        if (window.__EXPORT_DEBUG) {
+          console.log('[EXPORT_DEBUG] video ready', { readyState: video.readyState, videoWidth: video.videoWidth, src: video.currentSrc || video.src });
+        }
+        const fps = FIXED_VIDEO_FPS;
+        let targetDur = Number(opts?.duration);
+        if (!Number.isFinite(targetDur) || targetDur <= 0) {
+          const vidDur = isFinite(video.duration) ? video.duration : 6;
+          targetDur = vidDur;
+        }
+        const dur = Math.max(1, Math.min(VIDEO_EXPORT_MAX_SECONDS, targetDur));
+        const totalFrames = Math.round(fps * dur);
+
+        video.currentTime = 0;
+        wasOriginallyMuted = video.muted;
+        originalVolume = video.volume;
+        video.muted = false;
+        video.volume = 1.0;
+        try { await video.play(); } catch (_) {}
+
+        const recordCanvas = document.createElement('canvas');
+        prevOutW = outCanvas.width;
+        prevOutH = outCanvas.height;
+        outCanvas.width = FIXED_VIDEO_WIDTH;
+        outCanvas.height = FIXED_VIDEO_HEIGHT;
+        const rw = FIXED_VIDEO_WIDTH;
+        const rh = FIXED_VIDEO_HEIGHT;
+        recordCanvas.width = rw;
+        recordCanvas.height = rh;
+        const rctx = recordCanvas.getContext('2d');
+
+        const canvasStream = (typeof recordCanvas.captureStream === 'function')
+          ? recordCanvas.captureStream(fps)
+          : recordCanvas.captureStream();
+        const canvasTrack = canvasStream.getVideoTracks()[0] || null;
+        if (canvasTrack?.applyConstraints) {
+          try { canvasTrack.applyConstraints({ frameRate: fps, width: rw, height: rh }); } catch (_) {}
+        }
+
+        let audioTrack = null;
+        try {
+          if (typeof video.captureStream === 'function') {
+            const vStream = video.captureStream();
+            audioTrack = vStream.getAudioTracks()[0] || null;
+          }
+        } catch (_) {}
+
+        if (!audioTrack) {
+          try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (AudioCtx) {
+              const audioContext = new AudioCtx();
+              const source = audioContext.createMediaElementSource(video);
+              const destination = audioContext.createMediaStreamDestination();
+              source.connect(destination);
+              audioTrack = destination.stream.getAudioTracks()[0] || null;
+            }
+          } catch (_) {}
+        }
+
+        const finalStream = audioTrack
+          ? new MediaStream([canvasTrack, audioTrack].filter(Boolean))
+          : (canvasTrack ? new MediaStream([canvasTrack]) : canvasStream);
+
+        let selectedFormat = null;
+        const formats = [
+          'video/webm;codecs=vp9',
+          'video/webm;codecs=vp8',
+          'video/webm'
+        ];
+        for (const format of formats) {
+          if (MediaRecorder.isTypeSupported(format)) {
+            selectedFormat = format;
+            break;
+          }
+        }
+
+        const rec = new MediaRecorder(finalStream, {
+          mimeType: selectedFormat || 'video/webm',
+          videoBitsPerSecond: FIXED_VIDEO_BITRATE,
+          audioBitsPerSecond: FIXED_AUDIO_BITRATE
+        });
+
+        const chunks = [];
+        const recordingStartTime = Date.now();
+        rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+
+        const blobPromise = new Promise((resolve) => {
+          rec.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+        });
+
+        rec.start(100);
+        const frameInterval = 1000 / fps;
+
+        for (let i = 0; i < totalFrames; i++) {
+          const currentTime = i / fps;
+          await renderFrame(currentTime, false, video);
+          rctx.clearRect(0,0,rw,rh);
+          rctx.drawImage(outCanvas, 0, 0, rw, rh);
+          if (i % 6 === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+          const targetTime = recordingStartTime + (i + 1) * frameInterval;
+          const currentRealTime = Date.now();
+          const waitTime = Math.max(0, targetTime - currentRealTime);
+          await new Promise((resolve) => setTimeout(() => requestAnimationFrame(resolve), waitTime));
+        }
+
+        rec.stop();
+        const blob = await blobPromise;
+        outCanvas.width = prevOutW;
+        outCanvas.height = prevOutH;
+        if (!blob || !blob.size) throw new Error('Blob de vídeo vazio');
+        return blob;
+      } finally {
+        try { video.pause(); } catch (_) {}
+        video.src = '';
+        if (prevOutW && prevOutH) {
+          try { outCanvas.width = prevOutW; outCanvas.height = prevOutH; } catch (_) {}
+        }
+        if (originalVolume != null) video.volume = originalVolume;
+        if (wasOriginallyMuted != null) video.muted = wasOriginallyMuted;
+        if (layout) {
+          try { loadLayout(prevLayout); } catch (_) {}
+        }
+      }
+    }
+
+    async function exportImageFromBlob(blob, layout = null, opts = {}) {
+      if (!blob || !blob.size) throw new Error('Blob de imagem inválido');
+      const tempUrl = URL.createObjectURL(blob);
+      if (window.__EXPORT_DEBUG) {
+        console.log('[EXPORT_DEBUG] image tempUrl created', { url: tempUrl, size: blob.size });
+      }
+      try {
+        const out = await exportImageFromUrl(tempUrl, layout, opts);
+        if (window.__EXPORT_DEBUG) {
+          console.log('[EXPORT_DEBUG] image export blob', { size: out?.size || 0 });
+        }
+        return out;
+      } finally {
+        try { URL.revokeObjectURL(tempUrl); } catch (_) {}
+        if (window.__EXPORT_DEBUG) {
+          console.log('[EXPORT_DEBUG] image tempUrl revoked', tempUrl);
+        }
+      }
+    }
+
+    async function exportVideoFromBlob(blob, layout = null, opts = {}) {
+      if (!blob || !blob.size) throw new Error('Blob de vídeo inválido');
+      const tempUrl = URL.createObjectURL(blob);
+      if (window.__EXPORT_DEBUG) {
+        console.log('[EXPORT_DEBUG] video tempUrl created', { url: tempUrl, size: blob.size });
+      }
+      try {
+        const out = await exportVideoFromUrl(tempUrl, layout, opts);
+        if (window.__EXPORT_DEBUG) {
+          console.log('[EXPORT_DEBUG] video export blob', { size: out?.size || 0 });
+        }
+        return out;
+      } finally {
+        try { URL.revokeObjectURL(tempUrl); } catch (_) {}
+        if (window.__EXPORT_DEBUG) {
+          console.log('[EXPORT_DEBUG] video tempUrl revoked', tempUrl);
+        }
+      }
     }
   
     // ---------- Função para atualizar informações de exportação
@@ -2044,12 +2832,12 @@ const init = () => {
       if (bgEl && bgEl.tagName === 'VIDEO' && bgEl.duration && !isNaN(bgEl.duration)) {
         const currentDuration = Number(vidDur.value) || 6;
         const videoDuration = bgEl.duration;
-        const maxDuration = Math.min(60, videoDuration);
+        const maxDuration = Math.min(VIDEO_EXPORT_MAX_SECONDS, videoDuration);
         
         videoExportInfo.classList.remove('hidden');
         
         if (currentDuration === maxDuration) {
-          videoExportInfoText.textContent = `Usando duração do vídeo importado: ${maxDuration.toFixed(1)}s${videoDuration > 60 ? ' (limitado a 60s)' : ''}`;
+          videoExportInfoText.textContent = `Usando duração do vídeo importado: ${maxDuration.toFixed(1)}s${videoDuration > VIDEO_EXPORT_MAX_SECONDS ? ' (limitado a ' + VIDEO_EXPORT_MAX_SECONDS + 's)' : ''}`;
         } else {
           videoExportInfoText.textContent = `Duração personalizada: ${currentDuration}s (vídeo importado tem ${videoDuration.toFixed(1)}s)`;
         }
@@ -2061,11 +2849,11 @@ const init = () => {
     // ---------- Exportação de Vídeo
     async function exportVideo() {
       try {
-        const fps = Math.max(10, Math.min(60, Number(vidFPS.value)||30));
+        const fps = Math.max(VIDEO_EXPORT_MIN_FPS, Math.min(VIDEO_EXPORT_MAX_FPS, Number(vidFPS.value)||18));
         
         // SEMPRE usar a duração definida na interface para vídeos gravados
         // Isso garante que vídeos com duração "Infinity" sejam exportados corretamente
-        const dur = Math.max(1, Number(vidDur.value)||6);
+        const dur = Math.max(1, Math.min(VIDEO_EXPORT_MAX_SECONDS, Number(vidDur.value)||6));
         
         const totalFrames = Math.round(fps*dur);
     
@@ -2140,8 +2928,8 @@ const init = () => {
         
         const rec = new MediaRecorder(finalStream, { 
           mimeType: selectedFormat || 'video/webm',
-          videoBitsPerSecond: 2500000, // 2.5 Mbps para qualidade consistente
-          audioBitsPerSecond: 128000   // 128 kbps para áudio
+          videoBitsPerSecond: VIDEO_EXPORT_BITRATE,
+          audioBitsPerSecond: 96000   // 96 kbps para áudio
         });
         const chunks = [];
         let recordingStartTime = Date.now();
@@ -2192,6 +2980,7 @@ const init = () => {
           // Criar um vídeo temporário para verificar a duração
           const tempVideo = document.createElement('video');
           tempVideo.src = URL.createObjectURL(blob);
+          markBlobUrl(tempVideo, tempVideo.src);
           tempVideo.addEventListener('loadedmetadata', () => {
             const videoDuration = tempVideo.duration;
             
@@ -2204,6 +2993,7 @@ const init = () => {
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a'); a.href=url; a.download='slide.webm'; a.click();
           URL.revokeObjectURL(url);
+          revokeBlobUrl(tempVideo);
           
           // Nada para limpar - usamos apenas o vídeo original
           // Restaurar velocidade normal do vídeo
@@ -2230,16 +3020,114 @@ const init = () => {
       }
     }
   
+    async function waitImageReady(img) {
+      if (!img) throw new Error('Imagem indisponível');
+      if (img.complete && img.naturalWidth > 0) return;
+      try {
+        const decodePromise = img.decode ? img.decode() : Promise.resolve();
+        await Promise.race([
+          decodePromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout ao decodificar imagem')), 1500))
+        ]);
+        if (img.naturalWidth > 0) return;
+      } catch (_) {}
+      await new Promise((resolve, reject) => {
+        const onLoad = () => { cleanup(); resolve(); };
+        const onError = () => { cleanup(); reject(new Error('Imagem não carregou')); };
+        const cleanup = () => {
+          img.removeEventListener('load', onLoad);
+          img.removeEventListener('error', onError);
+        };
+        img.addEventListener('load', onLoad);
+        img.addEventListener('error', onError);
+      });
+    }
+
+    async function waitVideoReady(video) {
+      if (!video) throw new Error('Vídeo indisponível');
+      if (video.readyState >= 2 && video.videoWidth > 0) return;
+      await new Promise((resolve, reject) => {
+        let done = false;
+        const finish = (ok) => {
+          if (done) return;
+          done = true;
+          video.removeEventListener('loadedmetadata', onReady);
+          video.removeEventListener('canplay', onReady);
+          ok ? resolve() : reject(new Error('Vídeo não carregou'));
+        };
+        const onReady = () => finish(true);
+        video.addEventListener('loadedmetadata', onReady, { once: true });
+        video.addEventListener('canplay', onReady, { once: true });
+        setTimeout(() => {
+          if (video.videoWidth > 0) finish(true);
+          else finish(false);
+        }, 2000);
+      });
+      if (video.videoWidth <= 0) {
+        throw new Error('Vídeo sem dimensões válidas');
+      }
+    }
+
+    async function ensureBackgroundReady(el) {
+      if (!el) return;
+      if (el.tagName === 'IMG') {
+        await waitImageReady(el);
+      } else if (el.tagName === 'VIDEO') {
+        await waitVideoReady(el);
+      }
+    }
+
+    async function ensureBackgroundReadyWithRetry(el) {
+      try {
+        await ensureBackgroundReady(el);
+        if (el?.tagName === 'IMG' && el.naturalWidth <= 0) {
+          throw new Error('Imagem com largura inválida');
+        }
+        if (el?.tagName === 'VIDEO' && el.videoWidth <= 0) {
+          throw new Error('Vídeo com largura inválida');
+        }
+        return;
+      } catch (err) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await ensureBackgroundReady(el);
+        if (el?.tagName === 'IMG' && el.naturalWidth <= 0) {
+          throw new Error(`Imagem inválida após retry: ${el.src || 'sem src'}`);
+        }
+        if (el?.tagName === 'VIDEO' && el.videoWidth <= 0) {
+          throw new Error(`Vídeo inválido após retry: ${el.currentSrc || el.src || 'sem src'}`);
+        }
+        if (window.__EXPORT_DEBUG) console.warn('[EXPORT_DEBUG] bg ready retry', err);
+      }
+    }
+
     // ---------- Renderização de Frame
-    async function renderFrame(tSec=null, useExportVideo=false){
+    async function renderFrame(tSec=null, useExportVideo=false, sourceEl=null){
       octx.clearRect(0,0,outCanvas.width,outCanvas.height);
       // BG
-      if (bgEl){
-        if (bgEl.tagName==='IMG') {
-          drawCoverImage(bgEl,0,0,outCanvas.width,outCanvas.height);
+      const bgSource = sourceEl || bgEl;
+      if (bgSource){
+        if (bgSource.tagName==='IMG') {
+          try {
+            await ensureBackgroundReadyWithRetry(bgSource);
+            if (window.__EXPORT_DEBUG) console.log('[EXPORT_DEBUG] bg image ready', bgSource.src);
+          } catch (error) {
+            if (window.__EXPORT_DEBUG) console.warn('[EXPORT_DEBUG] bg image error', error);
+            const details = `src=${bgSource.src || 'sem src'} complete=${bgSource.complete} naturalWidth=${bgSource.naturalWidth}`;
+            throw new Error(`Imagem de fundo inválida: ${details}`);
+          }
+          drawCoverImage(bgSource,0,0,outCanvas.width,outCanvas.height);
         } else {
           // Sempre usar o vídeo original - sem seeks, sem complicações
-          drawCoverVideo(bgEl, 0, 0, outCanvas.width, outCanvas.height);
+          try {
+            await ensureBackgroundReadyWithRetry(bgSource);
+            if (window.__EXPORT_DEBUG) console.log('[EXPORT_DEBUG] bg video ready', bgSource.currentSrc || bgSource.src);
+          } catch (error) {
+            if (window.__EXPORT_DEBUG) console.warn('[EXPORT_DEBUG] bg video error', error);
+            const details = `src=${bgSource.currentSrc || bgSource.src || 'sem src'} readyState=${bgSource.readyState} videoWidth=${bgSource.videoWidth}`;
+            throw new Error(`Vídeo de fundo inválido: ${details}`);
+          }
+          drawCoverVideo(bgSource, 0, 0, outCanvas.width, outCanvas.height);
         }
       } else {
         const fallbackBg = (typeof bgSolidColor !== 'undefined' && bgSolidColor) ? bgSolidColor : DEFAULT_BG_COLOR;
@@ -2296,7 +3184,12 @@ const init = () => {
           // Agora el é o wrapper, precisamos pegar a imagem filha
           const img = el.querySelector('img');
           if (img) {
-            octx.drawImage(img, -w/2, -h/2, w, h);
+            if (!img.complete || img.naturalWidth === 0) {
+              try { await waitImageReady(img); } catch (_) {}
+            }
+            if (img.naturalWidth > 0) {
+              octx.drawImage(img, -w/2, -h/2, w, h);
+            }
           }
         } else {
           // Replicar exatamente o CSS do editor
@@ -2387,44 +3280,67 @@ const init = () => {
     }
   
     // ---------- Salvar / Carregar JSON (inclui novos campos)
-    btnSaveJSON.addEventListener('click', ()=>{
-      const data = serializeLayout();
-      const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href=url; a.download='layout.json'; a.click();
-      URL.revokeObjectURL(url);
-    });
-    loadJSON.addEventListener('change', e=>{
-      const f = e.target.files?.[0]; if(!f) return;
-      f.text().then(json=> loadLayout(JSON.parse(json)));
-    });
+    if (btnSaveJSON) {
+      btnSaveJSON.addEventListener('click', ()=>{
+        const data = serializeLayout();
+        const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href=url; a.download='layout.json'; a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+    if (loadJSON) {
+      loadJSON.addEventListener('change', e=>{
+        const f = e.target.files?.[0]; if(!f) return;
+        f.text().then(json=> loadLayout(JSON.parse(json)));
+      });
+    }
   
     function serializeLayout(){
-      const items = [...editor.querySelectorAll('.item')].map(el=>({
-        type: el.dataset.type,
-        left: parseInt(el.style.left||'0'),
-        top:  parseInt(el.style.top||'0'),
-        width: parseInt(el.style.width||el.offsetWidth),
-        height: parseInt(el.style.height||el.offsetHeight),
-        rot: Number(el.dataset.rot||0),
-        z: +getComputedStyle(el).zIndex||0,
-        anim: el.dataset.anim||'none',
-        delay: Number(el.dataset.delay||0),
-        dur: Number(el.dataset.dur||0.8),
-        text: el.dataset.type==='text' ? el.innerText : null,
-        fontSize: el.dataset.type==='text' ? Number(el.dataset.fontSize||28): null,
-        fontWeight: el.dataset.type==='text' ? el.dataset.fontWeight||'600': null,
-        fontColor: el.dataset.type==='text' ? el.dataset.fontColor||'#111827': null,
-        align: el.dataset.type==='text' ? (el.dataset.align||'left') : null,
-        bgColor: el.dataset.type==='text' ? (el.dataset.bgColor||'#ffffff') : null,
-        bgNone: el.dataset.type==='text' ? (el.dataset.bgNone==='true') : null,
-        src: el.dataset.type==='image' ? el.querySelector('img')?.src : null
-      }));
+      const items = [...editor.querySelectorAll('.item')].map(el=>{
+        const isImage = el.dataset.type === 'image';
+        const img = isImage ? el.querySelector('img') : null;
+        let assetId = isImage ? (el.dataset.assetId || img?.dataset?.assetId || null) : null;
+        if (!assetId && isImage && img?.src && String(img.src).startsWith('blob:')) {
+          assetId = EditorAssetStore.resolveByUrl(img.src);
+        }
+        return {
+          type: el.dataset.type,
+          left: parseInt(el.style.left||'0'),
+          top:  parseInt(el.style.top||'0'),
+          width: parseInt(el.style.width||el.offsetWidth),
+          height: parseInt(el.style.height||el.offsetHeight),
+          rot: Number(el.dataset.rot||0),
+          z: +getComputedStyle(el).zIndex||0,
+          anim: el.dataset.anim||'none',
+          delay: Number(el.dataset.delay||0),
+          dur: Number(el.dataset.dur||0.8),
+          text: el.dataset.type==='text' ? el.innerText : null,
+          fontSize: el.dataset.type==='text' ? Number(el.dataset.fontSize||28): null,
+          fontWeight: el.dataset.type==='text' ? el.dataset.fontWeight||'600': null,
+          fontColor: el.dataset.type==='text' ? el.dataset.fontColor||'#111827': null,
+          align: el.dataset.type==='text' ? (el.dataset.align||'left') : null,
+          bgColor: el.dataset.type==='text' ? (el.dataset.bgColor||'#ffffff') : null,
+          bgNone: el.dataset.type==='text' ? (el.dataset.bgNone==='true') : null,
+          assetId: assetId || null,
+          src: isImage && !assetId ? (img?.src || null) : null
+        };
+      });
       return { items };
     }
   
     function loadLayout(data){
-      editor.querySelectorAll('.item').forEach(n=>n.remove());
+      editor.querySelectorAll('.item').forEach((n)=>{
+        if (n.dataset?.type === 'image') {
+          const assetId = n.dataset.assetId || null;
+          const img = n.querySelector('img');
+          const previewUrl = img?.dataset?.previewUrl || null;
+          if (assetId && previewUrl) {
+            EditorAssetStore.revokePreview(assetId, previewUrl);
+          }
+        }
+        n.remove();
+      });
       for (const it of data.items||[]){
         if (it.type==='text'){
           const box = document.createElement('div');
@@ -2457,7 +3373,26 @@ const init = () => {
             wrapper.style.zIndex=String(it.z||0);
             attachDrag(wrapper);
           };
-          img.src = it.src;
+          let assetId = it.assetId || null;
+          if (!assetId && it.src && String(it.src).startsWith('blob:')) {
+            assetId = EditorAssetStore.resolveByUrl(it.src);
+            if (window.__EXPORT_DEBUG && assetId) {
+              console.log('[EXPORT_DEBUG] asset resolved from src', assetId);
+            }
+          }
+          if (assetId) {
+            const blob = EditorAssetStore.get(assetId);
+            if (blob) {
+              const url = URL.createObjectURL(blob);
+              EditorAssetStore.addPreview(assetId, url);
+              img.dataset.previewUrl = url;
+              img.dataset.assetId = assetId;
+              wrapper.dataset.assetId = assetId;
+              img.src = url;
+            }
+          } else if (it.src) {
+            img.src = it.src;
+          }
           wrapper.appendChild(img);
           editor.appendChild(wrapper);
         }
@@ -2484,14 +3419,163 @@ const init = () => {
         height: parseFloat(computedStyle.height) || 200
       };
     }
+    // Sincronizar preview da câmera ao abrir o editor
+    try { syncCameraAutoState(); } catch (_) {}
+
     // Expor ponte para integração externa (main.js)
     try {
       window.EditorBridge = {
-        setBackground: (url, type) => { try { setBackgroundMedia(url, (type||'image'), false); } catch(_){} },
+        setBackground: (url, type) => { try { setBackgroundMedia(url, (type||'image'), false, true); } catch(_){} },
+        clearBackground: () => { try { clearBackgroundMedia({ preserveBlob: true }); } catch(_){} },
+        whenBackgroundReady: async () => {
+          try {
+            const bg = editor?.querySelector?.('.bg-media') || null;
+            if (window.__EXPORT_DEBUG) {
+              console.log('[EXPORT_DEBUG] whenBackgroundReady', bg?.tagName || 'none', bg?.currentSrc || bg?.src || '');
+            }
+            await ensureBackgroundReadyWithRetry(bg);
+          } catch (err) {
+            if (window.__EXPORT_DEBUG) console.warn('[EXPORT_DEBUG] whenBackgroundReady error', err);
+          }
+        },
         serialize: () => { try { return serializeLayout(); } catch(_) { return { items: [] }; } },
         load: (data) => { try { return loadLayout(data||{ items: [] }); } catch(_){} },
         renderFrame: async () => { try { await renderFrame(); } catch(_){} },
         exportVideoBlob: async () => { try { return await exportVideoToBlob(); } catch(_) { return null; } },
+        exportImageFromUrl: async (url, layout, opts) => {
+          try { return await exportImageFromUrl(url, layout, opts); } catch (_) { return null; }
+        },
+        exportVideoFromUrl: async (url, layout, opts) => {
+          try { return await exportVideoFromUrl(url, layout, opts); } catch (_) { return null; }
+        },
+        exportImageFromBlob: async (blob, layout, opts) => {
+          try { return await exportImageFromBlob(blob, layout, opts); } catch (_) { return null; }
+        },
+        exportVideoFromBlob: async (blob, layout, opts) => {
+          try { return await exportVideoFromBlob(blob, layout, opts); } catch (_) { return null; }
+        },
+        startCamera: async (reason = '') => {
+          try {
+            const sessionId = Number(arguments[1] ?? currentOpenSessionId);
+            const isManual = (reason === 'user' || reason === 'user_toggle');
+            if (window.__CAPTURE_DEBUG) {
+              console.log('[CAPTURE_DEBUG] startCamera', {
+                reason,
+                sessionId,
+                autoStartAllowed,
+                manualStartAllowed,
+                currentOpenSessionId,
+                hasLiveStream: hasLiveStream(),
+                hasInitPromise: !!cameraInitPromise
+              });
+            }
+            if (isManual) manualStartAllowed = true;
+            if (isManual && !hasLiveStream()) {
+              if (window.__CAPTURE_DEBUG) console.log('[CAM] manual restart (hard reset before start)');
+              try { stopCameraCompletely('manual-restart'); } catch (_) {}
+            }
+            if (sessionId !== currentOpenSessionId && !isManual) {
+              if (window.__CAPTURE_DEBUG) console.log('[CAPTURE_DEBUG] BLOCKED startCamera (stale session)');
+              return false;
+            }
+            if (isManual) {
+              if (!manualStartAllowed) {
+                if (window.__CAPTURE_DEBUG) console.log('[CAPTURE_DEBUG] BLOCKED startCamera (manual not allowed)');
+                return false;
+              }
+            } else if (!autoStartAllowed) {
+              if (window.__CAPTURE_DEBUG) console.log('[CAPTURE_DEBUG] BLOCKED startCamera (auto not allowed)');
+              return false;
+            }
+            if (isManual && !hasLiveStream()) {
+              cameraInitPromise = null;
+              cameraInitSessionId = null;
+              if (window.__CAPTURE_DEBUG) console.log('[CAM] manual start path (force init)');
+              await startCameraManualImmediate();
+            } else {
+              await ensureCameraReady(sessionId, reason);
+            }
+            setCameraUiState(true);
+            if (window.__CAPTURE_DEBUG) console.log('[CAPTURE_DEBUG] startCamera ok', reason);
+            return true;
+          } catch(_) {
+            return false;
+          }
+        },
+        isCameraActive: () => {
+          try {
+            return !!currentStream && currentStream.getTracks().some(t => t.readyState === 'live');
+          } catch (_) {
+            return false;
+          }
+        },
+        toggleCamera: (reason = 'user_toggle') => {
+          try {
+            const lastTs = Number(window.__CAM_TOGGLE_LAST_TS || 0);
+            if (Date.now() - lastTs < 250) {
+              if (window.__CAPTURE_DEBUG) console.log('[CAM_TOGGLE] ignored (cooldown)');
+              return;
+            }
+            window.__CAM_TOGGLE_LAST_TS = Date.now();
+            const active = window.EditorBridge?.isCameraActive?.();
+            if (window.__CAPTURE_DEBUG) console.log('[CAM_TOGGLE] active', active);
+            if (active) {
+              window.EditorBridge?.stopCamera?.('user_off');
+              setCameraUiState(false);
+              if (window.__CAPTURE_DEBUG) console.log('[CAM_TOGGLE] stop ok');
+              return;
+            }
+            const startPromise = startCameraManualImmediate();
+            if (startPromise && typeof startPromise.then === 'function') {
+              startPromise.then((ok) => {
+                const nowActive = window.EditorBridge?.isCameraActive?.();
+                setCameraUiState(!!nowActive);
+                if (window.__CAPTURE_DEBUG) {
+                  const trackState = currentStream?.getVideoTracks?.()?.[0]?.readyState;
+                  const videoState = previewVideoElement?.readyState;
+                  console.log('[CAM_TOGGLE] start ok', { ok, trackState, videoState });
+                }
+              }).catch((err) => {
+                if (window.__CAPTURE_DEBUG) console.log('[CAM_TOGGLE] start error', err);
+              });
+            }
+          } catch (_) {}
+        },
+        stopCamera: (reason = '') => {
+          try {
+            if (reason === 'bg_set' || reason === 'close' || reason === 'user_off') {
+              autoStartAllowed = false;
+            }
+            stopCameraCompletely(reason);
+            if (window.__CAPTURE_DEBUG) console.log('[CAPTURE_DEBUG] stopCamera', reason);
+          } catch(_) {}
+        },
+        setCameraAutoAllowed: (allowed = true) => {
+          autoStartAllowed = !!allowed;
+          if (window.__CAPTURE_DEBUG) console.log('[CAPTURE_DEBUG] setCameraAutoAllowed', autoStartAllowed);
+          if (!autoStartAllowed) {
+            try { stopCameraCompletely('auto-blocked'); } catch (_) {}
+          }
+        },
+        applyOpenPolicy: ({ sessionId, cameraOnOpen, source } = {}) => {
+          const nextId = Number(sessionId || 0);
+          currentOpenSessionId = nextId;
+          cameraOnOpenForSession = !!cameraOnOpen;
+          autoStartAllowed = !!cameraOnOpenForSession;
+          if (window.__CAPTURE_DEBUG) {
+            console.log('[CAPTURE_DEBUG] applyOpenPolicy', {
+              sessionId: currentOpenSessionId,
+              cameraOnOpen: cameraOnOpenForSession,
+              source: source || ''
+            });
+          }
+          if (!cameraOnOpenForSession) {
+            try { stopCameraCompletely('apply-policy-off'); } catch (_) {}
+          }
+          try { wireCameraToggleButton(); } catch (_) {}
+          try { syncToggleButtonDom(); } catch (_) {}
+        },
+        wireCameraToggleButton: () => { try { wireCameraToggleButton(); } catch (_) {} },
         showLoader: (msg) => { try { showEditorLoader(msg || 'Processando...'); } catch(_){} },
         updateLoader: (msg) => { try { updateEditorLoader(msg); } catch(_){} },
         hideLoader: () => { try { hideEditorLoader(); } catch(_){} }

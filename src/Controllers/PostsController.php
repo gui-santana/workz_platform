@@ -3,15 +3,20 @@
 namespace Workz\Platform\Controllers;
 
 use DateTime;
+use Workz\Platform\Core\Database;
 use Workz\Platform\Models\General;
+use Workz\Platform\Models\PostMedia;
+use Workz\Platform\Services\StorageService;
 
 class PostsController
 {
     private General $db;
+    private PostMedia $media;
 
     public function __construct()
     {
         $this->db = new General();
+        $this->media = new PostMedia();
     }
 
     // Cria um post na tabela workz_data.hpl usando o modelo General
@@ -55,8 +60,73 @@ class PostsController
             return;
         }
 
-        // ct pode vir como objeto/array ou string JSON; sempre persistimos como string JSON
-        $ctJson = is_string($ct) ? $ct : json_encode($ct, JSON_UNESCAPED_UNICODE);
+        // ct pode vir como objeto/array ou string JSON; validamos para mídia v2
+        $ctData = null;
+        if (is_string($ct)) {
+            $decoded = json_decode($ct, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                $ctData = $decoded;
+            }
+        } elseif (is_array($ct)) {
+            $ctData = $ct;
+        }
+
+        $mediaItems = is_array($ctData['media'] ?? null) ? $ctData['media'] : [];
+        $mediaIds = [];
+        foreach ($mediaItems as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $mediaId = isset($item['media_id']) ? (int)$item['media_id'] : 0;
+            if ($mediaId > 0) {
+                $mediaIds[] = $mediaId;
+            }
+        }
+
+        if ($mediaIds) {
+            $mediaMap = $this->media->findByIds($mediaIds);
+            foreach ($mediaItems as $idx => $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $mediaId = isset($item['media_id']) ? (int)$item['media_id'] : 0;
+                if ($mediaId <= 0) {
+                    continue;
+                }
+                $row = $mediaMap[$mediaId] ?? null;
+                if (!$row) {
+                    http_response_code(422);
+                    echo json_encode(['status' => 'error', 'message' => 'Mídia inválida no post.']);
+                    return;
+                }
+                if ((int)($row['us'] ?? 0) !== $userId) {
+                    http_response_code(403);
+                    echo json_encode(['status' => 'error', 'message' => 'Mídia não pertence ao usuário.']);
+                    return;
+                }
+                if (($row['status'] ?? '') !== 'uploaded') {
+                    http_response_code(422);
+                    echo json_encode(['status' => 'error', 'message' => 'Mídia ainda não finalizada.']);
+                    return;
+                }
+                $rowCm = (int)($row['cm'] ?? 0);
+                $rowEm = (int)($row['em'] ?? 0);
+                if ($rowCm !== $cm || $rowEm !== $em) {
+                    http_response_code(422);
+                    echo json_encode(['status' => 'error', 'message' => 'Mídia fora do escopo do post.']);
+                    return;
+                }
+                $mediaItems[$idx]['type'] = $mediaItems[$idx]['type'] ?? $row['type'];
+            }
+
+            if ($ctData === null) {
+                $ctData = [];
+            }
+            $ctData['version'] = 2;
+            $ctData['media'] = $mediaItems;
+        }
+
+        $ctJson = is_string($ct) ? ($ctData !== null ? json_encode($ctData, JSON_UNESCAPED_UNICODE) : $ct) : json_encode($ctData ?? $ct, JSON_UNESCAPED_UNICODE);
 
         $data = [
             'us' => $userId,
@@ -71,6 +141,27 @@ class PostsController
 
         $id = $this->db->insert('workz_data', 'hpl', $data);
         if ($id) {
+            if ($mediaIds) {
+                try {
+                    $pdo = Database::getInstance('workz_data');
+                    $stmt = $pdo->prepare('INSERT INTO hpl_media (post_id, media_id, ord) VALUES (:post_id, :media_id, :ord)');
+                    $seen = [];
+                    foreach ($mediaItems as $ord => $item) {
+                        $mediaId = isset($item['media_id']) ? (int)$item['media_id'] : 0;
+                        if ($mediaId <= 0 || isset($seen[$mediaId])) {
+                            continue;
+                        }
+                        $seen[$mediaId] = true;
+                        $stmt->execute([
+                            'post_id' => $id,
+                            'media_id' => $mediaId,
+                            'ord' => $ord,
+                        ]);
+                    }
+                } catch (\Throwable $e) {
+                    // Se a tabela pivô não existir, seguimos sem bloquear a criação do post.
+                }
+            }
             http_response_code(201);
             echo json_encode(['status' => 'success', 'id' => $id]);
         } else {
@@ -107,14 +198,72 @@ class PostsController
             return;
         }
 
-        // Decodificar ct JSON por conveniência
+        $mediaIds = [];
         foreach ($rows as &$row) {
-            if (isset($row['ct']) && is_string($row['ct'])) {
-                $decoded = json_decode($row['ct'], true);
-                if (json_last_error() === JSON_ERROR_NONE) {
-                    $row['ct'] = $decoded;
+            if (!isset($row['ct']) || !is_string($row['ct'])) {
+                continue;
+            }
+            $decoded = json_decode($row['ct'], true);
+            if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+                continue;
+            }
+            $row['ct'] = $decoded;
+            $version = isset($decoded['version']) ? (int)$decoded['version'] : 0;
+            if ($version < 2) {
+                continue;
+            }
+            $mediaList = is_array($decoded['media'] ?? null) ? $decoded['media'] : [];
+            foreach ($mediaList as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $mediaId = isset($item['media_id']) ? (int)$item['media_id'] : 0;
+                if ($mediaId > 0) {
+                    $mediaIds[] = $mediaId;
                 }
             }
+        }
+        unset($row);
+
+        $mediaMap = $mediaIds ? $this->media->findByIds($mediaIds) : [];
+        if ($mediaMap) {
+            foreach ($rows as &$row) {
+                $ct = $row['ct'] ?? null;
+                if (!is_array($ct)) {
+                    continue;
+                }
+                $version = isset($ct['version']) ? (int)$ct['version'] : 0;
+                if ($version < 2 || !is_array($ct['media'] ?? null)) {
+                    continue;
+                }
+                $resolved = [];
+                foreach ($ct['media'] as $item) {
+                    if (!is_array($item)) {
+                        $resolved[] = $item;
+                        continue;
+                    }
+                    $mediaId = isset($item['media_id']) ? (int)$item['media_id'] : 0;
+                    if ($mediaId <= 0) {
+                        $resolved[] = $item;
+                        continue;
+                    }
+                    $rowMedia = $mediaMap[$mediaId] ?? null;
+                    if (!$rowMedia) {
+                        $resolved[] = $item;
+                        continue;
+                    }
+                    $item['type'] = $item['type'] ?? $rowMedia['type'] ?? null;
+                    $item['mimeType'] = $rowMedia['mime'] ?? $rowMedia['mime_type'] ?? null;
+                    $item['url'] = $rowMedia['url'] ?? null;
+                    if (!$item['url'] || str_starts_with((string)$item['url'], '/uploads/')) {
+                        $item['url'] = '/api/media/show/' . $mediaId;
+                    }
+                    $item['status'] = $rowMedia['status'] ?? null;
+                    $resolved[] = $item;
+                }
+                $row['ct']['media'] = $resolved;
+            }
+            unset($row);
         }
 
         echo json_encode([
@@ -123,6 +272,215 @@ class PostsController
             'limit' => $limit,
             'offset' => $offset,
         ]);
+    }
+
+    public function delete(?object $payload): void
+    {
+        header("Content-Type: application/json");
+        $input = json_decode(file_get_contents('php://input'), true) ?: [];
+
+        if (!$payload) {
+            http_response_code(401);
+            echo json_encode(['status' => 'error', 'message' => 'Unauthorized']);
+            return;
+        }
+
+        $postId = isset($input['id']) ? (int)$input['id'] : 0;
+        if ($postId <= 0) {
+            http_response_code(400);
+            echo json_encode(['status' => 'error', 'message' => 'ID inválido.']);
+            return;
+        }
+
+        $userId = (int)($payload->sub ?? 0);
+        $pdo = Database::getInstance('workz_data');
+
+        $stmt = $pdo->prepare('SELECT id, us, cm, em, ct FROM hpl WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $postId]);
+        $post = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$post) {
+            http_response_code(404);
+            echo json_encode(['status' => 'error', 'message' => 'Post não encontrado.']);
+            return;
+        }
+
+        if (!$this->canDeletePost($post, $userId)) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'Sem permissão para excluir.']);
+            return;
+        }
+
+        $mediaRows = [];
+        $mediaIds = [];
+        $hasPivot = $this->tableExists($pdo, 'hpl_media');
+
+        if ($hasPivot) {
+            $stmt = $pdo->prepare('SELECT m.id, m.object_key, m.storage_driver, m.mime, m.mime_type
+                                   FROM hpl_media hm
+                                   INNER JOIN media m ON m.id = hm.media_id
+                                   WHERE hm.post_id = :post_id');
+            $stmt->execute(['post_id' => $postId]);
+            $mediaRows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        }
+
+        if (!$mediaRows) {
+            $mediaIds = $this->extractMediaIdsFromCt($post['ct'] ?? null);
+            if ($mediaIds) {
+                $in = implode(',', array_fill(0, count($mediaIds), '?'));
+                $stmt = $pdo->prepare("SELECT id, object_key, storage_driver, mime, mime_type FROM media WHERE id IN ($in)");
+                $stmt->execute($mediaIds);
+                $mediaRows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+            }
+        }
+
+        $mediaIds = array_values(array_unique(array_map(fn($r) => (int)$r['id'], $mediaRows)));
+
+        try {
+            $pdo->beginTransaction();
+
+            if ($this->tableExists($pdo, 'hpl_comments')) {
+                $stmt = $pdo->prepare('DELETE FROM hpl_comments WHERE pl = :post_id');
+                $stmt->execute(['post_id' => $postId]);
+            }
+
+            if ($hasPivot) {
+                $stmt = $pdo->prepare('DELETE FROM hpl_media WHERE post_id = :post_id');
+                $stmt->execute(['post_id' => $postId]);
+            }
+
+            $stmt = $pdo->prepare('DELETE FROM hpl WHERE id = :id');
+            $stmt->execute(['id' => $postId]);
+
+            if ($mediaIds) {
+                foreach ($mediaIds as $mid) {
+                    $canDelete = true;
+                    if ($hasPivot) {
+                        $stmt = $pdo->prepare('SELECT COUNT(*) FROM hpl_media WHERE media_id = :mid');
+                        $stmt->execute(['mid' => $mid]);
+                        $count = (int)$stmt->fetchColumn();
+                        $canDelete = ($count === 0);
+                    }
+                    if ($canDelete) {
+                        $stmt = $pdo->prepare('DELETE FROM media WHERE id = :mid');
+                        $stmt->execute(['mid' => $mid]);
+                    }
+                }
+            }
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            http_response_code(500);
+            echo json_encode(['status' => 'error', 'message' => 'Falha ao excluir post.']);
+            return;
+        }
+
+        $this->cleanupMediaStorage($mediaRows);
+
+        echo json_encode(['status' => 'success', 'id' => $postId]);
+    }
+
+    private function extractMediaIdsFromCt($ct): array
+    {
+        if (!$ct) return [];
+        try {
+            $obj = is_string($ct) ? json_decode($ct, true) : (is_array($ct) ? $ct : null);
+            if (!is_array($obj) || !is_array($obj['media'] ?? null)) return [];
+            $ids = [];
+            foreach ($obj['media'] as $m) {
+                if (!is_array($m)) continue;
+                $mid = isset($m['media_id']) ? (int)$m['media_id'] : 0;
+                if ($mid > 0) $ids[] = $mid;
+            }
+            return array_values(array_unique($ids));
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    private function cleanupMediaStorage(array $mediaRows): void
+    {
+        if (!$mediaRows) return;
+        $storage = new StorageService();
+        $pdo = Database::getInstance('workz_data');
+        $hasQueue = $this->tableExists($pdo, 'media_cleanup_queue');
+
+        foreach ($mediaRows as $row) {
+            $driver = $row['storage_driver'] ?? 'local';
+            $key = $row['object_key'] ?? '';
+            if ($key === '') continue;
+            try {
+                if ($driver === 'oci') {
+                    $storage->deleteObject($key);
+                } else {
+                    $publicRoot = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'public';
+                    $path = $publicRoot . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, ltrim($key, '/'));
+                    if (is_file($path)) {
+                        @unlink($path);
+                    }
+                }
+            } catch (\Throwable $e) {
+                if ($hasQueue) {
+                    $stmt = $pdo->prepare('INSERT INTO media_cleanup_queue (media_id, object_key, storage_driver, attempts, last_error, status, created_at, updated_at)
+                                           VALUES (:mid, :key, :driver, 0, :err, :status, NOW(), NOW())');
+                    $stmt->execute([
+                        'mid' => (int)($row['id'] ?? 0),
+                        'key' => $key,
+                        'driver' => $driver,
+                        'err' => substr($e->getMessage(), 0, 2000),
+                        'status' => 'pending',
+                    ]);
+                } else {
+                    error_log('[PostsController::delete] storage cleanup failed: ' . $e->getMessage());
+                }
+            }
+        }
+    }
+
+    private function canDeletePost(array $post, int $userId): bool
+    {
+        $owner = (int)($post['us'] ?? 0);
+        if ($owner > 0 && $owner === $userId) return true;
+
+        $cm = (int)($post['cm'] ?? 0);
+        $em = (int)($post['em'] ?? 0);
+
+        try {
+            $pdo = Database::getInstance('workz_companies');
+            if ($cm > 0) {
+                $stmt = $pdo->prepare('SELECT nv, st FROM teams_users WHERE us = :us AND cm = :cm LIMIT 1');
+                $stmt->execute(['us' => $userId, 'cm' => $cm]);
+                $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+                if ($row && (int)($row['st'] ?? 0) === 1 && (int)($row['nv'] ?? 0) >= 3) {
+                    return true;
+                }
+            }
+            if ($em > 0) {
+                $stmt = $pdo->prepare('SELECT nv, st FROM employees WHERE us = :us AND em = :em LIMIT 1');
+                $stmt->execute(['us' => $userId, 'em' => $em]);
+                $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+                if ($row && (int)($row['st'] ?? 0) === 1 && (int)($row['nv'] ?? 0) >= 3) {
+                    return true;
+                }
+            }
+        } catch (\Throwable $e) {
+            return false;
+        }
+
+        return false;
+    }
+
+    private function tableExists(\PDO $pdo, string $table): bool
+    {
+        try {
+            $stmt = $pdo->prepare('SHOW TABLES LIKE :tbl');
+            $stmt->execute(['tbl' => $table]);
+            return (bool)$stmt->fetch(\PDO::FETCH_NUM);
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     // Upload de mídias (imagens/vídeos) para uso em posts. Aceita múltiplos arquivos.

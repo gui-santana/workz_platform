@@ -1,6 +1,8 @@
 // public/js/main.js
 
 import { ApiClient } from "./core/ApiClient.js";
+import { optimizeImage, formatBytes } from "./core/media_optimize.js";
+import { getVideoDuration, getVideoMeta, formatDuration, trimVideoToDuration } from "./core/video_utils.js";
 
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -26,10 +28,97 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const mainWrapper = document.querySelector("#main-wrapper"); //Main Wrapper
     const sidebarWrapper = document.querySelector('#sidebar-wrapper');
+    const topWin = (typeof window.top !== 'undefined' && window.top) ? window.top : window;
+    if (topWin && !topWin.__workzMediaRegistry) {
+        topWin.__workzMediaRegistry = {
+            streams: new Set(),
+            add(stream, meta = {}) {
+                if (!stream) return;
+                this.streams.add(stream);
+                if (window.__CAPTURE_DEBUG) {
+                    console.log('[CAM_REG] add', meta);
+                }
+            },
+            remove(stream) {
+                if (!stream) return;
+                this.streams.delete(stream);
+            },
+            killAll(reason = '') {
+                let count = 0;
+                this.streams.forEach((stream) => {
+                    try {
+                        if (stream && typeof stream.getTracks === 'function') {
+                            stream.getTracks().forEach((track) => {
+                                try { track.stop(); } catch (_) {}
+                            });
+                            count += 1;
+                        }
+                    } catch (_) {}
+                });
+                this.streams.clear();
+                if (window.__CAPTURE_DEBUG) {
+                    console.log('[CAM_KILL] killed', count, reason);
+                }
+            }
+        };
+    }
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && !navigator.mediaDevices.__workzPatched) {
+        const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async (constraints) => {
+            const stream = await originalGetUserMedia(constraints);
+            try {
+                topWin.__workzMediaRegistry?.add?.(stream, { constraints, ts: Date.now(), href: window.location.href });
+            } catch (_) {}
+            return stream;
+        };
+        navigator.mediaDevices.__workzPatched = true;
+    }
+
+    const hardStopCamera = (reason = '') => {
+        try { window.EditorBridge?.stopCamera?.(reason); } catch (_) {}
+        try { topWin.__workzMediaRegistry?.killAll?.(reason); } catch (_) {}
+        try {
+            document.querySelectorAll('video').forEach((video) => {
+                try {
+                    const stream = video.srcObject;
+                    if (stream && typeof stream.getTracks === 'function') {
+                        stream.getTracks().forEach((track) => {
+                            try { track.stop(); } catch (_) {}
+                        });
+                    }
+                    if (video.srcObject) video.srcObject = null;
+                } catch (_) {}
+            });
+        } catch (_) {}
+    };
+    if (sidebarWrapper && !sidebarWrapper._cameraObserverInstalled) {
+        try {
+            const observer = new MutationObserver(() => {
+                if (sidebarWrapper.classList.contains('w-0')) {
+                    hardStopCamera('sidebar-close');
+                }
+            });
+            observer.observe(sidebarWrapper, { attributes: true, attributeFilter: ['class'] });
+            sidebarWrapper._cameraObserverInstalled = true;
+        } catch (_) {}
+    }
 
     let workzContent = '';
 
     const apiClient = new ApiClient();
+
+    const syncJwtCookie = () => {
+        try {
+            const token = localStorage.getItem('jwt_token');
+            if (!token) return;
+            const cookieMatch = document.cookie.match(/(?:^|;\s*)jwt_token=([^;]+)/);
+            const current = cookieMatch ? decodeURIComponent(cookieMatch[1]) : null;
+            if (current === token) return;
+            const secure = location.protocol === 'https:' ? '; Secure' : '';
+            document.cookie = `jwt_token=${encodeURIComponent(token)}; Path=/; SameSite=Lax${secure}`;
+        } catch (_) {}
+    };
+    syncJwtCookie();
 
     // Global user/page/feed state
     let currentUserData = null;
@@ -56,7 +145,23 @@ document.addEventListener('DOMContentLoaded', () => {
     let feedFinished = false;
     // Observers globais para evitar acúmulo entre navegações
     let feedObserver = null;
+    let feedRequestId = 0;
     let listObserver = null;
+    let feedVideoObserver = null;
+    let feedPlaybackObserver = null;
+    const FEED_AUDIO_STORAGE_KEY = 'workz.feed.audio';
+    let feedAudioEnabled = false;
+    let feedAudioUnlocked = false;
+    const feedPostAudioMap = new Map();
+
+    function initFeedAudioPreference() {
+        try {
+            const stored = localStorage.getItem(FEED_AUDIO_STORAGE_KEY);
+            feedAudioEnabled = stored === '1';
+            feedAudioUnlocked = false;
+        } catch (_) { feedAudioEnabled = false; }
+    }
+    initFeedAudioPreference();
 
     const feedUserCache = new Map();
     function pruneFeedUserCache(max = 800) {
@@ -72,6 +177,21 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_) {}
     }
     let feedInteractionsAttached = false;
+
+    const feedBusinessCache = new Map();
+    const feedTeamCache = new Map();
+    function pruneFeedEntityCache(cache, max = 400) {
+        try {
+            if (!cache || typeof cache.size !== 'number') return;
+            if (cache.size <= max) return;
+            const removeCount = cache.size - max;
+            let i = 0;
+            for (const key of cache.keys()) {
+                cache.delete(key);
+                if (++i >= removeCount) break;
+            }
+        } catch (_) {}
+    }
 
     // Publicação: estado de privacidade (sincronizado entre trigger e editor)
     const POST_PRIVACY_STORAGE_KEY = 'workz.post.privacy';
@@ -215,6 +335,22 @@ document.addEventListener('DOMContentLoaded', () => {
         // Apenas em 'click' e no bubble phase (capture = false),
         // para não bloquear os handlers internos da sidebar
         try { sidebarWrapper.addEventListener('click', stopper, false); sidebarWrapper._clickShieldInstalled = true; } catch (_) {}
+    }
+
+    function installSwalClickShield() {
+        if (document._swalShieldInstalled) return;
+        const handler = (e) => {
+            const target = e.target;
+            if (target && target.closest && target.closest('.swal-overlay, .swal-modal, .swal2-container, .swal2-popup')) {
+                e.stopPropagation();
+            }
+        };
+        try {
+            document.addEventListener('click', handler, false);
+            document.addEventListener('mousedown', handler, false);
+            document.addEventListener('touchstart', handler, false);
+            document._swalShieldInstalled = true;
+        } catch (_) {}
     }
 
 
@@ -494,6 +630,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (/^data:image\//i.test(trimmed)) return trimmed;
+        if (/^blob:/i.test(trimmed)) return trimmed;
         if (/^https?:\/\//i.test(trimmed)) return trimmed;
 
         // If it starts with a known image path, treat it as a path.
@@ -502,6 +639,8 @@ document.addEventListener('DOMContentLoaded', () => {
             trimmed.startsWith('/users/') ||
             trimmed.startsWith('/uploads/') ||
             trimmed.startsWith('/app/uploads/') ||
+            trimmed.startsWith('/api/media/show/') ||
+            trimmed.startsWith('/api/media/') ||
             /^uploads\//i.test(trimmed)
         ) {
             return trimmed;
@@ -515,6 +654,783 @@ document.addEventListener('DOMContentLoaded', () => {
         const src = resolveImageSrc(imValue, label, options);
         const sanitized = String(src || '').replace(/['\\]/g, '\\$&');
         return `url('${sanitized}')`;
+    }
+
+    const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+    const MAX_VIDEO_BYTES = 15 * 1024 * 1024;
+    const MAX_VIDEO_SECONDS = 60;
+    const VIDEO_OVERHEAD_RATIO = 0.05;
+    const IMAGE_OPT_TARGET_BYTES = 14 * 1024 * 1024;
+    const IMAGE_OPT_MAX_DIM = 1920;
+    const IMAGE_OPT_MIN_DIM = 1024;
+    const IMAGE_OPT_INITIAL_QUALITY = 0.88;
+    const IMAGE_OPT_MIN_QUALITY = 0.45;
+    const IMAGE_OPT_QUALITY_STEP = 0.06;
+    const IMAGE_OPT_ULTRA_MIN_DIM = 960;
+    const IMAGE_OPT_ULTRA_MIN_QUALITY = 0.35;
+
+    function validateMediaFile(file) {
+        if (!file) return { ok: false, message: 'Arquivo inválido.' };
+        const isVideo = (file.type || '').toLowerCase().startsWith('video');
+        if (isVideo) return { ok: true }; // tamanho/duração de vídeo são tratados no fluxo inteligente
+        const maxBytes = MAX_IMAGE_BYTES;
+        if (Number.isFinite(file.size) && file.size > maxBytes) {
+            const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+            const limitMb = (maxBytes / (1024 * 1024)).toFixed(0);
+            return { ok: false, message: `Arquivo muito grande (${sizeMb}MB). Limite: ${limitMb}MB.` };
+        }
+        return { ok: true };
+    }
+
+    function showImageOptimizeStatus(label = 'Otimizando imagem...') {
+        try {
+            if (typeof swal === 'function') {
+                installSwalClickShield();
+                swal({
+                    title: label,
+                    text: 'Aguarde alguns segundos.',
+                    icon: 'info',
+                    buttons: false,
+                    closeOnClickOutside: false,
+                    closeOnEsc: false
+                });
+            }
+        } catch (_) {}
+    }
+
+    function hideImageOptimizeStatus() {
+        try {
+            if (typeof swal === 'function' && typeof swal.close === 'function') {
+                swal.close();
+            }
+        } catch (_) {}
+    }
+
+    function showVideoProcessStatus(label = 'Processando vídeo...') {
+        try {
+            if (typeof swal === 'function') {
+                installSwalClickShield();
+                swal({
+                    title: label,
+                    text: 'Aguarde alguns segundos.',
+                    icon: 'info',
+                    buttons: false,
+                    closeOnClickOutside: false,
+                    closeOnEsc: false
+                });
+            }
+        } catch (_) {}
+    }
+
+    function hideVideoProcessStatus() {
+        try {
+            if (typeof swal === 'function' && typeof swal.close === 'function') {
+                swal.close();
+            }
+        } catch (_) {}
+    }
+
+    function estimateOptimizedSizeMb(durationSeconds, videoKbps, audioKbps, overhead = VIDEO_OVERHEAD_RATIO) {
+        const totalBitsPerSec = (videoKbps + audioKbps) * 1000;
+        const estimatedBytes = durationSeconds * (totalBitsPerSec / 8) * (1 + overhead);
+        return estimatedBytes / (1024 * 1024);
+    }
+
+    function estimateMaxDurationSeconds(maxBytes, videoKbps, audioKbps, overhead = VIDEO_OVERHEAD_RATIO) {
+        const totalBitsPerSec = (videoKbps + audioKbps) * 1000;
+        const maxBits = maxBytes * 8 / (1 + overhead);
+        return Math.max(1, Math.floor(maxBits / totalBitsPerSec));
+    }
+
+    function getVideoOptimizationProfile(mode = 'normal') {
+        if (mode === 'aggressive') {
+            return { height: 480, videoKbps: 450, audioKbps: 48 };
+        }
+        return { height: 480, videoKbps: 550, audioKbps: 64 };
+    }
+
+    async function analyzeVideo(file) {
+        const meta = await getVideoMeta(file);
+        const duration = meta.duration || 0;
+        const width = meta.width || 0;
+        const height = meta.height || 0;
+        const sizeBytes = Number.isFinite(file?.size) ? file.size : 0;
+        const bitrate = duration > 0 ? Math.round((sizeBytes * 8) / duration) : 0;
+        return { duration, width, height, sizeBytes, bitrate };
+    }
+
+    function canTrimVideoInBrowser() {
+        return typeof MediaRecorder !== 'undefined'
+            && typeof HTMLVideoElement !== 'undefined'
+            && typeof HTMLVideoElement.prototype.captureStream === 'function';
+    }
+
+    function getCameraVideoEl(root = document) {
+        const editor = root.querySelector('#editor') || document.querySelector('#editor');
+        if (!editor) return null;
+        return editor.querySelector('video.bg-media')
+            || editor.querySelector('.bg-media video')
+            || editor.querySelector('video[data-role="camera"]')
+            || editor.querySelector('video');
+    }
+
+    function captureCameraPhotoBlob(videoEl) {
+        if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
+            return Promise.reject(new Error('Vídeo indisponível para captura.'));
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = videoEl.videoWidth;
+        canvas.height = videoEl.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        return new Promise((resolve, reject) => {
+            canvas.toBlob((blob) => {
+                if (!blob) {
+                    reject(new Error('Falha ao gerar foto.'));
+                    return;
+                }
+                resolve(blob);
+            }, 'image/jpeg', 0.92);
+        });
+    }
+
+    function getSupportedRecorderMime() {
+        const candidates = [
+            'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+            'video/webm;codecs=vp9,opus',
+            'video/webm;codecs=vp8,opus',
+            'video/webm'
+        ];
+        if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+            return '';
+        }
+        for (const mime of candidates) {
+            if (MediaRecorder.isTypeSupported(mime)) return mime;
+        }
+        return '';
+    }
+
+    async function optimizeImageForUpload(file, options = {}) {
+        if (!file || !(file.type || '').toLowerCase().startsWith('image/')) return { file, stats: null };
+        showImageOptimizeStatus('Otimizando imagem...');
+        const result = await optimizeImage(file, {
+            targetBytes: IMAGE_OPT_TARGET_BYTES,
+            maxDim: IMAGE_OPT_MAX_DIM,
+            minDim: IMAGE_OPT_MIN_DIM,
+            initialQuality: IMAGE_OPT_INITIAL_QUALITY,
+            minQuality: IMAGE_OPT_MIN_QUALITY,
+            qualityStep: IMAGE_OPT_QUALITY_STEP,
+            onProgress: ({ step, total, label }) => {
+                showImageOptimizeStatus(`${label} (${step}/${total})`);
+            },
+            ...options
+        });
+        hideImageOptimizeStatus();
+        return { file: result.optimizedFile, stats: result.stats };
+    }
+
+    async function maybeTrimVideoFile(file) {
+        const duration = await getVideoDuration(file);
+        if (duration <= MAX_VIDEO_SECONDS) {
+            return { file, duration, trimmed: false };
+        }
+        let wantsTrim = false;
+        try {
+            if (typeof swal === 'function') {
+                wantsTrim = await swal({
+                    title: 'Vídeo acima de 1 minuto',
+                    text: `Este vídeo tem ${formatDuration(duration)}. Cortar automaticamente para 01:00?`,
+                    icon: 'warning',
+                    buttons: {
+                        cancel: 'Cancelar',
+                        confirm: { text: 'Cortar para 1 minuto', value: true }
+                    }
+                });
+            }
+        } catch (_) {}
+        if (!wantsTrim) {
+            return { error: true, message: `Vídeo com ${formatDuration(duration)}. Máximo permitido: 01:00.` };
+        }
+
+        showVideoProcessStatus('Cortando vídeo...');
+        try {
+            const trimmedBlob = await trimVideoToDuration(file, MAX_VIDEO_SECONDS, {
+                videoBitsPerSecond: 700000,
+                audioBitsPerSecond: 96000
+            });
+            hideVideoProcessStatus();
+            const ext = trimmedBlob.type.includes('mp4') ? 'mp4' : 'webm';
+            const baseName = (file.name || 'video').replace(/\.[^.]+$/, '');
+            const trimmedFile = new File([trimmedBlob], `${baseName}_60s.${ext}`, {
+                type: trimmedBlob.type || 'video/webm',
+                lastModified: Date.now()
+            });
+            return { file: trimmedFile, duration: MAX_VIDEO_SECONDS, trimmed: true };
+        } catch (err) {
+            hideVideoProcessStatus();
+            return { error: true, message: 'Não foi possível cortar o vídeo neste navegador.' };
+        }
+    }
+
+    async function handleLargeVideo(file, source = 'file', { suppressPrompts = false } = {}) {
+        showVideoProcessStatus('Analisando vídeo...');
+        const info = await analyzeVideo(file);
+        hideVideoProcessStatus();
+
+        if (!info.duration) {
+            return { error: true, message: 'Não foi possível analisar o vídeo.' };
+        }
+
+        const normalProfile = getVideoOptimizationProfile('normal');
+        const aggressiveProfile = getVideoOptimizationProfile('aggressive');
+        const estimatedNormal = estimateOptimizedSizeMb(info.duration, normalProfile.videoKbps, normalProfile.audioKbps);
+        const estimatedAggressive = estimateOptimizedSizeMb(info.duration, aggressiveProfile.videoKbps, aggressiveProfile.audioKbps);
+        const maxDurationAggressive = estimateMaxDurationSeconds(MAX_VIDEO_BYTES, aggressiveProfile.videoKbps, aggressiveProfile.audioKbps);
+
+        const durationLabel = formatDuration(info.duration);
+        const resolutionLabel = info.width && info.height ? `${info.width}x${info.height}` : 'desconhecida';
+        const bitrateLabel = info.bitrate ? `${Math.round(info.bitrate / 1000)} kbps` : 'desconhecido';
+        const sizeLabel = formatBytes(info.sizeBytes);
+
+        const canTrim = source === 'recorded' && canTrimVideoInBrowser();
+        const maxDurationLabel = formatDuration(maxDurationAggressive);
+
+        if (info.duration > MAX_VIDEO_SECONDS) {
+            if (suppressPrompts) {
+                return { error: true, message: 'Vídeo acima de 1 minuto. Corte para 60s e tente novamente.' };
+            }
+            let wantsTrim = false;
+            try {
+                if (typeof swal === 'function') {
+                    installSwalClickShield();
+                    const buttons = canTrim
+                        ? { cancel: 'Cancelar', confirm: { text: 'Cortar para 1 minuto', value: true } }
+                        : { confirm: { text: 'OK', value: true } };
+                    wantsTrim = await swal({
+                        title: 'Vídeo acima de 1 minuto',
+                        text: `Duração: ${durationLabel}\nResolução: ${resolutionLabel}\nTamanho: ${sizeLabel}\n\nMáximo permitido: 01:00.`,
+                        icon: 'warning',
+                        closeOnClickOutside: false,
+                        closeOnEsc: false,
+                        buttons
+                    });
+                }
+            } catch (_) {}
+            if (wantsTrim && canTrim) {
+                showVideoProcessStatus('Cortando vídeo...');
+                try {
+                    const trimmedBlob = await trimVideoToDuration(file, MAX_VIDEO_SECONDS, {
+                        videoBitsPerSecond: 700000,
+                        audioBitsPerSecond: 96000
+                    });
+                    hideVideoProcessStatus();
+                    const ext = trimmedBlob.type.includes('mp4') ? 'mp4' : 'webm';
+                    const baseName = (file.name || 'video').replace(/\.[^.]+$/, '');
+                    const trimmedFile = new File([trimmedBlob], `${baseName}_60s.${ext}`, {
+                        type: trimmedBlob.type || 'video/webm',
+                        lastModified: Date.now()
+                    });
+                    return { file: trimmedFile, trimmed: true };
+                } catch (_) {
+                    hideVideoProcessStatus();
+                    return { error: true, message: 'Não foi possível cortar o vídeo automaticamente.' };
+                }
+            }
+            return { error: true, message: 'Vídeo acima de 1 minuto. Corte para 60s e tente novamente.' };
+        }
+
+        if (info.sizeBytes <= MAX_VIDEO_BYTES) {
+            return { file };
+        }
+
+        const advancedEnabled = !!window.WORKZ_MEDIA_ADVANCED_TRANSCODE;
+        const canOfferOptimize = advancedEnabled && source === 'file';
+
+        let modalText = `Tamanho atual: ${sizeLabel}\nDuração: ${durationLabel}\nResolução: ${resolutionLabel}\nBitrate estimado: ${bitrateLabel}\n\nEstimativa (normal): ~${estimatedNormal.toFixed(1)} MB\nEstimativa (agressivo): ~${estimatedAggressive.toFixed(1)} MB`;
+        if (estimatedAggressive > 15) {
+            modalText += `\n\nSugestão: cortar para até ${maxDurationLabel} para caber em 15MB.`;
+        }
+
+        if (estimatedAggressive > 15 && canTrim) {
+            if (suppressPrompts) {
+                return { error: true, message: 'Vídeo acima do limite. Corte para menos tempo e tente novamente.' };
+            }
+            let wantsTrim = false;
+            try {
+                if (typeof swal === 'function') {
+                    installSwalClickShield();
+                    wantsTrim = await swal({
+                        title: 'Vídeo muito grande',
+                        text: `${modalText}\n\nDeseja cortar para ${maxDurationLabel}?`,
+                        icon: 'warning',
+                        closeOnClickOutside: false,
+                        closeOnEsc: false,
+                        buttons: {
+                            cancel: 'Cancelar',
+                            confirm: { text: `Cortar para ${maxDurationLabel}`, value: true }
+                        }
+                    });
+                }
+            } catch (_) {}
+            if (wantsTrim) {
+                showVideoProcessStatus('Cortando vídeo...');
+                try {
+                    const trimmedBlob = await trimVideoToDuration(file, maxDurationAggressive, {
+                        videoBitsPerSecond: 700000,
+                        audioBitsPerSecond: 96000
+                    });
+                    hideVideoProcessStatus();
+                    const ext = trimmedBlob.type.includes('mp4') ? 'mp4' : 'webm';
+                    const baseName = (file.name || 'video').replace(/\.[^.]+$/, '');
+                    const trimmedFile = new File([trimmedBlob], `${baseName}_${maxDurationAggressive}s.${ext}`, {
+                        type: trimmedBlob.type || 'video/webm',
+                        lastModified: Date.now()
+                    });
+                    return { file: trimmedFile, trimmed: true };
+                } catch (_) {
+                    hideVideoProcessStatus();
+                    return { error: true, message: 'Não foi possível cortar o vídeo automaticamente.' };
+                }
+            }
+            return { error: true, message: 'Vídeo acima do limite. Corte para menos tempo e tente novamente.' };
+        }
+
+        if (!canOfferOptimize) {
+            if (suppressPrompts) {
+                return { error: true, message: 'Vídeo acima do limite sem otimização disponível.' };
+            }
+            const extra = advancedEnabled ? 'Modo avançado indisponível.' : 'Ative o modo avançado para otimizar arquivos prontos.';
+            try {
+                if (typeof swal === 'function') {
+                    installSwalClickShield();
+                    await swal({
+                        title: 'Vídeo grande demais',
+                        text: `${modalText}\n\nNão é possível otimizar automaticamente este arquivo no navegador.\n${extra}`,
+                        icon: 'warning',
+                        closeOnClickOutside: false,
+                        closeOnEsc: false,
+                        buttons: { confirm: { text: 'OK', value: true } }
+                    });
+                }
+            } catch (_) {}
+            return { error: true, message: 'Vídeo acima do limite sem otimização disponível.' };
+        }
+
+        if (suppressPrompts) {
+            return { error: true, message: 'Vídeo acima do limite. Otimização automática indisponível.' };
+        }
+        let wantsProceed = false;
+        try {
+            if (typeof swal === 'function') {
+                installSwalClickShield();
+                wantsProceed = await swal({
+                    title: 'Podemos otimizar',
+                    text: `${modalText}\n\nDeseja continuar?`,
+                    icon: 'info',
+                    closeOnClickOutside: false,
+                    closeOnEsc: false,
+                    buttons: {
+                        cancel: 'Cancelar',
+                        confirm: { text: 'Continuar', value: true }
+                    }
+                });
+            }
+        } catch (_) {}
+
+        if (!wantsProceed) {
+            return { error: true, message: 'Envio cancelado.' };
+        }
+
+        return { error: true, message: 'Vídeo acima do limite.' };
+    }
+
+    async function uploadPostMediaFile(file, { cm = 0, em = 0, typeOverride = null, source = 'file', suppressPrompts = false } = {}) {
+        let fileToUpload = file;
+        let type = typeOverride || ((file?.type || '').toLowerCase().startsWith('video') ? 'video' : 'image');
+        let imageStats = null;
+
+        if (type === 'image') {
+            const optimized = await optimizeImageForUpload(file);
+            fileToUpload = optimized.file;
+            imageStats = optimized.stats;
+            if (Number.isFinite(fileToUpload?.size) && fileToUpload.size > MAX_IMAGE_BYTES) {
+                if (suppressPrompts) {
+                    const ultra = await optimizeImage(file, {
+                        targetBytes: IMAGE_OPT_TARGET_BYTES,
+                        maxDim: IMAGE_OPT_MAX_DIM,
+                        minDim: IMAGE_OPT_ULTRA_MIN_DIM,
+                        initialQuality: IMAGE_OPT_INITIAL_QUALITY,
+                        minQuality: IMAGE_OPT_ULTRA_MIN_QUALITY,
+                        qualityStep: IMAGE_OPT_QUALITY_STEP,
+                        forceUltra: true
+                    });
+                    fileToUpload = ultra.optimizedFile;
+                    imageStats = ultra.stats;
+                    if (Number.isFinite(fileToUpload?.size) && fileToUpload.size > MAX_IMAGE_BYTES) {
+                        return { error: true, message: 'Imagem acima de 15MB mesmo após otimização.' };
+                    }
+                } else {
+                let wantsUltra = false;
+                try {
+                    if (typeof swal === 'function') {
+                        wantsUltra = await swal({
+                            title: 'Imagem muito grande',
+                            text: 'Não foi possível reduzir abaixo de 15MB com qualidade aceitável. Tentar modo ultra?',
+                            icon: 'warning',
+                            buttons: {
+                                cancel: 'Cancelar',
+                                confirm: { text: 'Modo ultra', value: true }
+                            }
+                        });
+                    }
+                } catch (_) {}
+                if (!wantsUltra) {
+                    return { error: true, message: 'Não foi possível reduzir a imagem abaixo de 15MB. Converta para JPG/WebP ou escolha outra imagem.' };
+                }
+                showImageOptimizeStatus('Modo ultra...');
+                const ultra = await optimizeImage(file, {
+                    targetBytes: IMAGE_OPT_TARGET_BYTES,
+                    maxDim: IMAGE_OPT_MAX_DIM,
+                    minDim: IMAGE_OPT_ULTRA_MIN_DIM,
+                    initialQuality: IMAGE_OPT_INITIAL_QUALITY,
+                    minQuality: IMAGE_OPT_ULTRA_MIN_QUALITY,
+                    qualityStep: IMAGE_OPT_QUALITY_STEP,
+                    forceUltra: true,
+                    onProgress: ({ step, total, label }) => {
+                        showImageOptimizeStatus(`${label} (${step}/${total})`);
+                    }
+                });
+                hideImageOptimizeStatus();
+                fileToUpload = ultra.optimizedFile;
+                imageStats = ultra.stats;
+                if (Number.isFinite(fileToUpload?.size) && fileToUpload.size > MAX_IMAGE_BYTES) {
+                    return { error: true, message: 'Mesmo no modo ultra a imagem ficou acima de 15MB. Tente outra imagem.' };
+                }
+                }
+            }
+            if (imageStats && !suppressPrompts) {
+                const msg = `Imagem otimizada: ${formatBytes(imageStats.originalBytes)} → ${formatBytes(imageStats.optimizedBytes)}`;
+                try { if (typeof swal === 'function') { swal('Otimizacao concluida', msg, 'success'); } } catch (_) {}
+            }
+            type = 'image';
+        }
+
+        if (type === 'video') {
+            const size = Number.isFinite(fileToUpload?.size) ? fileToUpload.size : null;
+            if (!suppressPrompts && size && size > MAX_VIDEO_BYTES) {
+                // Fluxo legado: apenas quando prompts não estiverem suprimidos
+                const handled = await handleLargeVideo(fileToUpload, source, { suppressPrompts });
+                if (handled?.error) {
+                    return { error: true, message: handled.message || 'Vídeo acima do limite.' };
+                }
+                if (handled?.file) {
+                    fileToUpload = handled.file;
+                }
+            }
+            const duration = await getVideoDuration(fileToUpload);
+            if (duration > MAX_VIDEO_SECONDS) {
+                const handled = await handleLargeVideo(fileToUpload, source, { suppressPrompts });
+                if (handled?.error) {
+                    return { error: true, message: handled.message || `Vídeo com ${formatDuration(duration)}. Máximo permitido: 01:00.` };
+                }
+                if (handled?.file) {
+                    fileToUpload = handled.file;
+                }
+            }
+        }
+
+        if (!fileToUpload || !Number.isFinite(fileToUpload.size) || fileToUpload.size === 0) {
+            return { error: true, message: 'Arquivo inválido para upload.' };
+        }
+        const mime = fileToUpload?.type || '';
+        const size = Number.isFinite(fileToUpload?.size) ? fileToUpload.size : null;
+        const initRes = await apiClient.post('/media/init', { type, mime, size, cm, em });
+        if (initRes?.status !== 'success') {
+            return { error: true, message: initRes?.message || 'Falha ao iniciar mídia.' };
+        }
+
+        const mediaId = initRes.media_id;
+        const fd = new FormData();
+        const fallbackName = type === 'video' ? `capture_${Date.now()}.webm` : `capture_${Date.now()}.jpg`;
+        const normalizedFile = (fileToUpload instanceof File)
+            ? fileToUpload
+            : new File([fileToUpload], fileToUpload?.name || fallbackName, { type: mime || (type === 'video' ? 'video/webm' : 'image/jpeg') });
+        fd.append('file', normalizedFile, normalizedFile.name);
+        fd.append('media_id', mediaId);
+        const uploadRes = await apiClient.upload('/media/upload', fd);
+        if (uploadRes?.status !== 'success') {
+            return { error: true, message: uploadRes?.message || 'Falha no upload da mídia.' };
+        }
+
+        const completeRes = await apiClient.post('/media/complete', { media_id: mediaId });
+        if (completeRes?.status !== 'success') {
+            return { error: true, message: completeRes?.message || 'Falha ao completar mídia.' };
+        }
+
+        return {
+            media_id: mediaId,
+            type,
+            mimeType: mime || null,
+            size,
+            url: completeRes?.url_final || uploadRes?.url || null,
+        };
+    }
+
+    function safeRevoke(url, reason = '') {
+        if (!url || typeof url !== 'string' || !url.startsWith('blob:')) return;
+        try { URL.revokeObjectURL(url); } catch (_) {}
+        if (window.__EXPORT_DEBUG) {
+            console.log('[EXPORT_DEBUG] revoke', url, reason);
+        }
+    }
+
+    function computePostTypeFromItems(items) {
+        const types = new Set((items || []).map((m) => (String(m.type||'').toLowerCase().startsWith('video') || String(m.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image'));
+        if (types.size === 1) return types.has('video') ? 'video' : 'image';
+        return 'mixed';
+    }
+
+    function ensurePublishLoader() {
+        let overlay = document.getElementById('publishMediaLoader');
+        if (overlay) return overlay;
+        overlay = document.createElement('div');
+        overlay.id = 'publishMediaLoader';
+        overlay.style.position = 'fixed';
+        overlay.style.inset = '0';
+        overlay.style.background = 'rgba(15, 23, 42, 0.55)';
+        overlay.style.zIndex = '9999';
+        overlay.style.display = 'none';
+        overlay.innerHTML = `
+            <div class="w-full h-full flex items-center justify-center">
+                <div class="bg-white rounded-2xl shadow-xl w-[320px] p-5 text-center space-y-3">
+                    <div class="text-base font-semibold">Processando mídias...</div>
+                    <div class="text-sm text-slate-500" id="publishMediaSubtitle">Item 1 de 1</div>
+                    <div class="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                        <div id="publishMediaBar" class="h-full bg-indigo-600 transition-all" style="width:0%"></div>
+                    </div>
+                    <div class="text-xs text-slate-500" id="publishMediaStage">Iniciando...</div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        return overlay;
+    }
+
+    function showPublishLoader(totalItems) {
+        const overlay = ensurePublishLoader();
+        overlay.style.display = 'block';
+        updatePublishLoader(1, totalItems, 0, 'Iniciando...');
+    }
+
+    function updatePublishLoader(index, total, percent, stageText) {
+        const subtitle = document.getElementById('publishMediaSubtitle');
+        const bar = document.getElementById('publishMediaBar');
+        const stage = document.getElementById('publishMediaStage');
+        if (subtitle) subtitle.textContent = `Item ${index} de ${total}`;
+        if (bar) bar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+        if (stage && stageText) stage.textContent = stageText;
+    }
+
+    function hidePublishLoader() {
+        const overlay = document.getElementById('publishMediaLoader');
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    async function publishPostMediaFlow({ items, captionInput, publishBtn, renderTray, switchToMedia }) {
+        if (!Array.isArray(items) || !items.length) {
+            notifyError('Adicione ao menos uma mídia.');
+            return;
+        }
+        const caption = (captionInput?.value || '').toString().trim();
+        const tp = computePostTypeFromItems(items);
+        const scope = getPostEntityScope();
+        let uploadFailed = false;
+        const totalItems = items.length;
+        showPublishLoader(totalItems);
+
+        if (window.__EXPORT_DEBUG) {
+            items.forEach((it, idx) => {
+                const url = it?.url || '';
+                console.log('[EXPORT_DEBUG] item', {
+                    idx,
+                    type: it?.type,
+                    source: it?.source,
+                    hasFile: it?.file instanceof Blob,
+                    size: it?.file?.size || it?.size || 0,
+                    urlPrefix: url ? (url.startsWith('blob:') ? 'blob' : 'http') : 'none'
+                });
+            });
+        }
+
+        if (!window.EditorBridge) {
+            hidePublishLoader();
+            notifyError('Editor indisponível.');
+            return;
+        }
+        if (window.EditorBridge) {
+            publishBtn.disabled = true; publishBtn.textContent = 'Publicando...';
+            const prevIdx = POST_MEDIA_STATE.activeIndex;
+
+            if (POST_MEDIA_STATE.activeIndex != null && window.EditorBridge?.serialize) {
+                try {
+                    const layoutNow = window.EditorBridge.serialize();
+                    if (items[POST_MEDIA_STATE.activeIndex]) {
+                        items[POST_MEDIA_STATE.activeIndex].layout = layoutNow;
+                    }
+                } catch (_) {}
+            }
+            for (let i = 0; i < items.length; i++) {
+                const it = items[i];
+                const isVideo = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
+                const hasLayout = !!it.layout;
+                if (!isVideo && !hasLayout) {
+                    continue;
+                }
+                updatePublishLoader(i + 1, totalItems, (i / totalItems) * 100, isVideo ? 'Exportando vídeo...' : 'Compondo imagem...');
+
+                const exportItem = async () => {
+                    const sourceFile = (it.file instanceof Blob) ? it.file : (it.originalFile instanceof Blob ? it.originalFile : null);
+                    if (!sourceFile) {
+                        throw new Error('Arquivo base ausente para composição.');
+                    }
+                    if (window.__EXPORT_DEBUG) {
+                        console.log('[EXPORT_DEBUG] export item', {
+                            idx: i,
+                            type: isVideo ? 'video' : 'image',
+                            hasLayout: !!it.layout,
+                            fileSize: sourceFile.size || 0
+                        });
+                    }
+                    const startedAt = window.performance?.now?.() || Date.now();
+                    if (isVideo) {
+                        const vblob = await window.EditorBridge.exportVideoFromBlob?.(sourceFile, it.layout || null, { duration: it.duration || null, profileFixed: true });
+                        if (window.__EXPORT_DEBUG) {
+                            console.log('[EXPORT_DEBUG] exportVideoBlob', { idx: i, ms: (window.performance?.now?.() || Date.now()) - startedAt });
+                        }
+                        if (vblob && vblob.size > 0) {
+                            updatePublishLoader(i + 1, totalItems, ((i + 0.5) / totalItems) * 100, 'Enviando vídeo...');
+                            const up = await uploadPostMediaFile(vblob, { ...scope, typeOverride: 'video', source: 'composed', suppressPrompts: true });
+                            if (up?.error) {
+                                uploadFailed = true;
+                            } else {
+                                it.media_id = up.media_id;
+                                it.url = up.url;
+                                it.mimeType = up.mimeType;
+                                it.size = up.size;
+                                it.type = 'video';
+                            }
+                        } else {
+                            uploadFailed = true;
+                        }
+                    } else {
+                        const blob = await window.EditorBridge.exportImageFromBlob?.(sourceFile, it.layout, { quality: 0.9 });
+                        if (window.__EXPORT_DEBUG) {
+                            console.log('[EXPORT_DEBUG] exportImage', { idx: i, ms: (window.performance?.now?.() || Date.now()) - startedAt });
+                        }
+                        if (blob && blob.size > 0) {
+                            updatePublishLoader(i + 1, totalItems, ((i + 0.5) / totalItems) * 100, 'Enviando imagem...');
+                            const up = await uploadPostMediaFile(blob, { ...scope, typeOverride: 'image', suppressPrompts: true });
+                            if (up?.error) {
+                                uploadFailed = true;
+                            } else {
+                                it.media_id = up.media_id;
+                                it.url = up.url;
+                                it.mimeType = up.mimeType;
+                                it.size = up.size;
+                                it.type = 'image';
+                            }
+                        } else {
+                            uploadFailed = true;
+                        }
+                    }
+                };
+
+                try { await exportItem(); } catch (_) { uploadFailed = true; }
+            }
+            if (prevIdx != null && typeof switchToMedia === 'function') {
+                POST_MEDIA_STATE.activeIndex = prevIdx; switchToMedia(prevIdx);
+            }
+            publishBtn.disabled = false; publishBtn.textContent = 'Publicar';
+        }
+
+        if (uploadFailed) {
+            hidePublishLoader();
+            notifyError('Falha ao gerar/upload de mídias. Tente novamente.');
+            return;
+        }
+
+        for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            if (!it?.media_id) {
+                const fileObj = it.file || it.originalFile || null;
+                if (!fileObj) {
+                    uploadFailed = true;
+                    notifyError(`Arquivo ausente para o item ${i + 1}.`);
+                    continue;
+                }
+                const isVid = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
+                try {
+                    if (isVid) {
+                        uploadFailed = true;
+                        notifyError(`Falha ao exportar o vídeo do item ${i + 1}.`);
+                    } else {
+                        updatePublishLoader(i + 1, totalItems, ((i + 0.5) / totalItems) * 100, 'Enviando imagem...');
+                        const up3 = await uploadPostMediaFile(fileObj, { ...scope, typeOverride: 'image', source: it?.source || 'file', suppressPrompts: true });
+                        if (up3?.error) {
+                            uploadFailed = true;
+                        } else {
+                            const keepLayout = it.layout ? { layout: it.layout } : {};
+                            items[i] = { ...items[i], ...up3, ...keepLayout };
+                        }
+                    }
+                } catch(_) { uploadFailed = true; }
+            }
+        }
+
+        if (uploadFailed || items.some(it => !it?.media_id)) {
+            hidePublishLoader();
+            notifyError('Não foi possível enviar todas as mídias. Verifique os arquivos e tente novamente.');
+            return;
+        }
+
+        const { cm, em } = scope;
+        const vtNow = String(viewType || '');
+        const tok = getPostPrivacy();
+        const ppCode = tokenToPrivacyCode(tok, vtNow === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow);
+        updatePublishLoader(totalItems, totalItems, 100, 'Finalizando post...');
+        const payload = { tp, cm, em, post_privacy: Number(ppCode), ct: { version: 2, caption, media: buildPostMediaPayload(items), post_privacy_token: tok } };
+        const res = await apiClient.post('/posts', payload);
+        if (res?.error || res?.status === 'error') {
+            hidePublishLoader();
+            notifyError(res?.message || 'Não foi possível publicar o post.');
+            return;
+        }
+        notifySuccess('Post publicado!');
+        hidePublishLoader();
+        cleanupPostMediaState({ startCamera: false });
+        if (captionInput) captionInput.value = '';
+        renderTray();
+        resetFeed();
+        loadFeed();
+    }
+
+    function buildPostMediaPayload(items = []) {
+        return (items || []).map((item) => {
+            const payload = {
+                type: item?.type,
+                media_id: item?.media_id,
+            };
+            if (item?.layout) payload.layout = item.layout;
+            return payload;
+        }).filter((item) => Number.isFinite(item.media_id) && item.media_id > 0);
+    }
+
+    function getPostEntityScope() {
+        const vt = String(viewType || '');
+        const vd = viewData || null;
+        const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
+        const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
+        return { cm, em };
     }
 
     function applyEntityBackgroundImage(entityData = null) {
@@ -890,10 +1806,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const tok = getPostPrivacy();
             const ppCode = tokenToPrivacyCode(tok, vtNow === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow);
             const caption = (captionInput?.value || '').trim();
-            let cm = 0;
-            let em = 0;
-            if (viewType === ENTITY.TEAM && viewData?.id) cm = Number(viewData.id) || 0;
-            if (viewType === ENTITY.BUSINESS && viewData?.id) em = Number(viewData.id) || 0;
+            const { cm, em } = getPostEntityScope();
             const postType = (preview.kind || '').toLowerCase() === 'video' ? 'video' : 'image';
             const ct = {
                 caption,
@@ -947,6 +1860,27 @@ document.addEventListener('DOMContentLoaded', () => {
             const keyHandler = (e) => { if (e.key === 'Enter') { e.preventDefault(); handleLoad(e); } };
             input.addEventListener('keydown', keyHandler);
             input._linkHandler = keyHandler;
+            if (input._linkPasteHandler) input.removeEventListener('paste', input._linkPasteHandler);
+            const pasteHandler = (e) => {
+                const text = e.clipboardData?.getData('text/plain') || '';
+                if (!text) return;
+                e.preventDefault();
+                input.value = text.trim();
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            };
+            input.addEventListener('paste', pasteHandler);
+            input._linkPasteHandler = pasteHandler;
+            if (input._linkDropHandler) input.removeEventListener('drop', input._linkDropHandler);
+            const dropHandler = (e) => {
+                const text = e.dataTransfer?.getData('text/plain') || '';
+                if (!text) return;
+                e.preventDefault();
+                input.focus();
+                input.value = text.trim();
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            };
+            input.addEventListener('drop', dropHandler);
+            input._linkDropHandler = dropHandler;
         }
         if (publishBtn) {
             if (publishBtn._linkHandler) publishBtn.removeEventListener('click', publishBtn._linkHandler);
@@ -956,299 +1890,145 @@ document.addEventListener('DOMContentLoaded', () => {
         setPreview(container._linkPreview);
     }
 
-    // Inicializa o seletor e a bandeja de múltiplas mídias no editor de posts
-    function initPostEditorGallery(root = document) {
-        const picker = root.querySelector('#postMediaPicker');
-        const tray = root.querySelector('#postMediaTray');
-        const publishBtn = root.querySelector('#publishGalleryBtn');
-        const captionInput = root.querySelector('#postCaption');
-
-        if (!picker || !tray || !publishBtn) return;
-
-        if (!POST_MEDIA_STATE.initialized) {
-            cleanupPostMediaState();
-            POST_MEDIA_STATE.initialized = true;
-        }
-
-        const renderTray = () => {
-            const items = POST_MEDIA_STATE.items || [];
-            if (!items.length) {
-                tray.innerHTML = `<p class="text-sm text-center">Nenhuma mídia adicionada ainda.</p>`;
-                return;
-            }
-            let html = '<div class="grid grid-cols-3 gap-2">';
-            items.forEach((m, i) => {
-                const isVideo = String(m.type).toLowerCase() === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video');
-                const mediaEl = isVideo
-                    ? `<video src="${m.url}" class="w-full h-24 object-cover rounded-xl" muted loop playsinline></video>`
-                    : `<img src="${m.url}" class="w-full h-24 object-cover rounded-xl"\u003e`;
-                const isActive = (POST_MEDIA_STATE.activeIndex === i);
-                html += `
-                    <div class="relative group ${isActive ? 'ring-2 ring-indigo-500 rounded-xl' : ''}" data-index="${i}">
-                        ${mediaEl}
-                        <span class="absolute top-1 left-1 text-xs bg-black/60 text-white rounded px-1">${i+1}/${items.length}</span>
-                        <div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-left\" title=\"Mover para a esquerda"\u003e<i class=\"fas fa-arrow-left text-[10px]"\u003e</i></button>
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-right\" title=\"Mover para a direita"\u003e<i class=\"fas fa-arrow-right text-[10px]"\u003e</i></button>
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-red-600/80 text-white flex items-center justify-center\" data-action=\"remove\" title=\"Remover"\u003e<i class=\"fas fa-trash text-[10px]"\u003e</i></button>
-                        </div>
-                    </div>`;
-            });
-            html += '</div>';
-            tray.innerHTML = html;
-        };
-
-        const handleReorderOrRemove = (ev) => {
-            const btn = ev.target.closest('button[data-action]');
-            if (!btn || !tray.contains(btn)) return;
-            const card = btn.closest('[data-index]');
-            const idx = Number(card?.dataset?.index ?? -1);
-            if (!Number.isFinite(idx) || idx < 0) return;
-            const action = btn.dataset.action;
-            const items = POST_MEDIA_STATE.items;
-            if (!Array.isArray(items) || !items.length) return;
-            if (action === 'remove') {
-                const removed = items.splice(idx, 1)[0];
-                try { if (removed?.url && String(removed.url).startsWith('blob:')) URL.revokeObjectURL(removed.url); } catch(_) {}
-            } else if (action === 'move-left' && idx > 0) {
-                const [it] = items.splice(idx, 1);
-                items.splice(idx - 1, 0, it);
-            } else if (action === 'move-right' && idx < items.length - 1) {
-                const [it] = items.splice(idx, 1);
-                items.splice(idx + 1, 0, it);
-            }
-            renderTray();
-        };
-
-        const ensureBridge = (cb) => {
-            if (window.EditorBridge && typeof cb === 'function') { cb(); return; }
-            setTimeout(() => ensureBridge(cb), 100);
-        };
-
-        const switchToMedia = (idx) => {
-            const items = POST_MEDIA_STATE.items || [];
-            if (!items[idx]) return;
-            // Salvar layout atual no item ativo
-            if (POST_MEDIA_STATE.activeIndex != null && window.EditorBridge?.serialize) {
-                try {
-                    const layout = window.EditorBridge.serialize();
-                    POST_MEDIA_STATE.items[POST_MEDIA_STATE.activeIndex].layout = layout;
-                } catch (_) {}
-            }
-            POST_MEDIA_STATE.activeIndex = idx;
-            renderTray();
-            const it = items[idx];
-            const type = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image';
-            const apply = () => {
-                try { window.EditorBridge?.setBackground?.(it.url || (it.path ? ('/'+String(it.path).replace(/^\/+/, '')) : ''), type); } catch(_) {}
-                if (window.EditorBridge?.load) {
-                    if (it.layout) { try { window.EditorBridge.load(it.layout); } catch(_) {} }
-                    else { try { window.EditorBridge.load({ items: [] }); } catch(_) {} }
-                }
-            };
-            ensureBridge(apply);
-        };
-
-        const handlePickerChange = async (ev) => {
-            const files = Array.from(ev.target.files || []);
-            if (!files.length) return;
-            const remain = 10 - (POST_MEDIA_STATE.items?.length || 0);
-            const toSend = files.slice(0, Math.max(0, remain));
-            if (!toSend.length) {
-                notifyError('Limite de 10 mídias por post.');
-                return;
-            }
-            const fd = new FormData();
-            toSend.forEach(f => fd.append('files[]', f, f.name));
-            const res = await apiClient.upload('/posts/media', fd);
-            if (res?.error || res?.status === 'error') {
-                notifyError(res?.message || 'Falha no upload das mídias.');
-                return;
-            }
-            const media = Array.isArray(res?.media) ? res.media : [];
-            if (!media.length) {
-                notifyError('Nenhuma mídia válida recebida.');
-                return;
-            }
-            POST_MEDIA_STATE.items.push(...media);
-            picker.value = '';
-            renderTray();
-            if (POST_MEDIA_STATE.activeIndex == null) {
-                switchToMedia(0);
-            }
-        };
-
-        const computePostType = (items) => {
-            const types = new Set((items||[]).map(m => (String(m.type||'').toLowerCase().startsWith('video') || String(m.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image'));
-            if (types.size === 1) return types.has('video') ? 'video' : 'image';
-            return 'mixed';
-        };
-
-        const handlePublish = async () => {
-            const items = POST_MEDIA_STATE.items || [];
-            if (!items.length) {
-                notifyError('Adicione ao menos uma mídia.');
-                return;
-            }
-            const caption = (captionInput?.value || '').toString().trim();
-            const tp = computePostType(items);
-
-            // Pré-processamento: gerar composições quando houver layout (imagem e vídeo)
-            if (window.EditorBridge) {
-                publishBtn.disabled = true; publishBtn.textContent = 'Publicando...';
-                // Guardar índice ativo para restaurar
-                const prevIdx = POST_MEDIA_STATE.activeIndex;
-
-                // Capturar layout atual do item ativo
-                if (POST_MEDIA_STATE.activeIndex != null && window.EditorBridge?.serialize) {
-                    try {
-                        const layoutNow = window.EditorBridge.serialize();
-                        if (items[POST_MEDIA_STATE.activeIndex]) {
-                            items[POST_MEDIA_STATE.activeIndex].layout = layoutNow;
-                        }
-                    } catch (_) {}
-                }
-                for (let i = 0; i < items.length; i++) {
-                    const it = items[i];
-                    const isVideo = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
-                    // layout será salvo automaticamente ao alternar via switchToMedia
-                    if (!it.layout) continue;
-                    if (isVideo) {
-                        // Compor vídeo com layout
-                        await new Promise((resolve)=>{
-                            const then = async () => {
-                                try {
-                                    const vblob = await window.EditorBridge.exportVideoBlob();
-                                    if (vblob) {
-                                        const fd2 = new FormData();
-                                        fd2.append('files[]', vblob, `composite_${Date.now()}.webm`);
-                                        const up = await apiClient.upload('/posts/media', fd2);
-                                        const first = Array.isArray(up?.media) ? up.media[0] : null;
-                                        if (first) {
-                                            it.originalUrl = it.url; it.originalPath = it.path; it.originalMime = it.mimeType;
-                                            it.url = first.url; it.path = first.path; it.mimeType = first.mimeType;
-                                        }
-                                    }
-                                } catch(_) {}
-                                resolve();
-                            };
-                            switchToMedia(i); setTimeout(then, 200);
-                        });
-                    } else {
-                        // Compor imagem com layout
-                        await new Promise((resolve)=>{
-                            const then = async () => { try { await window.EditorBridge.renderFrame(); } catch(_){} resolve(); };
-                            switchToMedia(i); setTimeout(then, 150);
-                        });
-                        try {
-                            const canvas = document.getElementById('outCanvas');
-                            if (canvas && canvas.toBlob) {
-                                const blob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
-                                if (blob) {
-                                    const fd2 = new FormData();
-                                    fd2.append('files[]', blob, `composite_${Date.now()}.jpg`);
-                                    const up = await apiClient.upload('/posts/media', fd2);
-                                    const first = Array.isArray(up?.media) ? up.media[0] : null;
-                                    if (first) {
-                                        // manter referência do original
-                                        it.originalUrl = it.url; it.originalPath = it.path; it.originalMime = it.mimeType;
-                                        it.url = first.url; it.path = first.path; it.mimeType = first.mimeType;
-                                    }
-                                }
-                            }
-                        } catch(_) {}
-                    }
-                }
-                // Restaurar índice
-                if (prevIdx != null) { POST_MEDIA_STATE.activeIndex = prevIdx; switchToMedia(prevIdx); }
-                publishBtn.disabled = false; publishBtn.textContent = 'Publicar';
-            }
-
-            // Upload pendente de itens sem layout (originais) somente no publish
-            for (let i = 0; i < items.length; i++) {
-                const it = items[i];
-                if (!it?.path) {
-                    const fileObj = it.file || null;
-                    if (fileObj) {
-                        try {
-                            const fd3 = new FormData();
-                            const isVid = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
-                            const preferredName = it.fileName || (isVid ? `post_${Date.now()}.webm` : `post_${Date.now()}.jpg`);
-                            fd3.append('files[]', fileObj, preferredName);
-                            const up3 = await apiClient.upload('/posts/media', fd3);
-                            const first3 = Array.isArray(up3?.media) ? up3.media[0] : null;
-                            if (first3) {
-                                const keepLayout = it.layout ? { layout: it.layout } : {};
-                                items[i] = { ...first3, ...keepLayout };
-                            }
-                        } catch(_) {}
-                    }
-                }
-            }
-
-            const vt = String(viewType || '');
-            const vd = viewData || null;
-            const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
-            const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
-
-            const vtNow = String(viewType || '');
-            const tok = getPostPrivacy();
-            const ppCode = tokenToPrivacyCode(tok, vtNow === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow);
-            const payload = { tp, cm, em, post_privacy: Number(ppCode), ct: { caption, media: items, post_privacy_token: tok } };
-            const res = await apiClient.post('/posts', payload);
-            if (res?.error || res?.status === 'error') {
-                notifyError(res?.message || 'Não foi possível publicar o post.');
-                return;
-            }
-            notifySuccess('Post publicado!');
-            cleanupPostMediaState();
-            if (captionInput) captionInput.value = '';
-            renderTray();
-            resetFeed();
-            loadFeed();
-        };
-
-        // Preferir estratégia local-first: não fazer upload no change
-        try { if (picker._galleryHandler) { picker.removeEventListener('change', picker._galleryHandler); } } catch(_) {}
-        try { setupLocalFirstGalleryUpload(root); } catch(_) {}
-
-        const trayClick = (ev) => {
-            // Bloqueia propagação para não acionar listeners globais que fecham a sidebar
-            if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
-            const btn = ev.target.closest('button[data-action]');
-            if (btn) { handleReorderOrRemove(ev); return; }
-            const card = ev.target.closest('[data-index]');
-            if (!card || !tray.contains(card)) return;
-            const idx = Number(card.dataset.index || '-1');
-            if (!Number.isFinite(idx) || idx < 0) return;
-            switchToMedia(idx);
-        };
-        if (tray._galleryHandler) { tray.removeEventListener('click', tray._galleryHandler); }
-        tray.addEventListener('click', trayClick);
-        tray._galleryHandler = trayClick;
-
-        if (publishBtn) {
-            publishBtn.classList.add('hidden'); // manter somente um botão visível
-            if (publishBtn._galleryHandler) { publishBtn.removeEventListener('click', publishBtn._galleryHandler); }
-            publishBtn.addEventListener('click', handlePublish);
-            publishBtn._galleryHandler = handlePublish;
-        }
-        renderTray();
-
-        // Se já houver itens (ex.: retorno ao editor), focar o primeiro
-        if ((POST_MEDIA_STATE.items?.length||0) > 0 && POST_MEDIA_STATE.activeIndex == null) {
-            switchToMedia(0);
-        }
-    }
-
-    // Integra captura do editor -> adiciona na galeria automaticamente
-    function setupEditorCaptureBridge(root = document) {
-        // Redireciona para o modo local-first (sem upload imediato)
-        try { if (window._editorCaptureHandler) window.removeEventListener('editor:capture', window._editorCaptureHandler); } catch(_) {}
-        try { setupEditorCaptureBridgeLocal(root); } catch(_) {}
-    }
-
     // Unifica pontos de entrada de mídia (captura e rótulos) para a galeria
+    function wireStoryCaptureButton(root = document) {
+        const captureBtn = root.querySelector('#captureButton');
+        if (!captureBtn) return;
+        if (captureBtn._storyCaptureInstalled) return;
+        if (captureBtn._unifyGalleryHandler) {
+            try { captureBtn.removeEventListener('click', captureBtn._unifyGalleryHandler, true); } catch (_) {}
+            captureBtn._unifyGalleryHandler = null;
+        }
+
+        let holdTimer = null;
+        let recording = false;
+        let recorder = null;
+        let chunks = [];
+        let pointerActive = false;
+        let canceled = false;
+        const HOLD_MS = 250;
+
+        const cleanupTimer = () => {
+            if (holdTimer) {
+                clearTimeout(holdTimer);
+                holdTimer = null;
+            }
+        };
+
+        const getLayoutSnapshot = () => {
+            try { return window.EditorBridge?.serialize ? window.EditorBridge.serialize() : null; } catch (_) { return null; }
+        };
+
+        const dispatchCapture = (blob, type) => {
+            if (!blob) return;
+            const layout = getLayoutSnapshot();
+            window.dispatchEvent(new CustomEvent('editor:capture', {
+                detail: { blob, type, layout, source: 'camera' }
+            }));
+        };
+
+        const startRecording = () => {
+            if (recording || canceled) return;
+            const videoEl = getCameraVideoEl(root);
+            const stream = videoEl?.srcObject;
+            if (!stream || typeof MediaRecorder === 'undefined') {
+                notifyError('Gravação de vídeo indisponível.');
+                return;
+            }
+            const mimeType = getSupportedRecorderMime();
+            try {
+                chunks = [];
+                recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+                recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
+                recorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: recorder?.mimeType || 'video/webm' });
+                    if (!canceled) dispatchCapture(blob, 'video');
+                    recording = false;
+                    recorder = null;
+                    chunks = [];
+                };
+                recorder.start();
+                recording = true;
+            } catch (_) {
+                notifyError('Não foi possível iniciar a gravação.');
+            }
+        };
+
+        const stopRecording = (discard = false) => {
+            canceled = discard;
+            cleanupTimer();
+            if (recording && recorder && recorder.state !== 'inactive') {
+                try { recorder.stop(); } catch (_) {}
+                return;
+            }
+            recording = false;
+            recorder = null;
+            chunks = [];
+        };
+
+        const handleTap = async () => {
+            const videoEl = getCameraVideoEl(root);
+            if (!videoEl) {
+                notifyError('Câmera indisponível.');
+                return;
+            }
+            try {
+                const blob = await captureCameraPhotoBlob(videoEl);
+                dispatchCapture(blob, 'image');
+            } catch (_) {
+                notifyError('Não foi possível capturar a foto.');
+            }
+        };
+
+        const onPointerDown = (ev) => {
+            if (ev.button != null && ev.button !== 0) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            pointerActive = true;
+            canceled = false;
+            try { captureBtn.setPointerCapture?.(ev.pointerId); } catch (_) {}
+            cleanupTimer();
+            holdTimer = setTimeout(() => {
+                if (!pointerActive) return;
+                startRecording();
+            }, HOLD_MS);
+        };
+
+        const onPointerUp = (ev) => {
+            if (!pointerActive) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            pointerActive = false;
+            try { captureBtn.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+            if (recording) {
+                stopRecording(false);
+                return;
+            }
+            cleanupTimer();
+            handleTap();
+        };
+
+        const onPointerCancel = (ev) => {
+            if (!pointerActive && !recording) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            pointerActive = false;
+            stopRecording(true);
+        };
+
+        const onClick = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+        };
+
+        captureBtn.addEventListener('pointerdown', onPointerDown);
+        captureBtn.addEventListener('pointerup', onPointerUp);
+        captureBtn.addEventListener('pointercancel', onPointerCancel);
+        captureBtn.addEventListener('pointerleave', onPointerCancel);
+        captureBtn.addEventListener('click', onClick, true);
+        captureBtn._storyCaptureInstalled = true;
+    }
+
     function wireUnifiedMediaAdders(root = document) {
         const isMobileLike = () => {
             try {
@@ -1263,24 +2043,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const picker = root.querySelector('#postMediaPicker');
         if (!picker) return;
 
-        // 1) Captura: no desktop, redireciona o clique para o seletor da galeria
-        const captureBtn = root.querySelector('#captureButton');
-        if (captureBtn) {
-            const onCaptureClick = (ev) => {
-                // Em dispositivos móveis, manter o fluxo nativo (gera editor:capture)
-                if (isMobileLike()) return;
-                ev.preventDefault();
-                if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
-                if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
-                try { initPostEditorGallery(root); } catch (_) {}
-                picker.click();
-            };
-            try { captureBtn.removeEventListener('click', captureBtn._unifyGalleryHandler, true); } catch (_) {}
-            captureBtn.addEventListener('click', onCaptureClick, true);
-            captureBtn._unifyGalleryHandler = onCaptureClick;
-        }
-
-        // 2) Toolbar superior: rótulo do bgUpload passa a abrir o seletor da galeria
+        // Toolbar superior: rótulo do bgUpload passa a abrir o seletor da galeria
         const bgInput = root.querySelector('#bgUpload');
         const bgLabel = bgInput ? bgInput.closest('label') : null;
         if (bgLabel) {
@@ -1288,6 +2051,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ev.preventDefault();
                 if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
                 if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+                try { root.dataset.suppressCameraAuto = '1'; } catch (_) {}
                 try { initPostEditorGallery(root); } catch (_) {}
                 picker.click();
             };
@@ -1304,13 +2068,40 @@ document.addEventListener('DOMContentLoaded', () => {
         if (picker._galleryHandler) {
             try { picker.removeEventListener('change', picker._galleryHandler); } catch(_) {}
         }
-        const handler = (ev) => {
+        const handler = async (ev) => {
             const files = Array.from(ev.target.files || []);
             if (!files.length) return;
             const remain = 10 - (POST_MEDIA_STATE.items?.length || 0);
             const toSend = files.slice(0, Math.max(0, remain));
             if (!toSend.length) return;
-            const mediaLocals = toSend.map((f) => {
+            const validFiles = [];
+            for (const f of toSend) {
+                const check = validateMediaFile(f);
+                if (!check.ok) {
+                    notifyError(check.message);
+                    continue;
+                }
+                const isVid = (f.type || '').toLowerCase().startsWith('video');
+                if (isVid) {
+                    let candidate = f;
+                    const duration = await getVideoDuration(candidate);
+                    if (duration > MAX_VIDEO_SECONDS) {
+                        const handled = await handleLargeVideo(candidate, 'file', { suppressPrompts: true });
+                        if (handled?.error) {
+                            notifyError(handled.message || 'Vídeo inválido.');
+                            continue;
+                        }
+                        if (handled?.file) {
+                            candidate = handled.file;
+                        }
+                    }
+                    validFiles.push(candidate);
+                    continue;
+                }
+                validFiles.push(f);
+            }
+            if (!validFiles.length) return;
+            const mediaLocals = validFiles.map((f) => {
                 const isVid = (f.type||'').toLowerCase().startsWith('video');
                 const objUrl = URL.createObjectURL(f);
                 return {
@@ -1319,13 +2110,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     mimeType: f.type || (isVid ? 'video/*' : 'image/*'),
                     type: isVid ? 'video' : 'image',
                     file: f,
-                    fileName: f.name || (isVid ? `post_${Date.now()}.webm` : `post_${Date.now()}.jpg`)
+                    fileName: f.name || (isVid ? `post_${Date.now()}.webm` : `post_${Date.now()}.jpg`),
+                    source: 'file'
                 };
             });
             POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
             POST_MEDIA_STATE.items.push(...mediaLocals);
+            POST_MEDIA_STATE.activeIndex = POST_MEDIA_STATE.items.length - 1;
             try { initPostEditorGallery(root); } catch(_) {}
-            if (POST_MEDIA_STATE.activeIndex == null) { try { switchToMedia?.(0); } catch(_) {} }
+            try { applyActivePostMediaToEditor(); } catch(_) {}
+            try { window.EditorBridge?.stopCamera?.('bg_set'); } catch (_) {}
         };
         picker.addEventListener('change', handler);
         picker._galleryHandler = handler;
@@ -1340,114 +2134,43 @@ document.addEventListener('DOMContentLoaded', () => {
             const detail = e?.detail || {};
             const blob = detail.blob || null;
             const type = (detail.type || '').toLowerCase();
+            const incomingLayout = detail.layout || null;
+            const incomingSource = detail.source || null;
             if (!blob) return;
+            const blobCheck = validateMediaFile(blob);
+            if (!blobCheck.ok) {
+                notifyError(blobCheck.message);
+                return;
+            }
             const name = type === 'video' ? `capture_${Date.now()}.webm` : `capture_${Date.now()}.jpg`;
             const objUrl = URL.createObjectURL(blob);
+            const isVideo = type === 'video' || ((blob.type||'').toLowerCase().startsWith('video'));
             const media = {
                 url: objUrl,
                 path: null,
-                mimeType: blob.type || (type === 'video' ? 'video/webm' : 'image/jpeg'),
-                type: type || ((blob.type||'').toLowerCase().startsWith('video') ? 'video' : 'image'),
+                mimeType: blob.type || (isVideo ? 'video/webm' : 'image/jpeg'),
+                type: type || (isVideo ? 'video' : 'image'),
                 file: blob,
-                fileName: name
+                fileName: name,
+                source: incomingSource || (isVideo ? 'recorded' : 'file')
             };
-            try { if (window.EditorBridge?.serialize) { media.layout = window.EditorBridge.serialize(); } } catch(_) {}
+            if (incomingLayout) {
+                media.layout = incomingLayout;
+            } else {
+                try { if (window.EditorBridge?.serialize) { media.layout = window.EditorBridge.serialize(); } } catch(_) {}
+            }
             POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
             POST_MEDIA_STATE.items.push(media);
             POST_MEDIA_STATE.activeIndex = POST_MEDIA_STATE.items.length - 1;
             try { initPostEditorGallery(root); } catch(_) {}
+            try { applyActivePostMediaToEditor(); } catch (_) {}
+            try { window.EditorBridge?.stopCamera?.('bg_set'); } catch (_) {}
             if (typeof notifySuccess === 'function') notifySuccess('Mídia adicionada à galeria.');
         };
         window.addEventListener('editor:capture', handler);
         window._editorCaptureHandler = handler;
     }
 
-    // Unifica o botão "Enviar" do editor ao fluxo da galeria
-    function wireUnifiedSendFlow(root = document) {
-        const btn = root.querySelector('#btnEnviar');
-        if (!btn) return;
-        if (btn._unifiedHandler) {
-            try { btn.removeEventListener('click', btn._unifiedHandler, true); } catch(_) {}
-        }
-
-        const handler = async (ev) => {
-            ev.preventDefault();
-            if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
-            if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
-            
-            // Se a galeria já tem itens, publicar usando o fluxo da galeria
-            const galleryItems = POST_MEDIA_STATE.items || [];
-            if (Array.isArray(galleryItems) && galleryItems.length > 0) {
-                const hiddenPublish = root.querySelector('#publishGalleryBtn');
-                if (hiddenPublish) { hiddenPublish.click(); return; }
-                try { initPostEditorGallery(root); setTimeout(() => root.querySelector('#publishGalleryBtn')?.click(), 0); } catch (_) {}
-                return;
-            }
-
-            // Caso não haja itens na galeria: exportar conteúdo atual (imagem/vídeo) e publicar direto
-            
-            // Detectar tipo de conteúdo olhando o DOM do editor
-            const editor = root.querySelector('#editor');
-            const bg = editor?.querySelector('.bg-media');
-            const hasVideoBg = !!bg && String(bg.tagName).toUpperCase() === 'VIDEO';
-            const hasAnimated = !!editor?.querySelector('.item[data-anim]:not([data-anim="none"])');
-            const isVideo = hasVideoBg || hasAnimated;
-
-            try {
-                let mediaDesc = null;
-                if (isVideo) {
-                    if (!window.EditorBridge?.exportVideoBlob) { notifyError('Exportação de vídeo indisponível.'); return; }
-                    const videoBlob = await window.EditorBridge.exportVideoBlob();
-                    if (!videoBlob) { notifyError('Falha ao gerar vídeo.'); return; }
-                    const fd = new FormData();
-                    fd.append('files[]', videoBlob, `post_${Date.now()}.webm`);
-                    const up = await apiClient.upload('/posts/media', fd);
-                    if (up?.error || up?.status === 'error') { notifyError(up?.message || 'Falha no upload do vídeo'); return; }
-                    mediaDesc = Array.isArray(up?.media) ? up.media[0] : null;
-                } else {
-                    if (!window.EditorBridge?.renderFrame) { notifyError('Exportação de imagem indisponível.'); return; }
-                    await window.EditorBridge.renderFrame();
-                    const canvas = document.getElementById('outCanvas');
-                    if (!canvas || !canvas.toBlob) { notifyError('Canvas de saída indisponível.'); return; }
-                    let imgBlob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
-                    if (!imgBlob) { notifyError('Falha ao gerar imagem.'); return; }
-                    const fd = new FormData();
-                    fd.append('files[]', imgBlob, `post_${Date.now()}.jpg`);
-                    const up = await apiClient.upload('/posts/media', fd);
-                    if (up?.error || up?.status === 'error') { notifyError(up?.message || 'Falha no upload da imagem'); return; }
-                    mediaDesc = Array.isArray(up?.media) ? up.media[0] : null;
-                }
-
-                if (!mediaDesc) { notifyError('Mídia não recebida.'); return; }
-
-                // Publicar post único
-                const captionInput = root.querySelector('#postCaption');
-                const caption = (captionInput?.value || '').toString().trim();
-
-                const vt = String(viewType || '');
-                const vd = viewData || null;
-                const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
-                const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
-
-                const tp = isVideo ? 'video' : 'image';
-                const vtNow = String(viewType || '');
-                const tok = getPostPrivacy();
-                const ppCode = tokenToPrivacyCode(tok, vtNow === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow);
-                const payload = { tp, cm, em, post_privacy: Number(ppCode), ct: { caption, media: [mediaDesc], post_privacy_token: tok } };
-                const res = await apiClient.post('/posts', payload);
-                if (res?.error || res?.status === 'error') { notifyError(res?.message || 'Não foi possível publicar.'); return; }
-                notifySuccess('Post publicado!');
-                resetFeed();
-                loadFeed();
-            } catch (err) {
-                console.error('[unified-send] error', err);
-                notifyError('Falha ao processar envio.');
-            }
-        };
-
-        btn.addEventListener('click', handler, true);
-        btn._unifiedHandler = handler;
-    }
     // (removidos duplicados de variáveis globais e installSidebarClickShield)
 
 
@@ -1495,6 +2218,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (/^data:image\//i.test(trimmed)) return trimmed;
+        if (/^blob:/i.test(trimmed)) return trimmed;
         if (/^https?:\/\//i.test(trimmed)) return trimmed;
 
         // If it starts with a known image path, treat it as a path.
@@ -1503,6 +2227,8 @@ document.addEventListener('DOMContentLoaded', () => {
             trimmed.startsWith('/users/') ||
             trimmed.startsWith('/uploads/') ||
             trimmed.startsWith('/app/uploads/') ||
+            trimmed.startsWith('/api/media/show/') ||
+            trimmed.startsWith('/api/media/') ||
             /^uploads\//i.test(trimmed)
         ) {
             return trimmed;
@@ -1571,13 +2297,31 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Estado do editor de posts (carrossel)
-    const POST_MEDIA_STATE = {
-        initialized: false,
-        items: [], // { type, url, path, mimeType, size, w?, h?, layout? }
-        activeIndex: null
-    };
+const POST_MEDIA_STATE = {
+    initialized: false,
+    items: [], // { type, url, path, mimeType, size, w?, h?, layout? }
+    activeIndex: null
+};
+try { window.POST_MEDIA_STATE = POST_MEDIA_STATE; } catch (_) {}
 
-    function cleanupPostMediaState() {
+function applyActivePostMediaToEditor(retry = 0) {
+    const items = POST_MEDIA_STATE.items || [];
+    const idx = POST_MEDIA_STATE.activeIndex;
+    if (!items.length || idx == null || !items[idx]) return;
+    if (!window.EditorBridge?.setBackground) {
+        if (retry < 5) setTimeout(() => applyActivePostMediaToEditor(retry + 1), 100);
+        return;
+    }
+    const it = items[idx];
+    const type = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image';
+    try { window.EditorBridge.setBackground(it.url || (it.path ? ('/'+String(it.path).replace(/^\/+/, '')) : ''), type); } catch(_) {}
+    if (window.EditorBridge.load) {
+        if (it.layout) { try { window.EditorBridge.load(it.layout); } catch(_) {} }
+        else { try { window.EditorBridge.load({ items: [] }); } catch(_) {} }
+    }
+}
+
+function cleanupPostMediaState({ startCamera = false } = {}) {
         try {
             const items = Array.isArray(POST_MEDIA_STATE.items) ? POST_MEDIA_STATE.items : [];
             items.forEach((m) => {
@@ -1591,6 +2335,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_) {}
         POST_MEDIA_STATE.items = [];
         POST_MEDIA_STATE.activeIndex = null;
+        if (startCamera) {
+            try { window.EditorBridge?.startCamera?.('open'); } catch (_) {}
+        }
     }
 
     function getImageUploadInput() {
@@ -1783,6 +2530,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const tray = root.querySelector('#postMediaTray');
         const publishBtn = root.querySelector('#publishGalleryBtn');
         const captionInput = root.querySelector('#postCaption');
+        const addBlankBtn = root.querySelector('#postAddBlankCanvas');
 
         if (!picker || !tray || !publishBtn) return;
 
@@ -1801,17 +2549,17 @@ document.addEventListener('DOMContentLoaded', () => {
             items.forEach((m, i) => {
                 const isVideo = String(m.type).toLowerCase() === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video');
                 const mediaEl = isVideo
-                    ? `<video src="${m.url}" class="w-full h-24 object-cover rounded-xl" muted loop playsinline></video>`
-                    : `<img src="${m.url}" class="w-full h-24 object-cover rounded-xl"\u003e`;
+                    ? `<video src="${m.url}" class="w-full shadow-lg h-24 object-cover rounded-xl" muted loop playsinline></video>`
+                    : `<img src="${m.url}" class="w-full shadow-lg h-24 object-cover rounded-xl"\u003e`;
                 const isActive = (POST_MEDIA_STATE.activeIndex === i);
                 html += `
                     <div class="relative group ${isActive ? 'ring-2 ring-indigo-500 rounded-xl' : ''}" data-index="${i}">
                         ${mediaEl}
-                        <span class="absolute top-1 left-1 text-xs bg-black/60 text-white rounded px-1">${i+1}/${items.length}</span>
-                        <div class="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-left\" title=\"Mover para a esquerda"\u003e<i class=\"fas fa-arrow-left text-[10px]"\u003e</i></button>
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-right\" title=\"Mover para a direita"\u003e<i class=\"fas fa-arrow-right text-[10px]"\u003e</i></button>
-                            <button type=\"button\" class=\"w-7 h-7 rounded-full bg-red-600/80 text-white flex items-center justify-center\" data-action=\"remove\" title=\"Remover"\u003e<i class=\"fas fa-trash text-[10px]"\u003e</i></button>
+                        <span class="absolute top-1 left-1 text-xs bg-black/60 text-white rounded-full px-1">${i+1}/${items.length}</span>
+                        <div class="absolute bottom-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                            <button type=\"button\" class=\"w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-left\" title=\"Mover para a esquerda"\u003e<i class=\"fas fa-arrow-left text-[10px]"\u003e</i></button>
+                            <button type=\"button\" class=\"w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center\" data-action=\"move-right\" title=\"Mover para a direita"\u003e<i class=\"fas fa-arrow-right text-[10px]"\u003e</i></button>
+                            <button type=\"button\" class=\"w-5 h-5 rounded-full bg-red-600/80 text-white flex items-center justify-center\" data-action=\"remove\" title=\"Remover"\u003e<i class=\"fas fa-trash text-[10px]"\u003e</i></button>
                         </div>
                     </div>`;
             });
@@ -1828,17 +2576,49 @@ document.addEventListener('DOMContentLoaded', () => {
             const action = btn.dataset.action;
             const items = POST_MEDIA_STATE.items;
             if (!Array.isArray(items) || !items.length) return;
+            const prevActiveIndex = POST_MEDIA_STATE.activeIndex;
+            let removedActive = false;
             if (action === 'remove') {
+                removedActive = (prevActiveIndex === idx);
                 const removed = items.splice(idx, 1)[0];
                 try { if (removed?.url && String(removed.url).startsWith('blob:')) URL.revokeObjectURL(removed.url); } catch(_) {}
+                if (POST_MEDIA_STATE.activeIndex != null) {
+                    if (POST_MEDIA_STATE.activeIndex >= items.length) {
+                        POST_MEDIA_STATE.activeIndex = items.length ? items.length - 1 : null;
+                    } else if (POST_MEDIA_STATE.activeIndex > idx) {
+                        POST_MEDIA_STATE.activeIndex -= 1;
+                    } else if (POST_MEDIA_STATE.activeIndex === idx) {
+                        POST_MEDIA_STATE.activeIndex = items.length ? Math.min(idx, items.length - 1) : null;
+                    }
+                }
             } else if (action === 'move-left' && idx > 0) {
                 const [it] = items.splice(idx, 1);
                 items.splice(idx - 1, 0, it);
+                if (POST_MEDIA_STATE.activeIndex === idx) {
+                    POST_MEDIA_STATE.activeIndex = idx - 1;
+                } else if (POST_MEDIA_STATE.activeIndex === idx - 1) {
+                    POST_MEDIA_STATE.activeIndex = idx;
+                }
             } else if (action === 'move-right' && idx < items.length - 1) {
                 const [it] = items.splice(idx, 1);
                 items.splice(idx + 1, 0, it);
+                if (POST_MEDIA_STATE.activeIndex === idx) {
+                    POST_MEDIA_STATE.activeIndex = idx + 1;
+                } else if (POST_MEDIA_STATE.activeIndex === idx + 1) {
+                    POST_MEDIA_STATE.activeIndex = idx;
+                }
             }
             renderTray();
+            if (!items.length) {
+                resetEditorView();
+                return;
+            }
+            if (POST_MEDIA_STATE.activeIndex == null) {
+                POST_MEDIA_STATE.activeIndex = 0;
+            }
+            if (POST_MEDIA_STATE.activeIndex != null && typeof switchToMedia === 'function') {
+                switchToMedia(POST_MEDIA_STATE.activeIndex, { skipSave: removedActive });
+            }
         };
 
         const ensureBridge = (cb) => {
@@ -1846,11 +2626,20 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => ensureBridge(cb), 100);
         };
 
-        const switchToMedia = (idx) => {
+        const resetEditorView = () => {
+            const apply = () => {
+                try { window.EditorBridge?.load?.({ items: [] }); } catch (_) {}
+                try { window.EditorBridge?.clearBackground?.(); } catch (_) {}
+                try { window.EditorBridge?.startCamera?.('open'); } catch (_) {}
+            };
+            ensureBridge(apply);
+        };
+
+        const switchToMedia = (idx, { skipSave = false } = {}) => {
             const items = POST_MEDIA_STATE.items || [];
             if (!items[idx]) return;
             // Salvar layout atual no item ativo
-            if (POST_MEDIA_STATE.activeIndex != null && window.EditorBridge?.serialize) {
+            if (!skipSave && POST_MEDIA_STATE.activeIndex != null && window.EditorBridge?.serialize) {
                 try {
                     const layout = window.EditorBridge.serialize();
                     POST_MEDIA_STATE.items[POST_MEDIA_STATE.activeIndex].layout = layout;
@@ -1862,6 +2651,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const type = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image';
             const apply = () => {
                 try { window.EditorBridge?.setBackground?.(it.url || (it.path ? ('/'+String(it.path).replace(/^\/+/, '')) : ''), type); } catch(_) {}
+                try { window.EditorBridge?.stopCamera?.('bg_set'); } catch (_) {}
                 if (window.EditorBridge?.load) {
                     if (it.layout) { try { window.EditorBridge.load(it.layout); } catch(_) {} }
                     else { try { window.EditorBridge.load({ items: [] }); } catch(_) {} }
@@ -1875,158 +2665,144 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!files.length) return;
             const remain = 10 - (POST_MEDIA_STATE.items?.length || 0);
             const toSend = files.slice(0, Math.max(0, remain));
-            if (!toSend.length) {
-                notifyError('Limite de 10 mídias por post.');
-                return;
+            if (!toSend.length) return;
+            const validFiles = [];
+            for (const f of toSend) {
+                const check = validateMediaFile(f);
+                if (!check.ok) {
+                    notifyError(check.message);
+                    continue;
+                }
+                const isVid = (f.type || '').toLowerCase().startsWith('video');
+                if (isVid) {
+                    let candidate = f;
+                    const duration = await getVideoDuration(candidate);
+                    if (duration > MAX_VIDEO_SECONDS) {
+                        const handled = await handleLargeVideo(candidate, 'file', { suppressPrompts: true });
+                        if (handled?.error) {
+                            notifyError(handled.message || 'Vídeo inválido.');
+                            continue;
+                        }
+                        if (handled?.file) {
+                            candidate = handled.file;
+                        }
+                    }
+                    validFiles.push(candidate);
+                    continue;
+                }
+                validFiles.push(f);
             }
-            const fd = new FormData();
-            toSend.forEach(f => fd.append('files[]', f, f.name));
-            const res = await apiClient.upload('/posts/media', fd);
-            if (res?.error || res?.status === 'error') {
-                notifyError(res?.message || 'Falha no upload das mídias.');
-                return;
-            }
-            const media = Array.isArray(res?.media) ? res.media : [];
-            if (!media.length) {
-                notifyError('Nenhuma mídia válida recebida.');
-                return;
-            }
-            POST_MEDIA_STATE.items.push(...media);
+            if (!validFiles.length) return;
+            const mediaLocals = validFiles.map((f) => {
+                const isVid = (f.type || '').toLowerCase().startsWith('video');
+                const objUrl = URL.createObjectURL(f);
+                return {
+                    url: objUrl,
+                    path: null,
+                    mimeType: f.type || (isVid ? 'video/*' : 'image/*'),
+                    type: isVid ? 'video' : 'image',
+                    file: f,
+                    fileName: f.name || (isVid ? `post_${Date.now()}.webm` : `post_${Date.now()}.jpg`),
+                    source: 'file'
+                };
+            });
+            POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
+            POST_MEDIA_STATE.items.push(...mediaLocals);
             picker.value = '';
             renderTray();
-            if (POST_MEDIA_STATE.activeIndex == null) {
-                switchToMedia(0);
-            }
+            const nextIdx = POST_MEDIA_STATE.items.length - 1;
+            switchToMedia(nextIdx);
         };
 
-        const computePostType = (items) => {
-            const types = new Set((items||[]).map(m => (String(m.type||'').toLowerCase().startsWith('video') || String(m.mimeType||'').toLowerCase().startsWith('video')) ? 'video' : 'image'));
-            if (types.size === 1) return types.has('video') ? 'video' : 'image';
-            return 'mixed';
+        const buildTransparentCanvasMedia = async (layout = { items: [] }) => {
+            const grid = root.querySelector('#gridCanvas');
+            const width = Number(grid?.width || grid?.getAttribute('width') || 900);
+            const height = Number(grid?.height || grid?.getAttribute('height') || 1200);
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return null;
+            const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
+            if (!blob) return null;
+            const objUrl = URL.createObjectURL(blob);
+            return {
+                url: objUrl,
+                path: null,
+                mimeType: 'image/png',
+                type: 'image',
+                file: blob,
+                fileName: `canvas_${Date.now()}.png`,
+                source: 'canvas',
+                layout: layout || { items: [] }
+            };
+        };
+
+        const addBlankCanvas = async () => {
+            if (POST_MEDIA_STATE.items?.length >= 10) {
+                notifyError('Limite de 10 mídias atingido.');
+                return;
+            }
+            POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
+
+            if (POST_MEDIA_STATE.items.length === 0) {
+                const layoutSnapshot = window.EditorBridge?.serialize ? window.EditorBridge.serialize() : null;
+                const hasLayoutItems = Array.isArray(layoutSnapshot?.items) && layoutSnapshot.items.length > 0;
+                const editorEl = root.querySelector('#editor');
+                const bgEl = editorEl?.querySelector?.('.bg-media') || null;
+                const hasBg = !!bgEl;
+                if (hasLayoutItems || hasBg) {
+                    let currentMedia = null;
+                    if (hasBg) {
+                        const tag = String(bgEl.tagName || '').toUpperCase();
+                        const isVideo = tag === 'VIDEO';
+                        const src = bgEl.currentSrc || bgEl.src || '';
+                        if (src) {
+                            currentMedia = {
+                                url: src,
+                                path: null,
+                                mimeType: isVideo ? 'video/*' : 'image/*',
+                                type: isVideo ? 'video' : 'image',
+                                file: null,
+                                fileName: `existing_${Date.now()}`,
+                                source: 'existing',
+                                layout: layoutSnapshot || { items: [] }
+                            };
+                        }
+                    } else {
+                        currentMedia = await buildTransparentCanvasMedia(layoutSnapshot || { items: [] });
+                    }
+                    if (currentMedia) {
+                        POST_MEDIA_STATE.items.push(currentMedia);
+                        POST_MEDIA_STATE.activeIndex = 0;
+                    }
+                }
+            }
+
+            if (POST_MEDIA_STATE.items.length >= 10) {
+                notifyError('Limite de 10 mídias atingido.');
+                return;
+            }
+            const media = await buildTransparentCanvasMedia({ items: [] });
+            if (!media) {
+                notifyError('Não foi possível criar o canvas.');
+                return;
+            }
+            POST_MEDIA_STATE.items = POST_MEDIA_STATE.items || [];
+            POST_MEDIA_STATE.items.push(media);
+            renderTray();
+            const nextIdx = POST_MEDIA_STATE.items.length - 1;
+            switchToMedia(nextIdx);
         };
 
         const handlePublish = async () => {
-            const items = POST_MEDIA_STATE.items || [];
-            if (!items.length) {
-                notifyError('Adicione ao menos uma mídia.');
-                return;
-            }
-            const caption = (captionInput?.value || '').toString().trim();
-            const tp = computePostType(items);
-
-            // Pré-processamento: gerar composições quando houver layout (imagem e vídeo)
-            if (window.EditorBridge) {
-                publishBtn.disabled = true; publishBtn.textContent = 'Publicando...';
-                // Guardar índice ativo para restaurar
-                const prevIdx = POST_MEDIA_STATE.activeIndex;
-
-                // Capturar layout atual do item ativo
-                if (POST_MEDIA_STATE.activeIndex != null && window.EditorBridge?.serialize) {
-                    try {
-                        const layoutNow = window.EditorBridge.serialize();
-                        if (items[POST_MEDIA_STATE.activeIndex]) {
-                            items[POST_MEDIA_STATE.activeIndex].layout = layoutNow;
-                        }
-                    } catch (_) {}
-                }
-                for (let i = 0; i < items.length; i++) {
-                    const it = items[i];
-                    const isVideo = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
-                    // layout será salvo automaticamente ao alternar via switchToMedia
-                    if (!it.layout) continue;
-                    if (isVideo) {
-                        // Compor vídeo com layout
-                        await new Promise((resolve)=>{
-                            const then = async () => {
-                                try {
-                                    const vblob = await window.EditorBridge.exportVideoBlob();
-                                    if (vblob) {
-                                        const fd2 = new FormData();
-                                        fd2.append('files[]', vblob, `composite_${Date.now()}.webm`);
-                                        const up = await apiClient.upload('/posts/media', fd2);
-                                        const first = Array.isArray(up?.media) ? up.media[0] : null;
-                                        if (first) {
-                                            it.originalUrl = it.url; it.originalPath = it.path; it.originalMime = it.mimeType;
-                                            it.url = first.url; it.path = first.path; it.mimeType = first.mimeType;
-                                        }
-                                    }
-                                } catch(_) {}
-                                resolve();
-                            };
-                            switchToMedia(i); setTimeout(then, 200);
-                        });
-                    } else {
-                        // Compor imagem com layout
-                        await new Promise((resolve)=>{
-                            const then = async () => { try { await window.EditorBridge.renderFrame(); } catch(_){} resolve(); };
-                            switchToMedia(i); setTimeout(then, 150);
-                        });
-                        try {
-                            const canvas = document.getElementById('outCanvas');
-                            if (canvas && canvas.toBlob) {
-                                const blob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
-                                if (blob) {
-                                    const fd2 = new FormData();
-                                    fd2.append('files[]', blob, `composite_${Date.now()}.jpg`);
-                                    const up = await apiClient.upload('/posts/media', fd2);
-                                    const first = Array.isArray(up?.media) ? up.media[0] : null;
-                                    if (first) {
-                                        // manter referência do original
-                                        it.originalUrl = it.url; it.originalPath = it.path; it.originalMime = it.mimeType;
-                                        it.url = first.url; it.path = first.path; it.mimeType = first.mimeType;
-                                    }
-                                }
-                            }
-                        } catch(_) {}
-                    }
-                }
-                // Restaurar índice
-                if (prevIdx != null) { POST_MEDIA_STATE.activeIndex = prevIdx; switchToMedia(prevIdx); }
-                publishBtn.disabled = false; publishBtn.textContent = 'Publicar';
-            }
-
-            // Upload pendente de itens sem layout (originais) somente no publish
-            for (let i = 0; i < items.length; i++) {
-                const it = items[i];
-                if (!it?.path) {
-                    const fileObj = it.file || null;
-                    if (fileObj) {
-                        try {
-                            const fd3 = new FormData();
-                            const isVid = (String(it.type||'').toLowerCase() === 'video' || String(it.mimeType||'').toLowerCase().startsWith('video'));
-                            const preferredName = it.fileName || (isVid ? `post_${Date.now()}.webm` : `post_${Date.now()}.jpg`);
-                            fd3.append('files[]', fileObj, preferredName);
-                            const up3 = await apiClient.upload('/posts/media', fd3);
-                            const first3 = Array.isArray(up3?.media) ? up3.media[0] : null;
-                            if (first3) {
-                                const keepLayout = it.layout ? { layout: it.layout } : {};
-                                items[i] = { ...first3, ...keepLayout };
-                            }
-                        } catch(_) {}
-                    }
-                }
-            }
-
-            const vt = String(viewType || '');
-            const vd = viewData || null;
-            const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
-            const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
-
-            const vtNow5 = String(viewType || '');
-            const tok5 = getPostPrivacy();
-            const ppCode5 = tokenToPrivacyCode(tok5, vtNow5 === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow5);
-            const payload = { tp, cm, em, post_privacy: Number(ppCode5), ct: { caption, media: items, post_privacy_token: tok5 } };
-            const res = await apiClient.post('/posts', payload);
-            if (res?.error || res?.status === 'error') {
-                notifyError(res?.message || 'Não foi possível publicar o post.');
-                return;
-            }
-            notifySuccess('Post publicado!');
-            cleanupPostMediaState();
-            if (captionInput) captionInput.value = '';
-            renderTray();
-            resetFeed();
-            loadFeed();
+            await publishPostMediaFlow({
+                items: POST_MEDIA_STATE.items,
+                captionInput,
+                publishBtn,
+                renderTray,
+                switchToMedia
+            });
         };
 
         // Preferir estratégia local-first: não fazer upload no change
@@ -2048,6 +2824,17 @@ document.addEventListener('DOMContentLoaded', () => {
         tray.addEventListener('click', trayClick);
         tray._galleryHandler = trayClick;
 
+        if (addBlankBtn) {
+            if (addBlankBtn._galleryHandler) { addBlankBtn.removeEventListener('click', addBlankBtn._galleryHandler); }
+            const handleAddBlank = (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                addBlankCanvas();
+            };
+            addBlankBtn.addEventListener('click', handleAddBlank);
+            addBlankBtn._galleryHandler = handleAddBlank;
+        }
+
         if (publishBtn) {
             publishBtn.classList.add('hidden'); // manter somente um botão visível
             if (publishBtn._galleryHandler) { publishBtn.removeEventListener('click', publishBtn._galleryHandler); }
@@ -2056,9 +2843,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         renderTray();
 
-        // Se já houver itens (ex.: retorno ao editor), focar o primeiro
-        if ((POST_MEDIA_STATE.items?.length||0) > 0 && POST_MEDIA_STATE.activeIndex == null) {
-            switchToMedia(0);
+        // Se já houver itens (ex.: retorno ao editor), focar o índice ativo
+        const suppressAuto = root?.dataset?.suppressCameraAuto === '1';
+        if (suppressAuto) {
+            try { delete root.dataset.suppressCameraAuto; } catch (_) {}
+        }
+        if ((POST_MEDIA_STATE.items?.length||0) > 0) {
+            const idx = (POST_MEDIA_STATE.activeIndex != null) ? POST_MEDIA_STATE.activeIndex : 0;
+            switchToMedia(idx);
+            try { window.EditorBridge?.stopCamera?.('bg_set'); } catch (_) {}
+        } else if (!suppressAuto) {
+            try { window.EditorBridge?.startCamera?.('open'); } catch (_) {}
         }
     }
 
@@ -2099,16 +2894,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const isVideo = hasVideoBg || hasAnimated;
 
             try {
+                const scope = getPostEntityScope();
                 let mediaDesc = null;
                 if (isVideo) {
                     if (!window.EditorBridge?.exportVideoBlob) { notifyError('Exportação de vídeo indisponível.'); return; }
                     const videoBlob = await window.EditorBridge.exportVideoBlob();
                     if (!videoBlob) { notifyError('Falha ao gerar vídeo.'); return; }
-                    const fd = new FormData();
-                    fd.append('files[]', videoBlob, `post_${Date.now()}.webm`);
-                    const up = await apiClient.upload('/posts/media', fd);
-                    if (up?.error || up?.status === 'error') { notifyError(up?.message || 'Falha no upload do vídeo'); return; }
-                    mediaDesc = Array.isArray(up?.media) ? up.media[0] : null;
+                    const up = await uploadPostMediaFile(videoBlob, { ...scope, typeOverride: 'video', source: 'recorded' });
+                    if (up?.error) { notifyError(up?.message || 'Falha no upload do vídeo'); return; }
+                    mediaDesc = up;
                 } else {
                     if (!window.EditorBridge?.renderFrame) { notifyError('Exportação de imagem indisponível.'); return; }
                     await window.EditorBridge.renderFrame();
@@ -2116,11 +2910,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!canvas || !canvas.toBlob) { notifyError('Canvas de saída indisponível.'); return; }
                     let imgBlob = await new Promise((res)=> canvas.toBlob(res, 'image/jpeg', 0.9));
                     if (!imgBlob) { notifyError('Falha ao gerar imagem.'); return; }
-                    const fd = new FormData();
-                    fd.append('files[]', imgBlob, `post_${Date.now()}.jpg`);
-                    const up = await apiClient.upload('/posts/media', fd);
-                    if (up?.error || up?.status === 'error') { notifyError(up?.message || 'Falha no upload da imagem'); return; }
-                    mediaDesc = Array.isArray(up?.media) ? up.media[0] : null;
+                    const up = await uploadPostMediaFile(imgBlob, { ...scope, typeOverride: 'image' });
+                    if (up?.error) { notifyError(up?.message || 'Falha no upload da imagem'); return; }
+                    mediaDesc = up;
                 }
 
                 if (!mediaDesc) { notifyError('Mídia não recebida.'); return; }
@@ -2128,16 +2920,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const captionInput = root.querySelector('#postCaption');
                 const caption = (captionInput?.value || '').toString().trim();
 
-                const vt = String(viewType || '');
-                const vd = viewData || null;
-                const cm = (vt === ENTITY.TEAM && vd?.id) ? Number(vd.id) || 0 : 0;
-                const em = (vt === ENTITY.BUSINESS && vd?.id) ? Number(vd.id) || 0 : 0;
+                const { cm, em } = scope;
 
                 const tp = isVideo ? 'video' : 'image';
                 const vtNow4 = String(viewType || '');
                 const tok4 = getPostPrivacy();
                 const ppCode4 = tokenToPrivacyCode(tok4, vtNow4 === 'dashboard' ? (viewData ? viewType : ENTITY.PROFILE) : vtNow4);
-                const payload = { tp, cm, em, post_privacy: ppCode4, ct: { caption, media: [mediaDesc], post_privacy_token: tok4 } };
+                const payload = { tp, cm, em, post_privacy: ppCode4, ct: { version: 2, caption, media: buildPostMediaPayload([mediaDesc]), post_privacy_token: tok4 } };
                 const res = await apiClient.post('/posts', payload);
                 if (res?.error || res?.status === 'error') { notifyError(res?.message || 'Não foi possível publicar.'); return; }
                 notifySuccess('Post publicado!');
@@ -2578,23 +3367,23 @@ document.addEventListener('DOMContentLoaded', () => {
         editorTriggerV2: (currentUserData) => `
             <div class="w-full p-3 border-b-2 border-gray-100 flex items-center gap-3">
                 <img class="page-thumb w-11 h-11 rounded-full pointer" src="/images/no-image.jpg" />
-                <div id="post-editor" title="Abrir editor" class="flex-1 rounded-3xl h-11 cursor-pointer text-gray-500 px-4 text-left bg-gray-100 hover:bg-gray-200 flex items-center overflow-hidden whitespace-nowrap truncate">
-                    <a class="block w-full overflow-hidden whitespace-nowrap truncate">O que você quer publicar, ${currentUserData.tt.split(' ')[0]}?</a>
+                <div id="post-editor" title="Abrir editor" class="flex-1 rounded-3xl h-11 cursor-pointer text-gray-700 px-4 text-left bg-gray-100 hover:bg-gray-200 flex items-center overflow-hidden whitespace-nowrap transition-colors truncate">
+                    <a class="block w-full overflow-hidden whitespace-nowrap truncate"><i class="fas fa-video mr-2"></i>O que você quer compartilhar, ${currentUserData.tt.split(' ')[0]}?</a>
                 </div>                
             </div>
             <div class="w-full p-3 flex items-center gap-3">
-                <button title="Abrir editor com caixa de texto" class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-text" aria-label="Abrir editor com texto">
+                <button title="Abrir editor com caixa de texto" class="h-9 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-text" aria-label="Abrir editor com texto">
                     <i class="fas fa-font"></i>                    
                 </button>
-                <button title="Abrir editor com imagem ou vídeo" class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-media" aria-label="Abrir editor e adicionar mídia">
+                <button title="Abrir editor com imagem ou vídeo" class="h-9 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-media" aria-label="Abrir editor e adicionar mídia">
                     <i class="fas fa-upload"></i>                    
                 </button>
-                <button title="Compartilhar um link" class="h-11 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-link" aria-label="Compartilhar link externo">
+                <button title="Compartilhar um link" class="h-9 pointer rounded-full aspect-square flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors" data-action="editor-quick-link" aria-label="Compartilhar link externo">
                     <i class="fas fa-link"></i>
                 </button>                
-                <div class="ml-auto flex items-center gap-2">
+                <div class="ml-auto flex items-center gap-2 max-w-[45%] min-w-0">
                     <label for="postPrivacyTrigger" class="sr-only">Privacidade</label>
-                    <select id="postPrivacyTrigger" class="h-9 px-3 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm"></select>
+                    <select id="postPrivacyTrigger" class="h-9 w-full min-w-0 px-3 truncate rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm"></select>
                 </div>
             </div>
         `,
@@ -3291,7 +4080,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `,
         signature: () => `
         <div class="text-center border-t border-gray-200 grid grid-cols-1 gap-1 py-4">
-            <img class="mx-auto" src="https://guilhermesantana.com.br/images/50x50.png" style="height: 40px; width: 40px" alt="meSan"></img>
+            <img class="mx-auto" src="images/50x50.png" style="height: 40px; width: 40px" alt="meSan"></img>
             <a href="https://guilhermesantana.com.br" target="_blank">Guilherme Santana © 2025</a>
         </div>
         `
@@ -3388,7 +4177,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div data-sidebar-type="current-user" data-sidebar-action="page-settings" class="pointer w-full bg-white shadow-md rounded-3xl p-3 flex items-center gap-3 cursor-pointer hover:bg-white/50 transition-all duration-300 ease-in-out" id="sidebar-profile-link">
                     <div data-sidebar-action="page-settings" class="grid grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 items-center gap-3">
                         <div class="flex col-span-1 justify-center">
-                            <img id="sidebar-profile-image" data-role="entity-image" class="w-full rounded-full object-cover" src="${resolveImageSrc(data?.im ?? currentUserData?.im, data?.tt ?? currentUserData?.tt, { size: 100 })}" alt="Foto do Utilizador">
+                            <img id="sidebar-profile-image" data-role="entity-image" class="w-18 h-18 rounded-full object-cover" src="${resolveImageSrc(data?.im ?? currentUserData?.im, data?.tt ?? currentUserData?.tt, { size: 100 })}" alt="Foto do Utilizador">
                         </div>
                         <div class="flex col-span-3 lg:col-span-4 xl:col-span-5 flex-col gap-1">
                             <p class="truncate font-bold">${data.tt}</p>
@@ -4281,37 +5070,36 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div id="guideY" class="guide guide-y" style="display:none; left:50%"></div>
                         </div>
                         <!-- Botão de captura estilo Instagram Stories -->
-                        <div class="capture-overlay">
+                        <div class="capture-overlay" style="pointer-events:auto; z-index:40;">
                             <button type="button" id="captureButton" class="capture-button" title="Toque para foto, segure para vídeo">
                                
                                 <div class="capture-hint"></div>
                             </button>
                         </div>
                         
-                        <section class="absolute top-0 left-0 right-0">
+                        <section class="absolute top-0 left-0 right-0 pointer-events-none" style="z-index:30;">
                             <!-- Toolbar superior minimalista -->
                             <div class="w-full overflow-hidden flex items-center justify-between p-4">                                                                   
-                                <label for="bgUpload" title="Preencher com imagem ou vídeo" class="h-10 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                <label for="bgUpload" title="Preencher com imagem ou vídeo" data-role="bg-upload-label" class="h-9 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors" style="pointer-events:auto;">
                                     <i class="fas fa-upload"></i>
                                     <input type="file" id="bgUpload" accept="application/json" class="sr-only">
                                 </label>
-                                <button type="button" title="Inserir caixa de texto" id="btnAddText" class="h-10 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                <button type="button" id="btnToggleCamera" title="Desligar câmera" class="h-9 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors" style="pointer-events:auto;">
+                                    <i class="fas fa-video"></i>
+                                </button>
+                                <button type="button" title="Inserir caixa de texto" id="btnAddText" class="h-9 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors" style="pointer-events:auto;">
                                     <i class="fas fa-font"></i>
                                 </button>
-                                <button type="button" title="Inserir imagem" id="btnAddImg" class="h-10 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                <button type="button" title="Inserir imagem" id="btnAddImg" class="h-9 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors" style="pointer-events:auto;">
                                     <i class="fas fa-icons"></i>
-                                </button>                                                                                            
-                                <label for="bgColorPicker" title="Cor de preenchimento" class="h-10 text-sm cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
+                                </button>
+                                <label for="bgColorPicker" title="Cor de preenchimento" class="h-9 text-sm cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors" style="pointer-events:auto;">
                                     <i class="fas fa-fill-drip"></i>
                                     <input id="bgColorPicker" type="color" value="#ffffff" class="h-1 w-4 mt-px input-color-picker" title="Cor de fundo do texto">
                                 </label>
-                                <label for="loadJSON" title="Importar JSON" class="h-10 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
-                                    <i class="fas fa-file-import"></i>
-                                    <input type="file" id="loadJSON" accept="application/json" class="sr-only">
-                                </label>
-                                <button type="button" title="Exportar JSON" id="btnSaveJSON" class="h-10 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors">
-                                    <i class="fas fa-file-export"></i>
-                                </button>
+                                <button id="postAddBlankCanvas" title="Adicionar template vazio" class="h-9 cursor-pointer pointer rounded-full aspect-square flex flex-col items-center justify-center bg-gray-200 hover:bg-gray-300 text-gray-800 transition-colors" style="pointer-events:auto;">
+                                    <i class="fas fa-plus"></i>
+                                </button>                                
                             </div>
                         </section>
                         
@@ -4412,7 +5200,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 html += `
                 <!-- Galeria (carrossel) - upload múltiplo e publicação -->
                 <section class="editor-card">
-                    <div id="postMediaTray" class=""></div> 
+                    <div id="postMediaTray" class=""></div>
                     <input id="postMediaPicker" class="hidden" type="file" multiple accept="image/*,video/*">                                                          
                 </section>
                 <hr>
@@ -4456,6 +5244,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         </button>                                                
                     </div>
                 </section>
+
+                <div class="hidden">
+                    <button type="button" id="btnSaveJSON"></button>
+                    <input id="loadJSON" type="file" accept="application/json">
+                </div>
 
                 <canvas id="outCanvas" width="900" height="1200" class="hidden"></canvas>
                 
@@ -4711,10 +5504,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 e.preventDefault();
                 e.stopPropagation(); // Impedir que o event listener global processe
 
-                // Criar um elemento mock com data-sidebar-action para usar com toggleSidebar
-                const mockElement = document.createElement('div');
-                mockElement.dataset.sidebarAction = 'post-editor';
-                toggleSidebar(mockElement, true);
+                openEditor({ cameraOnOpen: true, source: 'post-editor' });
                 return;
             }
 
@@ -4788,7 +5578,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ===== Post privacy badge helpers =====
-    function getPostScope(post) {
+    function getPostScopeType(post) {
         try {
             if (Number(post?.em) > 0) return 'business';
             if (Number(post?.cm) > 0) return 'team';
@@ -4804,7 +5594,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_) { return null; }
     }
     function getPostPrivacyDisplay(post) {
-        const scope = getPostScope(post);
+        const scope = getPostScopeType(post);
         const token = extractPrivacyToken(post?.ct);
         const code = (post && post.post_privacy != null) ? Number(post.post_privacy) : null;
         const out = { label: null, icon: 'fa-lock', tooltip: 'Privacidade', code, token, scope };
@@ -4855,6 +5645,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return out;
     }
 
+    function isPostPublic(post) {
+        const token = extractPrivacyToken(post?.ct);
+        if (token === 'lv3' || token === 'public') return true;
+        const code = (post && post.post_privacy != null) ? Number(post.post_privacy) : null;
+        return code != null && code >= 3;
+    }
+
+    function getPostShareUrl({ post, linkPreview, menuMediaUrl }) {
+        const linkUrl = linkPreview?.url || '';
+        const mediaUrl = menuMediaUrl || post?.feedMediaUrl || '';
+        const preferred = linkUrl || mediaUrl;
+        if (!preferred) return '';
+        try { return new URL(preferred, window.location.origin).toString(); } catch (_) { return preferred; }
+    }
+
     async function ensureFeedUsersLoaded(ids = []) {
         const normalized = Array.from(new Set((ids || []).map(normalizeNumericId).filter((id) => id !== null)));
         if (!normalized.length) return;
@@ -4878,6 +5683,54 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function ensureFeedBusinessesLoaded(ids = []) {
+        const normalized = Array.from(new Set((ids || []).map(normalizeNumericId).filter((id) => id !== null)));
+        if (!normalized.length) return;
+        const missing = normalized.filter((id) => !feedBusinessCache.has(String(id)));
+        if (!missing.length) return;
+        try {
+            const res = await apiClient.post('/search', {
+                db: 'workz_companies',
+                table: 'companies',
+                columns: ['id', 'tt', 'im'],
+                conditions: { id: { op: 'IN', value: missing } },
+                fetchAll: true,
+            });
+            const rows = Array.isArray(res?.data) ? res.data : [];
+            rows.forEach((row) => {
+                if (row?.id == null) return;
+                feedBusinessCache.set(String(row.id), row);
+                pruneFeedEntityCache(feedBusinessCache);
+            });
+        } catch (error) {
+            console.error('Failed to load feed businesses', error);
+        }
+    }
+
+    async function ensureFeedTeamsLoaded(ids = []) {
+        const normalized = Array.from(new Set((ids || []).map(normalizeNumericId).filter((id) => id !== null)));
+        if (!normalized.length) return;
+        const missing = normalized.filter((id) => !feedTeamCache.has(String(id)));
+        if (!missing.length) return;
+        try {
+            const res = await apiClient.post('/search', {
+                db: 'workz_companies',
+                table: 'teams',
+                columns: ['id', 'tt', 'im', 'em'],
+                conditions: { id: { op: 'IN', value: missing } },
+                fetchAll: true,
+            });
+            const rows = Array.isArray(res?.data) ? res.data : [];
+            rows.forEach((row) => {
+                if (row?.id == null) return;
+                feedTeamCache.set(String(row.id), row);
+                pruneFeedEntityCache(feedTeamCache);
+            });
+        } catch (error) {
+            console.error('Failed to load feed teams', error);
+        }
+    }
+
     function getFeedUserSummary(id) {
         const key = String(id);
         const user = feedUserCache.get(key);
@@ -4887,6 +5740,34 @@ document.addEventListener('DOMContentLoaded', () => {
             name,
             avatar: resolveImageSrc(user?.im, name, { size: 160 }),
         };
+    }
+
+    function getFeedEntitySummary({ em, cm }) {
+        if (Number(em) > 0) {
+            const key = String(em);
+            const biz = feedBusinessCache.get(key);
+            const name = biz?.tt || 'Negócio';
+            return {
+                type: 'business',
+                id: em,
+                name,
+                avatar: resolveImageSrc(biz?.im, name, { size: 120 }),
+                url: `/business/${em}`
+            };
+        }
+        if (Number(cm) > 0) {
+            const key = String(cm);
+            const team = feedTeamCache.get(key);
+            const name = team?.tt || 'Equipe';
+            return {
+                type: 'team',
+                id: cm,
+                name,
+                avatar: resolveImageSrc(team?.im, name, { size: 120 }),
+                url: `/team/${cm}`
+            };
+        }
+        return null;
     }
 
     async function fetchFeedLikes(postIds = []) {
@@ -5108,7 +5989,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const postIds = Array.from(new Set(items.map((item) => normalizeNumericId(item?.id)).filter((id) => id !== null)));
         if (!postIds.length) return items;
         const authorIds = Array.from(new Set(items.map((item) => normalizeNumericId(item?.us)).filter((id) => id !== null)));
+        const businessIds = Array.from(new Set(items.map((item) => normalizeNumericId(item?.em)).filter((id) => id !== null && id > 0)));
+        const teamIds = Array.from(new Set(items.map((item) => normalizeNumericId(item?.cm)).filter((id) => id !== null && id > 0)));
         await ensureFeedUsersLoaded(authorIds);
+        if (businessIds.length) await ensureFeedBusinessesLoaded(businessIds);
+        if (teamIds.length) await ensureFeedTeamsLoaded(teamIds);
 
         const [likesMap, commentsMap] = await Promise.all([
             fetchFeedLikes(postIds),
@@ -5124,7 +6009,72 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (commentAuthorIds.length) await ensureFeedUsersLoaded(commentAuthorIds);
 
-        return items.map((item) => {
+        const parsedCts = items.map((item) => {
+            try {
+                return typeof item?.ct === 'string' ? JSON.parse(item.ct) : (item?.ct || null);
+            } catch (_) {
+                return null;
+            }
+        });
+
+        const mediaIdSet = new Set();
+        parsedCts.forEach((ct) => {
+            if (!ct || Number(ct?.version || 0) < 2 || !Array.isArray(ct.media)) return;
+            ct.media.forEach((m) => {
+                const hasUrl = !!(m?.url || m?.path);
+                if (hasUrl) return;
+                const mid = normalizeNumericId(m?.media_id);
+                if (mid != null) mediaIdSet.add(mid);
+            });
+        });
+
+        let mediaBatchMap = new Map();
+        if (mediaIdSet.size) {
+            const ids = Array.from(mediaIdSet);
+            try {
+                const res = await apiClient.post('/media/batch', { ids });
+                if (res?.status === 'success' && Array.isArray(res.items)) {
+                    mediaBatchMap = new Map(res.items.map((row) => [String(row.id), row]));
+                }
+            } catch (_) {}
+        }
+
+        const normalizeMediaUrl = (mediaItem, url) => {
+            if (!url) return null;
+            const str = String(url);
+            if (/^\/?uploads\//i.test(str) || /^\/public\/uploads\//i.test(str)) {
+                const mid = normalizeNumericId(mediaItem?.media_id);
+                if (mid != null) return `/api/media/show/${mid}`;
+            }
+            return str;
+        };
+        const resolveMediaUrl = (mediaItem) => {
+            if (!mediaItem) return null;
+            if (mediaItem.url && !String(mediaItem.url).startsWith('blob:')) return normalizeMediaUrl(mediaItem, mediaItem.url);
+            if (mediaItem.path) return normalizeMediaUrl(mediaItem, '/' + String(mediaItem.path).replace(/^\/+/, ''));
+            const mid = normalizeNumericId(mediaItem?.media_id);
+            if (mid != null) return `/api/media/show/${mid}`;
+            return null;
+        };
+
+        const hydrateMediaList = (mediaList = []) => {
+            if (!Array.isArray(mediaList) || !mediaList.length) return [];
+            return mediaList.map((m) => {
+                if (!m) return m;
+                if ((m.url && !String(m.url).startsWith('blob:')) || m.path) return m;
+                const mid = normalizeNumericId(m.media_id);
+                if (mid == null) return m;
+                const resolved = mediaBatchMap.get(String(mid));
+                if (!resolved) return m;
+                const next = { ...m };
+                next.url = normalizeMediaUrl(next, resolved.url || next.url);
+                if (!next.mimeType && (resolved.mime || resolved.mime_type)) next.mimeType = resolved.mime || resolved.mime_type;
+                if (!next.type && resolved.type) next.type = resolved.type;
+                return next;
+            });
+        };
+
+        return items.map((item, idx) => {
             const numericId = normalizeNumericId(item?.id);
             const key = numericId != null ? String(numericId) : String(item?.id ?? '');
             const likeInfo = likesMap.get(key) || { total: 0, userLiked: false };
@@ -5134,14 +6084,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 formattedDate: formatFeedTimestamp(row.dt),
             }));
             // Preparar mídia do post a partir de ct (JSON)
-            let parsedCt = null;
-            try { parsedCt = typeof item?.ct === 'string' ? JSON.parse(item.ct) : (item?.ct || null); } catch (_) { parsedCt = null; }
-            const mediaList = (parsedCt && Array.isArray(parsedCt.media)) ? parsedCt.media : [];
+            let parsedCt = parsedCts[idx] || null;
+            let mediaList = (parsedCt && Array.isArray(parsedCt.media)) ? parsedCt.media : [];
+            if (parsedCt && Number(parsedCt?.version || 0) >= 2) {
+                mediaList = hydrateMediaList(mediaList);
+                parsedCt = { ...parsedCt, media: mediaList };
+            }
             const media0 = mediaList[0] || null;
             const mmime = String(media0?.mimeType || '').toLowerCase();
             let feedMediaType = media0?.type || (mmime.startsWith('video') ? 'video' : (mmime.startsWith('image') ? 'image' : null));
-            let feedMediaUrl = media0?.url || (media0?.path ? ('/' + String(media0.path).replace(/^\/+/, '')) : null);
+            let feedMediaUrl = resolveMediaUrl(media0);
             const linkPreview = parsedCt?.linkPreview || null;
+            if (window.__FEED_MEDIA_DEBUG) {
+                try {
+                    const mid = normalizeNumericId(media0?.media_id);
+                    console.log('[FEED_MEDIA_DEBUG] post', item?.id, 'media0', { mediaId: mid, url: feedMediaUrl });
+                } catch (_) {}
+            }
             // Define imagem de fundo preferindo a mídia (se for imagem)
             let backgroundImage = null;
             if (feedMediaType === 'image' && feedMediaUrl) {
@@ -5154,6 +6113,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return {
                 ...item,
                 author: getFeedUserSummary(item.us),
+                entity: getFeedEntitySummary({ em: item?.em, cm: item?.cm }),
                 likeInfo,
                 comments,
                 commentCount: comments.length,
@@ -5211,6 +6171,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const html = newItems.map((post) => {
             const author = post?.author ?? {};
             const authorName = escapeHtml(author?.name || 'Usuário');
+            const entity = post?.entity || null;
+            const entityName = entity?.name ? escapeHtml(entity.name) : '';
+            const entityUrl = entity?.url || '';
             const avatarSrc = author?.avatar || resolveImageSrc(null, authorName, { size: 100 });
             const title = escapeHtml(post?.tt || '');
             const captionRaw = (typeof post?.ct === 'string') ? post.ct : (post?.ct?.caption || post?.ct?.text || '');
@@ -5218,6 +6181,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const linkPreview = post?.linkPreview || post?.ct?.linkPreview || null;
             const linkKind = (linkPreview?.kind || linkPreview?.type || '').toLowerCase();
             const linkHost = safeHostname(linkPreview?.url || '');
+            const showVideoMeta = linkKind !== 'video';
             const formattedDate = escapeHtml(post?.formattedDate || '');
             const likeInfo = post?.likeInfo || {};
             const likeTotal = Number.isFinite(Number(likeInfo.total)) ? Number(likeInfo.total) : 0;
@@ -5227,15 +6191,39 @@ document.addEventListener('DOMContentLoaded', () => {
             const menuMediaUrl = post?.feedMediaUrl || (linkKind !== 'video' ? (linkPreview?.image || '') : '');
             const menuMediaType = post?.feedMediaType || (linkKind === 'video' ? 'embed' : (linkPreview?.image ? 'image' : ''));
             const backgroundStyle = (!post?.hasCarousel && post?.feedMediaType !== 'video' && linkKind !== 'video' && post?.backgroundImage) ? `background-image: ${post.backgroundImage};` : '';
+            const shareUrl = getPostShareUrl({ post, linkPreview, menuMediaUrl });
+            const shareTitle = post?.tt || linkPreview?.title || 'Conteúdo';
+            const canShare = !!shareUrl && (isPostPublic(post) || viewType === 'public');
+            const audioEnabled = shouldUnmuteForPost(postId);
+            const audioIcon = audioEnabled ? 'fas fa-volume-up' : 'fas fa-volume-mute';
+            const hasVideo = (
+                linkKind === 'video' ||
+                post?.feedMediaType === 'video' ||
+                (post?.hasCarousel && Array.isArray(post.media) && post.media.some((m) => {
+                    const mt = String(m?.type || '').toLowerCase();
+                    return mt === 'video' || String(m?.mimeType || '').toLowerCase().startsWith('video');
+                }))
+            );
+            const audioButtonMarkup = hasVideo
+                ? `<button type="button" class="w-7 h-7 text-white/90 flex items-center justify-center" data-feed-action="toggle-audio" data-post-id="${postId}" data-audio-state="${audioEnabled ? 'on' : 'off'}" aria-pressed="${audioEnabled}"><i class="${audioIcon}"></i></button>`
+                : '';
             let mediaMarkup = '';
             if (post?.hasCarousel && Array.isArray(post.media)) {
                 const slides = post.media.map((m, idx) => {
                     const mtype = String(m.type || '').toLowerCase();
-                    const murl = m.url || (m.path ? ('/' + String(m.path).replace(/^\/+/, '')) : '');
+                    let murl = (m.url && !String(m.url).startsWith('blob:')) ? m.url : (m.path ? ('/' + String(m.path).replace(/^\/+/, '')) : '');
+                    if ((!murl || /^\/?uploads\//i.test(murl) || /^\/public\/uploads\//i.test(murl)) && m?.media_id) {
+                        murl = `/api/media/show/${m.media_id}`;
+                    }
                     const isVid = (mtype === 'video' || String(m.mimeType||'').toLowerCase().startsWith('video'));
                     const inner = isVid
-                        ? `<video src="${murl}" class="absolute inset-0 w-full h-full object-cover" ${idx===0 ? 'autoplay' : ''} muted loop playsinline data-carousel-video></video>`
-                        : `<img src="${murl}" class="absolute inset-0 w-full h-full object-cover"\u003e`;
+                        ? `<video data-src="${murl}" class="absolute inset-0 w-full h-full object-cover feed-video-lazy" preload="metadata"${idx===0 ? ' data-feed-autoplay="1"' : ''} muted loop playsinline data-carousel-video data-feed-media="1" data-media-type="video" data-media-url="${murl}"></video>`
+                        : `<img src="${murl}" class="absolute inset-0 w-full h-full object-cover" data-feed-media="1" data-media-type="image" data-media-url="${murl}" draggable="false"\u003e`;
+                    if (window.__FEED_MEDIA_DEBUG) {
+                        try {
+                            console.log('[FEED_MEDIA_DEBUG] post', postId, 'carousel', { idx, mediaId: m?.media_id, url: murl, type: mtype });
+                        } catch (_) {}
+                    }
                     return `<div class="inline-block align-top w-full h-full relative">${inner}</div>`;
                 }).join('');
                 mediaMarkup = `
@@ -5243,22 +6231,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="h-full whitespace-nowrap transition-transform duration-300 ease-out" data-carousel-track style="transform: translateX(0);">
                         ${slides}
                     </div>
-                    <div class="absolute inset-y-0 left-0 flex items-center p-2 z-20">
-                        <button type="button" class="w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center" data-feed-action="prev-slide" data-post-id="${postId}" aria-label="Anterior">
+                    <div class="absolute inset-y-0 left-0 flex items-center p-2 z-9 pointer-events-none">
+                        <button type="button" class="w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center pointer-events-auto" data-feed-action="prev-slide" data-post-id="${postId}" aria-label="Anterior">
                             <i class="fas fa-chevron-left text-sm"></i>
                         </button>
                     </div>
-                    <div class="absolute inset-y-0 right-0 flex items-center p-2 z-20">
-                        <button type="button" class="w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center" data-feed-action="next-slide" data-post-id="${postId}" aria-label="Próximo">
+                    <div class="absolute inset-y-0 right-0 flex items-center p-2 z-9 pointer-events-none">
+                        <button type="button" class="w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center pointer-events-auto" data-feed-action="next-slide" data-post-id="${postId}" aria-label="Próximo">
                             <i class="fas fa-chevron-right text-sm"></i>
                         </button>
                     </div>
                 </div>`;
             } else if (linkKind === 'video' && linkPreview?.embedUrl) {
-                const embed = escapeHtml(linkPreview.embedUrl);
-                mediaMarkup = `<div class="absolute inset-0 bg-black flex items-center justify-center"><iframe src="${embed}" class="w-full h-full" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen title="${title || 'Vídeo'}"></iframe></div>`;
+                const embedMeta = buildFeedEmbedMeta(linkPreview.embedUrl, postId);
+                const embed = escapeHtml(embedMeta.url || linkPreview.embedUrl);
+                mediaMarkup = `<div class="absolute inset-0 bg-black flex items-center justify-center"><iframe src="${embed}" class="w-full h-full feed-embed" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen title="${title || 'Vídeo'}" data-feed-autoplay="1" data-embed-provider="${embedMeta.provider || ''}" data-embed-id="${embedMeta.id || ''}"></iframe></div>`;
             } else if (post?.feedMediaType === 'video' && post?.feedMediaUrl) {
-                mediaMarkup = `<video class="absolute inset-0 w-full h-full object-cover" src="${post.feedMediaUrl}" muted autoplay loop playsinline></video>`;
+                mediaMarkup = `<video class="absolute inset-0 w-full h-full object-cover feed-video-lazy" data-src="${post.feedMediaUrl}" preload="metadata" muted loop playsinline data-feed-autoplay="1" data-feed-media="1" data-media-type="video" data-media-url="${post.feedMediaUrl}"></video>`;
             }
             const comments = Array.isArray(post?.comments) ? post.comments : [];
             const commentList = comments.map((comment) => renderFeedComment(comment)).join('');
@@ -5273,40 +6262,47 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
         <article class="snap-center col-span-12 sm:col-span-6 lg:col-span-4" data-post-id="${postId}">
             <div class="relative aspect-[3/4] rounded-3xl overflow-hidden shadow-lg text-white">
-                    <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}"></div>
+                    <div class="absolute inset-0 bg-cover bg-center" style="${backgroundStyle}" data-role="feed-media-bg" data-media-url="${post?.feedMediaUrl || ''}" data-media-type="${post?.feedMediaType || ''}"></div>
                 ${mediaMarkup}
                 <div class="absolute inset-0 bg-gradient-to-b from-black/15 via-black/10 to-black/20 pointer-events-none"></div>
-                <div class="relative z-1 w-full h-full">
-                    <header class="absolute top-3 left-3 right-3 flex items-center justify-between gap-2">
-                        <div class="flex items-center gap-2">
+                <div class="relative z-1 w-full h-full pointer-events-none">
+                    <header class="absolute top-3 left-3 right-3 flex items-start justify-between gap-2 pointer-events-auto">
+                        <div class="flex items-center gap-2 min-w-0 flex-1">
                             <img src="${avatarSrc}" alt="${authorName}" class="w-9 h-9 rounded-full pointer">                            
-                            <div class="flex flex-col truncate font-semibold text-sm leading-tight text-shadow-lg">
-                                <a href="#">${authorName}</a>
+                            <div class="flex flex-col min-w-0 font-semibold text-sm leading-tight text-shadow-lg">
+                                <div class="flex items-center gap-1 min-w-0">
+                                    <a href="#" class="truncate min-w-0 flex-1">${authorName}</a>
+                                    ${entityName ? `<span class="text-white/70 flex-none">&rsaquo;</span>${entityUrl ? `<a href="${entityUrl}" class="text-white/90 truncate min-w-0 flex-1">${entityName}</a>` : `<span class="text-white/90 font-normal truncate min-w-0 flex-1">${entityName}</span>`}` : ''}
+                                </div>
                                 ${formattedDate ? `<time class="text-[11px] text-white/70">${formattedDate}</time>` : ''}
                             </div>
                         </div>
-                        <button type="button" class="w-7 h-7 text-white flex items-center justify-center" data-feed-action="open-post-menu" data-post-id="${postId}" data-media-url="${post?.feedMediaUrl || ''}" data-media-type="${post?.feedMediaType || ''}">
-                            <i class="fas fa-ellipsis-v"></i>
-                        </button>
+                        <div class="flex flex-col items-center gap-1 flex-none">
+                            <button type="button" class="w-7 h-7 text-white flex items-center justify-center" data-feed-action="open-post-menu" data-post-id="${postId}" data-media-url="${post?.feedMediaUrl || ''}" data-media-type="${post?.feedMediaType || ''}">
+                                <i class="fas fa-ellipsis-v"></i>
+                            </button>
+                            ${audioButtonMarkup}
+                        </div>
                     </header>                    
-                    <div class="absolute top-12 right-2 w-44 bg-black/80 text-white rounded-xl shadow-lg border border-white/10 hidden z-40" data-role="post-menu" data-post-id="${postId}" data-media-url="${menuMediaUrl}" data-media-type="${menuMediaType}" data-can-delete="${canDelete ? '1' : '0'}">
+                    <div class="absolute top-12 right-2 w-44 bg-black/80 text-white rounded-xl shadow-lg border border-white/10 hidden z-40 pointer-events-auto transition-all duration-200 ease-out opacity-0 scale-95 origin-top-right" data-role="post-menu" data-post-id="${postId}" data-media-url="${menuMediaUrl}" data-media-type="${menuMediaType}" data-can-delete="${canDelete ? '1' : '0'}">
                         <button type="button" class="w-full text-left px-3 py-2 hover:bg-white/10" data-feed-action="download-media" data-post-id="${postId}">
                             <i class="fas fa-download mr-2"></i>${post?.feedMediaType === 'video' ? 'Baixar vídeo' : 'Baixar imagem'}
                         </button>
+                        ${canShare ? `<button type="button" class="w-full text-left px-3 py-2 hover:bg-white/10" data-feed-action="share-media" data-post-id="${postId}" data-share-url="${escapeHtml(shareUrl)}" data-share-title="${escapeHtml(shareTitle)}"><i class="fas fa-share mr-2"></i>Compartilhar</button>` : ''}
                         <button type="button" class="w-full text-left px-3 py-2 hover:bg-white/10" data-feed-action="report-post" data-post-id="${postId}">
                             <i class="fas fa-flag mr-2"></i>Denunciar
                         </button>
                         ${canDelete ? `<button type=\"button\" class=\"w-full text-left px-3 py-2 hover:bg-red-500/20 text-red-300\" data-feed-action=\"delete-post\" data-post-id=\"${postId}"\u003e<i class=\\\"fas fa-trash mr-2"\u003e</i>Excluir</button>` : ''}
                     </div>
-                    <footer class="absolute bottom-0 left-0 right-0 px-3 pb-3 pt-14 space-y-2 pointer-events-none">
-                        ${title ? (() => {
+                    <footer class="absolute bottom-0 left-0 right-0 pt-14 space-y-2 pointer-events-none">
+                        ${showVideoMeta && title ? (() => {
                             const linkTitle = escapeHtml(linkPreview?.title || title);
                             const href = linkPreview?.url ? escapeHtml(linkPreview.url) : null;
                             return href
                                 ? `<h3 class="text-base font-semibold drop-shadow pointer-events-auto"><a class="text-white hover:text-orange-200 underline-offset-2" href="${href}" target="_blank" rel="noopener noreferrer">${linkTitle}</a></h3>`
                                 : `<h3 class="text-base font-semibold text-white drop-shadow pointer-events-auto">${linkTitle}</h3>`;
                         })() : ''}
-                        ${linkPreview ? `
+                        ${showVideoMeta && linkPreview ? `
                         <div class="pointer-events-auto bg-black/35 backdrop-blur-sm rounded-2xl p-3 text-white">
                             ${linkPreview.siteName || linkHost ? `<p class="text-[11px] uppercase tracking-wide text-white/70">${escapeHtml(linkPreview.siteName || linkPreview.provider || linkHost)}</p>` : ''}
                             ${(() => {
@@ -5318,23 +6314,25 @@ document.addEventListener('DOMContentLoaded', () => {
                             })()}
                         </div>` : ''}
                         ${caption ? `<p class="text-[13px] text-white/90 leading-relaxed pointer-events-auto">${caption}</p>` : ''}
-                        <div class="flex items-center gap-2 pointer-events-auto">
-                            <button type="button" class="flex items-center justify-center w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 transition text-base ${userLiked ? 'text-red-400' : 'text-white'}" data-feed-action="toggle-like" data-post-id="${postId}" data-liked="${userLiked ? '1' : '0'}" aria-pressed="${userLiked}">
-                                <i class="${userLiked ? 'fas' : 'far'} fa-heart"></i>
-                            </button>
-                            <button type="button" class="flex items-center justify-center w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 transition text-base text-white" data-feed-action="open-comments" data-post-id="${postId}">
-                                <i class="far fa-comment"></i>
-                            </button>
-                            <span class="text-xs text-white/90" data-role="like-count" data-post-id="${postId}" data-count="${likeTotal}">${likeTotal} ${likeLabel}</span>
-                            ${post?.hasCarousel ? `<span class=\"ml-auto text-xs text-white/85 rounded-full bg-black/35 px-2 py-0.5\" data-role=\"carousel-indicator\" data-post-id=\"${postId}\">1/${post.media.length}</span>` : ''}
+                        <div class="flex items-center gap-1 pointer-events-auto">
+                            <div class="p-3 flex items-center gap-3 pointer-events-auto">
+                                <button type="button" class="transition text-xl ${userLiked ? 'text-red-400' : 'text-white'}" data-feed-action="toggle-like" data-post-id="${postId}" data-liked="${userLiked ? '1' : '0'}" aria-pressed="${userLiked}">
+                                    <i class="${userLiked ? 'fas' : 'far'} fa-heart"></i>
+                                </button>
+                                <button type="button" class="transition text-xl text-white" data-feed-action="open-comments" data-post-id="${postId}">
+                                    <i class="far fa-comment"></i>
+                                </button>
+                            </div>
+                            <p class="text-xs text-white truncate" data-role="like-count" data-post-id="${postId}" data-count="${likeTotal}">${likeTotal} ${likeLabel}</p>
+                            ${post?.hasCarousel ? `<span class=\"ml-auto mr-3 text-xs font-bold text-white/85 rounded-full bg-black/35 px-2 pt-0.5 pb-1\" data-role=\"carousel-indicator\" data-post-id=\"${postId}\">1/${post.media.length}</span>` : ''}
                         </div>
                         <div class="space-y-3 hidden pointer-events-auto" data-role="comment-block" data-post-id="${postId}">
                             <div class="space-y-3" data-role="comment-list" data-post-id="${postId}">
                                 ${commentList || '<p class="text-xs text-white/60" data-role="empty-comments">Ainda sem comentários.</p>'}
                             </div>
-                            <form class="flex items-center gap-2 bg-black/40 rounded-full px-3 py-2" data-feed-action="comment-form" data-post-id="${postId}">
-                                <input type="text" name="comment" class="flex-1 bg-transparent border-none text-sm text-white placeholder-white/60 focus:outline-none" placeholder="Adicione um comentário..." autocomplete="off" maxlength="300">
-                                <button type="submit" class="text-sm font-semibold text-white hover:text-indigo-200 transition">Publicar</button>
+                            <form class="flex items-center gap-2 bg-black/40 rounded-full px-3 py-2 w-full min-w-0 flex-nowrap overflow-hidden" data-feed-action="comment-form" data-post-id="${postId}">
+                                <input type="text" name="comment" class="flex-1 min-w-0 bg-transparent border-none text-sm text-white placeholder-white/60 focus:outline-none truncate" placeholder="Adicione um comentário..." autocomplete="off" maxlength="300">
+                                <button type="submit" class="text-sm font-semibold text-white hover:text-indigo-200 transition flex-none"><i class="fas fa-paper-plane"></i></button>
                             </form>
                         </div>
                     </footer>
@@ -5346,6 +6344,302 @@ document.addEventListener('DOMContentLoaded', () => {
         timeline.insertAdjacentHTML('beforeend', html);
         enhanceFeedCards(newItems);
         ensureFeedInteractions();
+    }
+
+    function waitForVideoReady(video) {
+        if (!video) return Promise.resolve();
+        if (video.readyState >= 2) return Promise.resolve();
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                try { video.removeEventListener('loadedmetadata', finish); } catch (_) {}
+                try { video.removeEventListener('canplay', finish); } catch (_) {}
+                resolve();
+            };
+            try { video.addEventListener('loadedmetadata', finish, { once: true }); } catch (_) {}
+            try { video.addEventListener('canplay', finish, { once: true }); } catch (_) {}
+            setTimeout(finish, 1200);
+        });
+    }
+
+    async function safePlayVideo(video, owner) {
+        if (!video) return;
+        const tokenOwner = owner || video;
+        tokenOwner._playToken = (tokenOwner._playToken || 0) + 1;
+        const token = tokenOwner._playToken;
+        await waitForVideoReady(video);
+        try {
+            await video.play();
+        } catch (err) {
+            if (err?.name !== 'AbortError') {
+                try { console.warn('Feed video play failed', err); } catch (_) {}
+            }
+        }
+        if (tokenOwner._playToken !== token) {
+            try { video.pause(); } catch (_) {}
+        }
+    }
+
+    function buildFeedEmbedMeta(url, postId) {
+        if (!url) return { url: '', provider: '', id: '' };
+        const provider = detectFeedEmbedProvider(url);
+        const id = `feed-embed-${postId}`;
+        let nextUrl = url;
+        if (provider === 'youtube') {
+            nextUrl = withUrlParams(url, {
+                enablejsapi: 1,
+                playsinline: 1,
+                origin: window.location.origin,
+                rel: 0,
+                mute: 1
+            });
+        } else if (provider === 'vimeo') {
+            nextUrl = withUrlParams(url, {
+                api: 1,
+                player_id: id,
+                autoplay: 0,
+                muted: 1
+            });
+        } else if (provider === 'dailymotion') {
+            nextUrl = withUrlParams(url, {
+                api: 'postMessage',
+                autoplay: 0,
+                mute: 1
+            });
+        }
+        return { url: nextUrl, provider, id };
+    }
+
+    function withUrlParams(url, params) {
+        if (!url) return '';
+        try {
+            const u = new URL(url, window.location.origin);
+            Object.entries(params || {}).forEach(([key, value]) => {
+                if (value == null || value === '') return;
+                u.searchParams.set(key, String(value));
+            });
+            return u.toString();
+        } catch (_) { return url; }
+    }
+
+    function detectFeedEmbedProvider(url) {
+        const host = safeHostname(url || '');
+        const h = String(host || '').toLowerCase();
+        if (h.includes('youtube') || h.includes('youtu.be')) return 'youtube';
+        if (h.includes('vimeo')) return 'vimeo';
+        if (h.includes('dailymotion') || h.includes('dai.ly')) return 'dailymotion';
+        return '';
+    }
+
+    function ensureFeedVideoObserver() {
+        if (feedVideoObserver || typeof IntersectionObserver === 'undefined') return;
+        feedVideoObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) return;
+                const video = entry.target;
+                const src = video?.dataset?.src;
+                if (src && !video.dataset.loaded) {
+                    video.src = src;
+                    video.dataset.loaded = '1';
+                    try { video.load(); } catch (_) {}
+                }
+                try { feedVideoObserver?.unobserve(video); } catch (_) {}
+            });
+        }, { rootMargin: '200px', threshold: 0.2 });
+    }
+
+    function hydrateFeedVideo(video) {
+        if (!video) return;
+        const src = video?.dataset?.src;
+        if (src && !video.dataset.loaded) {
+            video.src = src;
+            video.dataset.loaded = '1';
+            try { video.load(); } catch (_) {}
+        }
+    }
+
+    function ensureFeedPlaybackObserver() {
+        if (feedPlaybackObserver || typeof IntersectionObserver === 'undefined') return;
+        feedPlaybackObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                const el = entry.target;
+                if (!el || el.dataset?.feedAutoplay !== '1') return;
+                const shouldPlay = entry.isIntersecting && entry.intersectionRatio >= 0.55 && isFeedMediaCentered(entry);
+                if (el.tagName && el.tagName.toLowerCase() === 'video') {
+                    if (shouldPlay) {
+                        hydrateFeedVideo(el);
+                        applyFeedAudioToVideo(el);
+                        const owner = el.closest?.('[data-role="carousel"]') || el;
+                        safePlayVideo(el, owner);
+                        el.dataset.playing = '1';
+                    } else if (el.dataset.playing === '1') {
+                        try { el.pause(); } catch (_) {}
+                        el.dataset.playing = '0';
+                    }
+                } else if (el.tagName && el.tagName.toLowerCase() === 'iframe') {
+                    const provider = el.dataset.embedProvider || detectFeedEmbedProvider(el.src || '');
+                    if (shouldPlay) {
+                        applyFeedAudioToEmbed(el);
+                        playFeedEmbed(el, provider);
+                        el.dataset.playing = '1';
+                    } else if (el.dataset.playing === '1') {
+                        pauseFeedEmbed(el, provider);
+                        el.dataset.playing = '0';
+                    }
+                }
+            });
+        }, { threshold: [0, 0.35, 0.55, 0.85, 1] });
+    }
+
+    function isFeedMediaCentered(entry) {
+        if (!entry) return false;
+        const rect = entry.boundingClientRect;
+        const viewportH = window.innerHeight || 0;
+        if (!viewportH || !rect) return false;
+        const centerY = rect.top + rect.height / 2;
+        const viewportCenterY = viewportH / 2;
+        const delta = Math.abs(centerY - viewportCenterY);
+        const allowed = Math.max(80, viewportH * 0.18);
+        return delta <= allowed;
+    }
+
+    function isDesktopFeedAudioMode() {
+        try {
+            const wide = window.matchMedia ? window.matchMedia('(min-width: 1024px)').matches : (window.innerWidth >= 1024);
+            const fine = window.matchMedia ? window.matchMedia('(pointer: fine)').matches : true;
+            return wide && fine;
+        } catch (_) { return false; }
+    }
+
+    function getPostIdFromMediaEl(el) {
+        try { return el?.closest?.('[data-post-id]')?.dataset?.postId || null; } catch (_) { return null; }
+    }
+
+    function shouldUnmuteForPost(postId) {
+        if (isDesktopFeedAudioMode()) {
+            if (!postId) return false;
+            return !!feedPostAudioMap.get(String(postId)) && feedAudioUnlocked;
+        }
+        return feedAudioEnabled && feedAudioUnlocked;
+    }
+
+    function setPostAudioEnabled(postId, enabled, { userGesture = false } = {}) {
+        if (!postId) return;
+        feedPostAudioMap.set(String(postId), !!enabled);
+        if (userGesture && enabled) feedAudioUnlocked = true;
+    }
+
+    function observeFeedAutoplayTarget(el) {
+        if (!el || el.dataset?.feedAutoplay !== '1') return;
+        if (typeof IntersectionObserver === 'undefined') return;
+        ensureFeedPlaybackObserver();
+        try { feedPlaybackObserver.observe(el); } catch (_) {}
+    }
+
+    function playFeedEmbed(iframe, provider) {
+        if (!iframe) return;
+        const targetProvider = provider || detectFeedEmbedProvider(iframe.src || '');
+        if (targetProvider === 'youtube') {
+            postEmbedMessage(iframe, JSON.stringify({ event: 'command', func: 'playVideo', args: '' }));
+        } else if (targetProvider === 'vimeo') {
+            postEmbedMessage(iframe, { method: 'play' });
+        } else if (targetProvider === 'dailymotion') {
+            postEmbedMessage(iframe, { command: 'play' });
+        }
+    }
+
+    function pauseFeedEmbed(iframe, provider) {
+        if (!iframe) return;
+        const targetProvider = provider || detectFeedEmbedProvider(iframe.src || '');
+        if (targetProvider === 'youtube') {
+            postEmbedMessage(iframe, JSON.stringify({ event: 'command', func: 'pauseVideo', args: '' }));
+        } else if (targetProvider === 'vimeo') {
+            postEmbedMessage(iframe, { method: 'pause' });
+        } else if (targetProvider === 'dailymotion') {
+            postEmbedMessage(iframe, { command: 'pause' });
+        }
+    }
+
+    function setFeedEmbedMuted(iframe, muted, provider) {
+        if (!iframe) return;
+        const targetProvider = provider || detectFeedEmbedProvider(iframe.src || '');
+        if (targetProvider === 'youtube') {
+            postEmbedMessage(iframe, JSON.stringify({ event: 'command', func: muted ? 'mute' : 'unMute', args: '' }));
+            if (!muted) postEmbedMessage(iframe, JSON.stringify({ event: 'command', func: 'setVolume', args: [100] }));
+        } else if (targetProvider === 'vimeo') {
+            postEmbedMessage(iframe, { method: 'setVolume', value: muted ? 0 : 1 });
+        } else if (targetProvider === 'dailymotion') {
+            postEmbedMessage(iframe, { command: 'mute', parameters: [!!muted] });
+        }
+    }
+
+    function applyFeedAudioToVideo(video) {
+        if (!video) return;
+        const postId = getPostIdFromMediaEl(video);
+        const shouldUnmute = shouldUnmuteForPost(postId);
+        video.muted = !shouldUnmute;
+        try { video.volume = shouldUnmute ? 1 : 0; } catch (_) {}
+    }
+
+    function applyFeedAudioToEmbed(iframe) {
+        if (!iframe) return;
+        const postId = getPostIdFromMediaEl(iframe);
+        const shouldUnmute = shouldUnmuteForPost(postId);
+        setFeedEmbedMuted(iframe, !shouldUnmute, iframe.dataset.embedProvider || '');
+    }
+
+    function applyFeedAudioToElement(el) {
+        if (!el) return;
+        const tag = el.tagName ? el.tagName.toLowerCase() : '';
+        if (tag === 'video') applyFeedAudioToVideo(el);
+        if (tag === 'iframe') applyFeedAudioToEmbed(el);
+    }
+
+    function getPostActiveMediaElement(article) {
+        if (!article) return null;
+        const carousel = article.querySelector('[data-role="carousel"]');
+        if (carousel) {
+            const track = carousel.querySelector('[data-carousel-track]');
+            const index = Number(carousel.dataset.index || '0') || 0;
+            return track?.children?.[index]?.querySelector('video,iframe') || null;
+        }
+        return article.querySelector('video[data-feed-media="1"], iframe.feed-embed') || null;
+    }
+
+    function updateFeedAudioButtons() {
+        const timeline = document.querySelector('#timeline');
+        if (!timeline) return;
+        timeline.querySelectorAll('[data-feed-action="toggle-audio"]').forEach((btn) => {
+            const postId = btn.dataset.postId || '';
+            const enabled = shouldUnmuteForPost(postId);
+            btn.dataset.audioState = enabled ? 'on' : 'off';
+            btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+            const icon = btn.querySelector('i');
+            if (icon) icon.className = enabled ? 'fas fa-volume-up' : 'fas fa-volume-mute';
+        });
+    }
+
+    function setFeedAudioEnabled(value, { userGesture = false } = {}) {
+        if (isDesktopFeedAudioMode()) {
+            if (userGesture && value) feedAudioUnlocked = true;
+            updateFeedAudioButtons();
+            return;
+        }
+        feedAudioEnabled = !!value;
+        if (userGesture && feedAudioEnabled) feedAudioUnlocked = true;
+        if (!feedAudioEnabled) feedAudioUnlocked = false;
+        try { localStorage.setItem(FEED_AUDIO_STORAGE_KEY, feedAudioEnabled ? '1' : '0'); } catch (_) {}
+        updateFeedAudioButtons();
+        const timeline = document.querySelector('#timeline');
+        if (!timeline) return;
+        const mediaEls = timeline.querySelectorAll('video[data-feed-media="1"], iframe.feed-embed');
+        mediaEls.forEach((el) => applyFeedAudioToElement(el));
+    }
+
+    function postEmbedMessage(iframe, payload) {
+        try { iframe.contentWindow?.postMessage(payload, '*'); } catch (_) {}
     }
 
     function enhanceFeedCards(items) {
@@ -5360,7 +6654,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!card || !commentBlock) return;
             // Cria overlay e move bloco de comentários para dentro
             const overlay = document.createElement('section');
-            overlay.className = 'absolute inset-0 bg-black/70 backdrop-blur-sm hidden z-30';
+            overlay.className = 'absolute inset-0 bg-black/70 backdrop-blur-sm hidden z-30 transition-opacity duration-200 ease-out opacity-0 pointer-events-none';
             overlay.setAttribute('data-role','comment-overlay');
             overlay.setAttribute('data-post-id', postId);
             overlay.innerHTML = `
@@ -5394,19 +6688,77 @@ document.addEventListener('DOMContentLoaded', () => {
             // Insere overlay dentro do card (necessário para absolute inset-0)
             card.appendChild(overlay);
 
-            // Autoplay do primeiro vídeo em carrossel
+            // Lazy load de vídeos no feed
+            const lazyVideos = article.querySelectorAll('video.feed-video-lazy[data-src]');
+            if (lazyVideos.length) {
+                if (typeof IntersectionObserver === 'undefined') {
+                    lazyVideos.forEach((vid) => hydrateFeedVideo(vid));
+                } else {
+                    ensureFeedVideoObserver();
+                    lazyVideos.forEach((vid) => {
+                        if (!vid.dataset.loaded) {
+                            try { feedVideoObserver.observe(vid); } catch (_) {}
+                        }
+                    });
+                }
+            }
+
+            // Autoplay do primeiro vídeo em carrossel (quando centralizado)
             try {
                 const carousel = article.querySelector(`[data-role="carousel"][data-post-id="${postId}"]`);
                 if (carousel) {
                     const track = carousel.querySelector('[data-carousel-track]');
                     const firstVid = track?.children?.[0]?.querySelector('video');
                     if (firstVid) {
-                        firstVid.muted = true; firstVid.playsInline = true; firstVid.autoplay = true;
-                        // Forçar reprodução após inserção no DOM
-                        setTimeout(() => { try { firstVid.play(); } catch(_) {} }, 50);
+                        hydrateFeedVideo(firstVid);
+                        firstVid.muted = true; firstVid.playsInline = true;
+                        observeFeedAutoplayTarget(firstVid);
                     }
+                    attachFeedCarouselSwipe(carousel);
                 }
             } catch (_) {}
+
+            // Autoplay centralizado de vídeos/embeds únicos
+            const autoplayTargets = article.querySelectorAll('video[data-feed-autoplay="1"], iframe[data-feed-autoplay="1"]');
+            autoplayTargets.forEach((el) => observeFeedAutoplayTarget(el));
+
+            if (window.__FEED_MEDIA_DEBUG) {
+                attachFeedMediaDebug(article, postId);
+            }
+        });
+        updateFeedAudioButtons();
+    }
+
+    function attachFeedMediaDebug(article, postId) {
+        if (!article) return;
+        const logHead = async (src) => {
+            if (!src) return;
+            try {
+                const isSameOrigin = src.startsWith('/') || src.startsWith(window.location.origin);
+                if (!isSameOrigin) return;
+                const res = await fetch(src, { method: 'HEAD', credentials: 'include' });
+                console.log('[FEED_MEDIA_DEBUG] HEAD', { postId, src, status: res.status });
+            } catch (err) {
+                console.warn('[FEED_MEDIA_DEBUG] HEAD failed', { postId, src, err });
+            }
+        };
+        const onError = (ev) => {
+            const el = ev.currentTarget;
+            const src = el?.getAttribute('src') || el?.getAttribute('data-src') || '';
+            console.warn('[FEED_MEDIA_DEBUG] media error', {
+                postId,
+                tag: el?.tagName,
+                src,
+                type: ev?.type
+            });
+            logHead(src);
+        };
+        article.querySelectorAll('img').forEach((img) => {
+            img.addEventListener('error', onError);
+        });
+        article.querySelectorAll('video').forEach((vid) => {
+            vid.addEventListener('error', onError);
+            vid.addEventListener('stalled', onError);
         });
     }
 
@@ -5414,8 +6766,415 @@ document.addEventListener('DOMContentLoaded', () => {
         const timeline = document.querySelector('#timeline');
         if (!timeline || feedInteractionsAttached) return;
         timeline.addEventListener('click', handleFeedClick);
+        timeline.addEventListener('click', handleFeedMediaClick);
         timeline.addEventListener('submit', handleFeedSubmit);
         feedInteractionsAttached = true;
+    }
+
+    function animateIn(el, opts = {}) {
+        if (!el) return;
+        const hiddenClass = opts.hiddenClass || 'hidden';
+        const activeClass = opts.activeClass || 'opacity-100 scale-100';
+        const inactiveClass = opts.inactiveClass || 'opacity-0 scale-95';
+        const addTokens = (value) => {
+            if (!value) return;
+            el.classList.add(...String(value).split(/\s+/).filter(Boolean));
+        };
+        const removeTokens = (value) => {
+            if (!value) return;
+            el.classList.remove(...String(value).split(/\s+/).filter(Boolean));
+        };
+        removeTokens(hiddenClass);
+        removeTokens('pointer-events-none');
+        addTokens(inactiveClass);
+        requestAnimationFrame(() => {
+            addTokens(activeClass);
+            removeTokens(inactiveClass);
+        });
+    }
+
+    function animateOut(el, opts = {}) {
+        if (!el) return;
+        const hiddenClass = opts.hiddenClass || 'hidden';
+        const activeClass = opts.activeClass || 'opacity-100 scale-100';
+        const inactiveClass = opts.inactiveClass || 'opacity-0 scale-95';
+        const addTokens = (value) => {
+            if (!value) return;
+            el.classList.add(...String(value).split(/\s+/).filter(Boolean));
+        };
+        const removeTokens = (value) => {
+            if (!value) return;
+            el.classList.remove(...String(value).split(/\s+/).filter(Boolean));
+        };
+        addTokens(inactiveClass);
+        removeTokens(activeClass);
+        addTokens('pointer-events-none');
+        const duration = Number(opts.duration || 180);
+        window.setTimeout(() => {
+            addTokens(hiddenClass);
+        }, duration);
+    }
+
+    let mediaViewerState = null;
+
+    function ensureMediaViewer() {
+        let viewer = document.querySelector('#media-viewer');
+        if (viewer) return viewer;
+        viewer = document.createElement('section');
+        viewer.id = 'media-viewer';
+        viewer.className = 'fixed inset-0 z-50 hidden opacity-0 transition-opacity duration-200 ease-out pointer-events-none';
+        viewer.innerHTML = `
+            <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" data-role="media-viewer-backdrop"></div>
+            <div class="relative z-10 w-full h-full flex items-center justify-center p-4">
+                <button type="button" class="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center" data-role="media-viewer-close" aria-label="Fechar">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div class="relative w-full h-full max-w-[92vw] max-h-[88vh] flex items-center justify-center transition-transform duration-200 ease-out scale-95" data-role="media-viewer-stage">
+                    <img class="max-w-full max-h-full object-contain select-none hidden" data-role="media-viewer-image" alt="Mídia" draggable="false">
+                    <video class="max-w-full max-h-full hidden" data-role="media-viewer-video" controls playsinline></video>
+                </div>
+            </div>`;
+        document.body.appendChild(viewer);
+        mediaViewerState = {
+            viewer,
+            stage: viewer.querySelector('[data-role="media-viewer-stage"]'),
+            img: viewer.querySelector('[data-role="media-viewer-image"]'),
+            video: viewer.querySelector('[data-role="media-viewer-video"]'),
+            open: false,
+            isImage: false,
+            scale: 1,
+            x: 0,
+            y: 0,
+            dragging: false,
+            startX: 0,
+            startY: 0,
+            originX: 0,
+            originY: 0,
+            pinchStartDist: 0,
+            pinchStartScale: 1
+        };
+        const closeBtn = viewer.querySelector('[data-role="media-viewer-close"]');
+        const backdrop = viewer.querySelector('[data-role="media-viewer-backdrop"]');
+        if (closeBtn) closeBtn.addEventListener('click', () => closeMediaViewer());
+        if (backdrop) backdrop.addEventListener('click', () => closeMediaViewer());
+        mediaViewerState.img.addEventListener('wheel', onMediaViewerWheel, { passive: false });
+        mediaViewerState.img.addEventListener('pointerdown', onMediaViewerPointerDown);
+        mediaViewerState.img.addEventListener('pointermove', onMediaViewerPointerMove);
+        mediaViewerState.img.addEventListener('pointerup', onMediaViewerPointerUp);
+        mediaViewerState.img.addEventListener('pointercancel', onMediaViewerPointerUp);
+        mediaViewerState.img.addEventListener('touchstart', onMediaViewerTouchStart, { passive: false });
+        mediaViewerState.img.addEventListener('touchmove', onMediaViewerTouchMove, { passive: false });
+        mediaViewerState.img.addEventListener('touchend', onMediaViewerTouchEnd);
+        mediaViewerState.img.addEventListener('dblclick', onMediaViewerDoubleClick);
+        return viewer;
+    }
+
+    function openMediaViewer({ url, type } = {}) {
+        if (!url) return;
+        ensureMediaViewer();
+        const state = mediaViewerState;
+        if (!state) return;
+        state.open = true;
+        state.isImage = type !== 'video';
+        state.scale = 1;
+        state.x = 0;
+        state.y = 0;
+        state.dragging = false;
+        state.pinchStartDist = 0;
+        state.pinchStartScale = 1;
+        if (state.isImage) {
+            state.img.src = url;
+            state.img.classList.remove('hidden');
+            state.video.classList.add('hidden');
+        } else {
+            state.video.src = url;
+            state.video.classList.remove('hidden');
+            state.img.classList.add('hidden');
+        }
+        applyMediaViewerTransform();
+        state.viewer.classList.remove('hidden', 'pointer-events-none', 'opacity-0');
+        state.viewer.classList.add('opacity-100');
+        state.stage.classList.remove('scale-95');
+        state.stage.classList.add('scale-100');
+        document.body.classList.add('overflow-hidden');
+    }
+
+    function closeMediaViewer() {
+        const state = mediaViewerState;
+        if (!state || !state.open) return false;
+        state.open = false;
+        state.viewer.classList.add('opacity-0', 'pointer-events-none');
+        state.viewer.classList.remove('opacity-100');
+        state.stage.classList.add('scale-95');
+        state.stage.classList.remove('scale-100');
+        window.setTimeout(() => {
+            if (state.open) return;
+            state.viewer.classList.add('hidden');
+        }, 200);
+        document.body.classList.remove('overflow-hidden');
+        try { state.video.pause(); } catch (_) {}
+        state.video.removeAttribute('src');
+        state.video.load();
+        state.img.removeAttribute('src');
+        return true;
+    }
+
+    function applyMediaViewerTransform() {
+        const state = mediaViewerState;
+        if (!state || !state.isImage) return;
+        state.img.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+        state.img.style.transformOrigin = 'center center';
+        state.img.style.touchAction = 'none';
+    }
+
+    function clampScale(value) {
+        const min = 1;
+        const max = 4;
+        return Math.min(max, Math.max(min, value));
+    }
+
+    function onMediaViewerWheel(ev) {
+        const state = mediaViewerState;
+        if (!state?.open || !state.isImage) return;
+        ev.preventDefault();
+        const delta = ev.deltaY || 0;
+        const next = state.scale + (delta > 0 ? -0.2 : 0.2);
+        state.scale = clampScale(next);
+        applyMediaViewerTransform();
+    }
+
+    function onMediaViewerPointerDown(ev) {
+        const state = mediaViewerState;
+        if (!state?.open || !state.isImage) return;
+        if (ev.button !== 0) return;
+        state.dragging = true;
+        state.startX = ev.clientX;
+        state.startY = ev.clientY;
+        state.originX = state.x;
+        state.originY = state.y;
+        try { ev.currentTarget.setPointerCapture?.(ev.pointerId); } catch (_) {}
+    }
+
+    function onMediaViewerPointerMove(ev) {
+        const state = mediaViewerState;
+        if (!state?.open || !state.isImage || !state.dragging) return;
+        const dx = ev.clientX - state.startX;
+        const dy = ev.clientY - state.startY;
+        state.x = state.originX + dx;
+        state.y = state.originY + dy;
+        applyMediaViewerTransform();
+    }
+
+    function onMediaViewerPointerUp(ev) {
+        const state = mediaViewerState;
+        if (!state?.open || !state.isImage) return;
+        state.dragging = false;
+        try { ev.currentTarget.releasePointerCapture?.(ev.pointerId); } catch (_) {}
+    }
+
+    function onMediaViewerTouchStart(ev) {
+        const state = mediaViewerState;
+        if (!state?.open || !state.isImage) return;
+        if (ev.touches.length === 2) {
+            const dx = ev.touches[0].clientX - ev.touches[1].clientX;
+            const dy = ev.touches[0].clientY - ev.touches[1].clientY;
+            state.pinchStartDist = Math.hypot(dx, dy);
+            state.pinchStartScale = state.scale;
+        } else if (ev.touches.length === 1) {
+            state.dragging = true;
+            state.startX = ev.touches[0].clientX;
+            state.startY = ev.touches[0].clientY;
+            state.originX = state.x;
+            state.originY = state.y;
+        }
+    }
+
+    function onMediaViewerTouchMove(ev) {
+        const state = mediaViewerState;
+        if (!state?.open || !state.isImage) return;
+        if (ev.touches.length === 2) {
+            ev.preventDefault();
+            const dx = ev.touches[0].clientX - ev.touches[1].clientX;
+            const dy = ev.touches[0].clientY - ev.touches[1].clientY;
+            const dist = Math.hypot(dx, dy);
+            if (state.pinchStartDist > 0) {
+                state.scale = clampScale(state.pinchStartScale * (dist / state.pinchStartDist));
+                applyMediaViewerTransform();
+            }
+        } else if (ev.touches.length === 1 && state.dragging) {
+            ev.preventDefault();
+            const dx = ev.touches[0].clientX - state.startX;
+            const dy = ev.touches[0].clientY - state.startY;
+            state.x = state.originX + dx;
+            state.y = state.originY + dy;
+            applyMediaViewerTransform();
+        }
+    }
+
+    function onMediaViewerTouchEnd() {
+        const state = mediaViewerState;
+        if (!state?.open || !state.isImage) return;
+        state.dragging = false;
+        state.pinchStartDist = 0;
+    }
+
+    function onMediaViewerDoubleClick() {
+        const state = mediaViewerState;
+        if (!state?.open || !state.isImage) return;
+        state.scale = state.scale > 1 ? 1 : 2;
+        state.x = 0;
+        state.y = 0;
+        applyMediaViewerTransform();
+    }
+
+    function handleFeedMediaClick(event) {
+        const timeline = event.currentTarget;
+        const target = event.target;
+        if (!(timeline instanceof Element) || !target) return;
+        if (target.closest('[data-feed-action]')) return;
+        if (target.closest('[data-role="post-menu"]')) return;
+        if (target.closest('[data-role="comment-overlay"]')) return;
+        const mediaEl = target.closest('[data-feed-media="1"]');
+        if (mediaEl) {
+            const url = mediaEl.dataset.mediaUrl;
+            const type = mediaEl.dataset.mediaType || 'image';
+            if (url) openMediaViewer({ url, type });
+            return;
+        }
+        const carousel = target.closest('[data-role="carousel"]');
+        if (carousel) {
+            const track = carousel.querySelector('[data-carousel-track]');
+            const index = Number(carousel.dataset.index || '0') || 0;
+            const activeMedia = track?.children?.[index]?.querySelector('img,video');
+            if (activeMedia) {
+                const url = activeMedia.getAttribute('data-media-url') || activeMedia.getAttribute('src') || activeMedia.getAttribute('data-src') || '';
+                const type = activeMedia.getAttribute('data-media-type') || (activeMedia.tagName.toLowerCase() === 'video' ? 'video' : 'image');
+                if (url) openMediaViewer({ url, type });
+            }
+            return;
+        }
+        const bg = target.closest('[data-role="feed-media-bg"]');
+        if (bg) {
+            const url = bg.dataset.mediaUrl;
+            const type = bg.dataset.mediaType || 'image';
+            if (url && type === 'image') openMediaViewer({ url, type });
+        }
+    }
+
+    function isTouchLikePointer() {
+        try {
+            return (
+                ('ontouchstart' in window) ||
+                (navigator.maxTouchPoints && navigator.maxTouchPoints > 0) ||
+                (window.matchMedia && window.matchMedia('(pointer:coarse)').matches)
+            );
+        } catch (_) { return false; }
+    }
+
+    function setFeedCarouselIndex(carousel, nextIndex, timeline = null) {
+        if (!carousel) return;
+        const track = carousel.querySelector('[data-carousel-track]');
+        if (!track) return;
+        const total = track.children.length;
+        if (!total) return;
+        const prevIndex = Number(carousel.dataset.index || '0') || 0;
+        const index = Math.max(0, Math.min(total - 1, nextIndex));
+        if (index === prevIndex) return;
+        carousel.dataset.index = String(index);
+        track.style.transform = `translateX(${-index * 100}%)`;
+        const postId = carousel.dataset.postId;
+        const root = timeline || carousel.closest('#timeline') || document.querySelector('#timeline');
+        if (root && postId) {
+            const indicator = root.querySelector(`[data-role="carousel-indicator"][data-post-id="${postId}"]`);
+            if (indicator) indicator.textContent = `${index + 1}/${total}`;
+            const opener = root.querySelector(`[data-feed-action="open-post-menu"][data-post-id="${postId}"]`);
+            const activeMedia = track.children[index]?.querySelector('img,video');
+            if (opener && activeMedia) {
+                opener.dataset.mediaUrl = activeMedia.getAttribute('src') || activeMedia.getAttribute('data-src') || '';
+                opener.dataset.mediaType = activeMedia.tagName.toLowerCase() === 'video' ? 'video' : 'image';
+                const menu = root.querySelector(`[data-role="post-menu"][data-post-id="${postId}"]`);
+                if (menu) {
+                    menu.dataset.mediaUrl = opener.dataset.mediaUrl;
+                    menu.dataset.mediaType = opener.dataset.mediaType;
+                }
+            }
+        }
+        try {
+            const prevVid = track.children[prevIndex]?.querySelector('video');
+            if (prevVid) { try { prevVid.pause(); } catch(_){} }
+            const currentVid = track.children[index]?.querySelector('video');
+            const vids = track.querySelectorAll('video');
+            vids.forEach(v => { if (v !== currentVid) { try { v.pause(); } catch(_){} } });
+            if (currentVid) {
+                hydrateFeedVideo(currentVid);
+                currentVid.playsInline = true;
+                applyFeedAudioToVideo(currentVid);
+                observeFeedAutoplayTarget(currentVid);
+            }
+        } catch(_) {}
+    }
+
+    function attachFeedCarouselSwipe(carousel) {
+        if (!carousel || carousel.dataset.swipeAttached === '1') return;
+        const track = carousel.querySelector('[data-carousel-track]');
+        if (!track) return;
+        carousel.dataset.swipeAttached = '1';
+        carousel.style.touchAction = 'pan-y';
+        let active = false;
+        let pointerId = null;
+        let startX = 0;
+        let startY = 0;
+        const deadzone = 8;
+        const threshold = 42;
+
+        const cancel = () => {
+            if (!active) return;
+            active = false;
+            if (pointerId != null) {
+                try { carousel.releasePointerCapture?.(pointerId); } catch (_) {}
+            }
+            pointerId = null;
+        };
+
+        const onPointerDown = (ev) => {
+            if (!isTouchLikePointer()) return;
+            if (ev.pointerType && ev.pointerType !== 'touch') return;
+            if (ev.target.closest('[data-feed-action]')) return;
+            active = true;
+            pointerId = ev.pointerId;
+            startX = ev.clientX;
+            startY = ev.clientY;
+            try { carousel.setPointerCapture?.(ev.pointerId); } catch (_) {}
+        };
+
+        const onPointerMove = (ev) => {
+            if (!active || (pointerId != null && ev.pointerId !== pointerId)) return;
+            const dx = ev.clientX - startX;
+            const dy = ev.clientY - startY;
+            if (Math.abs(dx) < deadzone && Math.abs(dy) < deadzone) return;
+            if (Math.abs(dx) > Math.abs(dy)) {
+                ev.preventDefault();
+            } else {
+                cancel();
+            }
+        };
+
+        const onPointerUp = (ev) => {
+            if (!active || (pointerId != null && ev.pointerId !== pointerId)) return;
+            const dx = ev.clientX - startX;
+            const dy = ev.clientY - startY;
+            cancel();
+            if (Math.abs(dx) < threshold || Math.abs(dx) < Math.abs(dy)) return;
+            const currentIndex = Number(carousel.dataset.index || '0') || 0;
+            const nextIndex = currentIndex + (dx < 0 ? 1 : -1);
+            setFeedCarouselIndex(carousel, nextIndex);
+        };
+
+        carousel.addEventListener('pointerdown', onPointerDown);
+        carousel.addEventListener('pointermove', onPointerMove, { passive: false });
+        carousel.addEventListener('pointerup', onPointerUp);
+        carousel.addEventListener('pointercancel', cancel);
+        carousel.addEventListener('pointerleave', cancel);
     }
 
     async function handleFeedClick(event) {
@@ -5432,20 +7191,25 @@ document.addEventListener('DOMContentLoaded', () => {
             event.preventDefault();
             const postId = target.dataset.postId;
             const overlay = timeline.querySelector(`[data-role="comment-overlay"][data-post-id="${postId}"]`);
-            if (overlay) overlay.classList.remove('hidden');
+            if (overlay) animateIn(overlay, { activeClass: 'opacity-100', inactiveClass: 'opacity-0', duration: 200 });
         } else if (action === 'close-comments') {
             event.preventDefault();
             const postId = target.dataset.postId;
             const overlay = timeline.querySelector(`[data-role="comment-overlay"][data-post-id="${postId}"]`);
-            if (overlay) overlay.classList.add('hidden');
+            if (overlay) animateOut(overlay, { activeClass: 'opacity-100', inactiveClass: 'opacity-0', duration: 200 });
         } else if (action === 'open-post-menu') {
             event.preventDefault();
             const postId = target.dataset.postId;
-            timeline.querySelectorAll('[data-role="post-menu"]').forEach(menu => {
-                if (menu.dataset.postId !== postId) menu.classList.add('hidden');
-            });
             const menu = timeline.querySelector(`[data-role="post-menu"][data-post-id="${postId}"]`);
-            if (menu) menu.classList.toggle('hidden');
+            timeline.querySelectorAll('[data-role="post-menu"]').forEach(other => {
+                if (other.dataset.postId !== postId) {
+                    animateOut(other, { duration: 200 });
+                }
+            });
+            if (menu) {
+                if (menu.classList.contains('hidden')) animateIn(menu, { duration: 200 });
+                else animateOut(menu, { duration: 200 });
+            }
         } else if (action === 'prev-slide' || action === 'next-slide') {
             event.preventDefault();
             const postId = target.dataset.postId;
@@ -5455,34 +7219,25 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!track) return;
             const total = track.children.length;
             if (!total) return;
-            let index = Number(carousel.dataset.index || '0') || 0;
+            const prevIndex = Number(carousel.dataset.index || '0') || 0;
+            let index = prevIndex;
             if (action === 'prev-slide') index = Math.max(0, index - 1);
             else index = Math.min(total - 1, index + 1);
-            carousel.dataset.index = String(index);
-            track.style.transform = `translateX(${-index * 100}%)`;
-            const indicator = timeline.querySelector(`[data-role="carousel-indicator"][data-post-id="${postId}"]`);
-            if (indicator) indicator.textContent = `${index + 1}/${total}`;
-            const opener = timeline.querySelector(`[data-feed-action="open-post-menu"][data-post-id="${postId}"]`);
-            const activeMedia = track.children[index]?.querySelector('img,video');
-            if (opener && activeMedia) {
-                opener.dataset.mediaUrl = activeMedia.getAttribute('src') || '';
-                opener.dataset.mediaType = activeMedia.tagName.toLowerCase() === 'video' ? 'video' : 'image';
-                const menu = timeline.querySelector(`[data-role="post-menu"][data-post-id="${postId}"]`);
-                if (menu) {
-                    menu.dataset.mediaUrl = opener.dataset.mediaUrl;
-                    menu.dataset.mediaType = opener.dataset.mediaType;
-                }
+            setFeedCarouselIndex(carousel, index, timeline);
+        } else if (action === 'toggle-audio') {
+            event.preventDefault();
+            const postId = target.dataset.postId;
+            if (isDesktopFeedAudioMode()) {
+                const next = !shouldUnmuteForPost(postId);
+                setPostAudioEnabled(postId, next, { userGesture: true });
+                updateFeedAudioButtons();
+            } else {
+                const next = !feedAudioEnabled;
+                setFeedAudioEnabled(next, { userGesture: true });
             }
-            // Controlar reprodução dos vídeos no carrossel
-            try {
-                const vids = track.querySelectorAll('video');
-                vids.forEach(v => { try { v.pause(); v.currentTime = 0; } catch(_){} });
-                const currentVid = track.children[index]?.querySelector('video');
-                if (currentVid) {
-                    currentVid.muted = true; currentVid.playsInline = true; currentVid.autoplay = true;
-                    currentVid.play().catch(()=>{});
-                }
-            } catch(_) {}
+            const article = timeline.querySelector(`[data-post-id="${postId}"]`);
+            const mediaEl = getPostActiveMediaElement(article);
+            if (mediaEl) applyFeedAudioToElement(mediaEl);
         } else if (action === 'download-media') {
             event.preventDefault();
             const postId = target.dataset.postId;
@@ -5493,11 +7248,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const a = document.createElement('a');
             const ext = (() => { try { const u = new URL(url, window.location.origin); const p = u.pathname; const m = p.match(/\.([a-zA-Z0-9]+)$/); return m ? m[1] : (type==='video' ? 'webm' : 'jpg'); } catch(_) { return type==='video' ? 'webm' : 'jpg'; } })();
             a.href = url; a.download = `post_${postId}.${ext}`; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
-            if (menu) menu.classList.add('hidden');
+            if (menu) animateOut(menu, { duration: 200 });
+        } else if (action === 'share-media') {
+            event.preventDefault();
+            const menu = target.closest('[data-role="post-menu"]');
+            const url = target.dataset.shareUrl || menu?.dataset.mediaUrl || '';
+            const title = target.dataset.shareTitle || '';
+            if (!url) { if (typeof notifyError === 'function') notifyError('Mídia indisponível.'); return; }
+            await sharePostMedia({ url, title });
+            if (menu) animateOut(menu, { duration: 200 });
         } else if (action === 'report-post') {
             event.preventDefault();
             const menu = target.closest('[data-role="post-menu"]');
-            if (menu) menu.classList.add('hidden');
+            if (menu) animateOut(menu, { duration: 200 });
             if (typeof notifySuccess === 'function') notifySuccess('Denúncia registrada. Obrigado por nos ajudar.');
         } else if (action === 'delete-post') {
             event.preventDefault();
@@ -5509,8 +7272,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!confirmed) return;
             try {
                 // Backend faz cascade delete (post + mídias)
-                const json = await apiClient.post('/app/delete_post.php', { id: postId });
-                if (json?.error) { throw new Error(json?.error || 'Falha ao excluir'); }
+                const json = await apiClient.post('/posts/delete', { id: postId });
+                if (json?.error || json?.status === 'error') { throw new Error(json?.message || json?.error || 'Falha ao excluir'); }
                 const article = timeline.querySelector(`[data-post-id="${postId}"]`);
                 if (article && article.parentElement) article.parentElement.removeChild(article);
                 if (typeof notifySuccess === 'function') notifySuccess('Publicação excluída.');
@@ -5519,7 +7282,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('Failed to delete post', e);
                 if (typeof notifyError === 'function') notifyError('Não foi possível excluir a publicação.');
             } finally {
-                if (menu) menu.classList.add('hidden');
+                if (menu) animateOut(menu, { duration: 200 });
             }
             
         }
@@ -5792,6 +7555,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function sharePostMedia({ url, title }) {
+        if (!url) return false;
+        const cleanUrl = (() => {
+            try { return new URL(url, window.location.origin).toString(); } catch (_) { return url; }
+        })();
+        try {
+            if (navigator.share) {
+                await navigator.share({ title: title || document.title || 'Workz!', url: cleanUrl });
+                return true;
+            }
+        } catch (_) { }
+        try {
+            await navigator.clipboard.writeText(cleanUrl);
+            notifySuccess('Link copiado!');
+            return true;
+        } catch (_) {
+            prompt('Copie o link para compartilhar:', cleanUrl);
+            return false;
+        }
+    }
+
     // Helpers de mapeamento de condições por tipo de view
     function getPostConditions(type, id) {
         const base = { st: 1 };
@@ -5925,8 +7709,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Roteador de ações centralizado
-    // Helper: abre o post-editor e aguarda o Editor ficar pronto
-    async function openPostEditorAnd(waitForFn = null) {
+    // Helper: abre o post-editor com controle explícito de câmera e aguarda o Editor ficar pronto
+    async function openEditor({ cameraOnOpen = true, source = '', waitForFn = null } = {}) {
+        const nextSessionId = Number(window.__EDITOR_OPEN_SESSION?.id || 0) + 1;
+        window.__EDITOR_OPEN_SESSION = { id: nextSessionId, cameraOnOpen: !!cameraOnOpen, source: source || '' };
+        window.__EDITOR_CAMERA_AUTO_DISABLED = !cameraOnOpen;
+        if (window.__CAPTURE_DEBUG) {
+            console.log('[CAPTURE_DEBUG] openEditor', { source, cameraOnOpen, sessionId: nextSessionId });
+        }
+        try { window.EditorBridge?.applyOpenPolicy?.(window.__EDITOR_OPEN_SESSION); } catch (_) {}
         const mockElement = document.createElement('div');
         mockElement.dataset.sidebarAction = 'post-editor';
         try {
@@ -5943,13 +7734,61 @@ document.addEventListener('DOMContentLoaded', () => {
                 const inited = !!(viewport && viewport.dataset && viewport.dataset.initialized === '1');
                 const ok = typeof waitForFn === 'function' ? !!waitForFn(sc) : !!viewport;
                 if ((bridgeReady && ok && inited) || (Date.now() - started > 8000)) {
-                    resolve(sc || document);
+                    const mount = sc || document;
+                    const session = window.__EDITOR_OPEN_SESSION || { id: 0, cameraOnOpen: cameraOnOpen, source: source || '' };
+                    if (cameraOnOpen) {
+                        try { window.EditorBridge?.applyOpenPolicy?.(session); } catch (_) {}
+                        try { window.EditorBridge?.startCamera?.('open', session.id); } catch (_) {}
+                    } else {
+                        try { window.EditorBridge?.applyOpenPolicy?.(session); } catch (_) {}
+                        try { window.EditorBridge?.stopCamera?.('open-no-camera'); } catch (_) {}
+                    }
+                    try { window.EditorBridge?.wireCameraToggleButton?.(); } catch (_) {}
+                    resolve(mount);
                 } else {
                     setTimeout(check, 100);
                 }
             };
             check();
         });
+    }
+
+    function installGlobalCameraToggleDelegate() {
+        if (window.__GLOBAL_TOGGLE_DELEGATE) return;
+        const shouldHandleByPoint = (ev) => {
+            const btn = document.getElementById('btnToggleCamera');
+            if (!btn) return false;
+            const rect = btn.getBoundingClientRect();
+            if (!rect || (rect.width === 0 && rect.height === 0)) return false;
+            return ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom;
+        };
+        const handler = (ev) => {
+            const directTarget = ev.target?.closest?.('#btnToggleCamera, [data-action="toggle-camera"]');
+            const byPoint = !directTarget && shouldHandleByPoint(ev);
+            const target = directTarget || (byPoint ? document.getElementById('btnToggleCamera') : null);
+            if (!target) return;
+            if (window.__CAPTURE_DEBUG) {
+                const path = typeof ev.composedPath === 'function' ? ev.composedPath().slice(0, 5) : [];
+                const el = document.elementFromPoint(ev.clientX, ev.clientY);
+                console.log('[CAM_TOGGLE] global delegated', { type: ev.type, target, path, elementFromPoint: el });
+            }
+            ev.preventDefault();
+            if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+            if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+            window.EditorBridge?.toggleCamera?.('user_toggle');
+        };
+        document.addEventListener('pointerdown', handler, true);
+        document.addEventListener('click', handler, true);
+        window.__GLOBAL_TOGGLE_DELEGATE = true;
+    }
+
+    try { installGlobalCameraToggleDelegate(); } catch (_) {}
+
+    // Compat: abre o post-editor e aguarda o Editor ficar pronto
+    async function openPostEditorAnd(waitForFn = null, options = {}) {
+        const cameraOn = options?.camera !== false;
+        const source = options?.source || 'openPostEditorAnd';
+        return openEditor({ cameraOnOpen: cameraOn, source, waitForFn });
     }
 
     // ===== Desktop background helpers =====
@@ -6046,14 +7885,22 @@ document.addEventListener('DOMContentLoaded', () => {
         // Editor: atalhos rápidos
         'editor-quick-text': async () => {
             try {
-                const sc = await openPostEditorAnd(sc => sc && sc.querySelector('#btnAddText'));
+                const sc = await openEditor({
+                    cameraOnOpen: false,
+                    source: 'editor-quick-text',
+                    waitForFn: sc => sc && sc.querySelector('#btnAddText')
+                });
                 const btn = (sc || document).querySelector('#btnAddText');
                 if (btn) setTimeout(() => { try { btn.click(); } catch (_) {} }, 60);
             } catch (_) {}
         },
         'editor-quick-media': async () => {
             try {
-                const sc = await openPostEditorAnd(sc => sc && (sc.querySelector('#postMediaPicker') || sc.querySelector('#btnAddImg')));
+                const sc = await openEditor({
+                    cameraOnOpen: false,
+                    source: 'editor-quick-media',
+                    waitForFn: sc => sc && (sc.querySelector('#postMediaPicker') || sc.querySelector('#btnAddImg'))
+                });
                 const picker = (sc || document).querySelector('#postMediaPicker');
                 if (picker) {
                     picker.click();
@@ -7220,7 +9067,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Usar fetch para carregar o script diretamente
-        const editorUrl = window.location.origin + '/js/editor.js?v=' + Date.now();
+        const editorVersion = window.APP_VERSION || window.WORKZ_APP_VERSION || '';
+        const editorUrl = window.location.origin + '/js/editor.js' + (editorVersion ? `?v=${encodeURIComponent(editorVersion)}` : '');
         
         window._editorLoading = true;
         fetch(editorUrl)
@@ -7559,19 +9407,23 @@ document.addEventListener('DOMContentLoaded', () => {
             if (el && el.dataset.sidebarAction === 'post-editor') {
                 // Remover w-0 e adicionar classes de largura
                 sidebarWrapper.classList.remove('w-0');
-                sidebarWrapper.classList.add('xl:w-1/4', 'lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
+                sidebarWrapper.classList.add('xl:w-1/3', 'lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
             } else if (el && el.dataset.sidebarAction === 'link-share') {
                 sidebarWrapper.classList.remove('w-0');
-                sidebarWrapper.classList.add('xl:w-1/4', 'lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
+                sidebarWrapper.classList.add('xl:w-1/3', 'lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
             } else {
                 // Comportamento normal de toggle para outros elementos
                 sidebarWrapper.classList.toggle('w-0');
-                sidebarWrapper.classList.toggle('xl:w-1/4');
+                sidebarWrapper.classList.toggle('xl:w-1/3');
                 sidebarWrapper.classList.toggle('lg:w-1/3');
                 sidebarWrapper.classList.toggle('sm:w-1/2');
                 sidebarWrapper.classList.toggle('w-full');
                 sidebarWrapper.classList.toggle('shadow-2xl');
             }
+        }
+
+        if (sidebarWrapper.classList.contains('w-0')) {
+            hardStopCamera('sidebar-close');
         }
 
         if (el) {
@@ -9417,6 +11269,7 @@ document.addEventListener('DOMContentLoaded', () => {
         feedLoading = false;
         feedFinished = false;
         feedInteractionsAttached = false;
+        feedPostAudioMap.clear();
 
         // Limpar o conteúdo do timeline
         const timeline = document.querySelector('#timeline');
@@ -9436,6 +11289,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         feedLoading = true;
+        const requestId = ++feedRequestId;
 
         const orBlocks = [];
 
@@ -9497,23 +11351,29 @@ document.addEventListener('DOMContentLoaded', () => {
             }];
         }
         const res = await apiClient.post('/search', feedPayload);
+        if (requestId !== feedRequestId) return;
 
         let items = res?.data || [];
 
         // se não veio nada, acabou
         if (!items.length) {
-            feedFinished = true;
-            feedLoading = false;
+            if (requestId === feedRequestId) {
+                feedFinished = true;
+                feedLoading = false;
+            }
             return;
         }
 
         // Ajusta itens conforme privacidade de página e da publicação
         try { items = await filterDashboardItems(items); } catch (_) {}
+        if (requestId !== feedRequestId) return;
 
         // se após filtro não restou nada
         if (!items.length) {
-            feedFinished = true;
-            feedLoading = false;
+            if (requestId === feedRequestId) {
+                feedFinished = true;
+                feedLoading = false;
+            }
             return;
         }
 
@@ -9524,6 +11384,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error('Failed to prepare feed items', error);
         }
+        if (requestId !== feedRequestId) return;
         appendFeed(feedItems);
 
 
@@ -10392,7 +12253,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('click', function (event) {
         const target = event.target;
         const activeSwal = document.querySelector('.swal-overlay:not(.swal-hidden)');
-        if (activeSwal && activeSwal.contains(target)) {
+        const activeSwal2 = document.querySelector('.swal2-container');
+        const swalButton = target?.closest?.('.swal2-confirm, .swal-button');
+        if (swalButton || (activeSwal && activeSwal.contains(target)) || (activeSwal2 && activeSwal2.contains(target))) {
+            return;
+        }
+        const swalVisible = document.body.classList.contains('swal2-shown') || document.body.classList.contains('swal-overlay--show-modal');
+        if (swalVisible) {
             return;
         }
         const isSidebarOpen = !sidebarWrapper.classList.contains('w-0');
@@ -10434,6 +12301,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (isSidebarOpen && !clickedSidebarTrigger) {
+            hardStopCamera('outside-click');
             toggleSidebar(); // fecha
         }
 
@@ -10441,14 +12309,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const clickedPostMenu = !!target.closest('[data-role="post-menu"]');
         const clickedPostMenuTrigger = !!target.closest('[data-feed-action="open-post-menu"]');
         if (!clickedPostMenu && !clickedPostMenuTrigger) {
-            document.querySelectorAll('[data-role="post-menu"]').forEach(menu => menu.classList.add('hidden'));
+            document.querySelectorAll('[data-role="post-menu"]').forEach(menu => animateOut(menu, { duration: 200 }));
         }
     });
 
     // Fecha menus de post com tecla Escape
     document.addEventListener('keydown', (ev) => {
         if (ev.key === 'Escape') {
-            document.querySelectorAll('[data-role="post-menu"]').forEach(menu => menu.classList.add('hidden'));
+            if (closeMediaViewer()) return;
+            document.querySelectorAll('[data-role="post-menu"]').forEach(menu => animateOut(menu, { duration: 200 }));
         }
     });
 

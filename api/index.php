@@ -22,6 +22,8 @@ use Workz\Platform\Controllers\TeamsController;
 use Workz\Platform\Controllers\PostsController;
 use Workz\Platform\Controllers\CompaniesController;
 use Workz\Platform\Controllers\LinkPreviewController;
+use Workz\Platform\Controllers\MediaController;
+use Workz\Platform\Controllers\PostMediaController;
 
 use Workz\Platform\Controllers\PerformanceController;
 use Workz\Platform\Middleware\AuthMiddleware;
@@ -90,7 +92,16 @@ $router->add('POST', '/api/companies/members/reject', [CompaniesController::clas
 // Posts (criar e feed)
 $router->add('POST', '/api/posts', [PostsController::class, 'create'], [AuthMiddleware::class, 'handle']);
 $router->add('POST', '/api/posts/feed', [PostsController::class, 'feed'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/posts/delete', [PostsController::class, 'delete'], [AuthMiddleware::class, 'handle']);
 $router->add('POST', '/api/posts/media', [PostsController::class, 'uploadMedia'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/media', [MediaController::class, 'upload'], [AuthMiddleware::class, 'handle']);
+$router->add('GET', '/api/media/(\\d+)', [MediaController::class, 'show'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/media/init', [PostMediaController::class, 'init'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/media/upload', [PostMediaController::class, 'upload'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/media/complete', [PostMediaController::class, 'complete'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/media/batch', [PostMediaController::class, 'batch'], [AuthMiddleware::class, 'handle']);
+$router->add('GET', '/api/media/show', [PostMediaController::class, 'show']);
+$router->add('GET', '/api/media/show/(\\d+)', [PostMediaController::class, 'show']);
 $router->add('POST', '/api/link/preview', [LinkPreviewController::class, 'preview'], [AuthMiddleware::class, 'handle']);
 
 (require_once __DIR__ . '/routes/app_management_routes.php')($router); // Inclui as rotas de gerenciamento de apps
