@@ -7,6 +7,7 @@ use Workz\Platform\Models\General;
 use Workz\Platform\Core\StorageManager;
 use Workz\Platform\Core\BuildPipeline;
 use Workz\Platform\Policies\BusinessPolicy;
+use Workz\Platform\Services\ManifestNormalizer;
 class AppManagementController
 {
     private General $generalModel;
@@ -122,12 +123,10 @@ class AppManagementController
 
     private function resolveWorkzManifest(array $input, array $appData = []): array
     {
-        $base = $this->buildWorkzManifest($input, $appData);
         $provided = $this->coerceManifestPayload($input['manifest'] ?? $input['manifest_json'] ?? null);
-        if (!$provided) {
-            return $base;
-        }
-        return array_replace_recursive($base, $provided);
+        $pipe = is_array($provided) ? $provided : array_merge($appData, $input);
+        $appType = strtolower((string)($input['app_type'] ?? $appData['app_type'] ?? 'javascript'));
+        return ManifestNormalizer::buildFromPipe($pipe, $appType, $_SERVER['HTTP_HOST'] ?? null);
     }
 
     private function filterColumns(string $table, array $data): array

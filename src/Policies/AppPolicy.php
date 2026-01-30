@@ -12,8 +12,8 @@ class AppPolicy
         $teamRole = strtoupper($teamRole);
         $businessRole = $businessRole ? strtoupper($businessRole) : null;
 
-        // Reforço: se o negócio não está ativo (papel GUEST), negar tudo
-        if ($businessRole === 'GUEST') {
+        // Se o negócio é GUEST, ainda permitir ações quando o papel do time der acesso.
+        if ($businessRole === 'GUEST' && $teamRole === 'GUEST') {
             return false;
         }
 

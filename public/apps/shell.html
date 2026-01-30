@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{APP_NAME}}</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { font-family: system-ui, Arial, sans-serif; background: #f4f4f4; }
+    .shell {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      background: #f4f4f4;
+    }
+    .shell-header {
+      padding: 10px 16px;
+      background: #ffffff;
+      border-bottom: 1px solid #e6e6e6;
+      font-weight: 600;
+    }
+    .shell-body {
+      flex: 1;
+      background: #fff;
+    }
+    .shell-iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+    }
+    .shell-error {
+      color: #8a1c1c;
+      background: #fce7e7;
+      padding: 10px 12px;
+      margin: 12px 16px;
+      border-radius: 6px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <script>
+    (function () {
+      try {
+        if (window.top !== window) return;
+        var host = String(window.location.hostname || '').toLowerCase();
+        if (!host || host === 'localhost' || !host.endsWith('.localhost')) return;
+        var sub = host.replace(/\.localhost$/, '');
+        var path = String(window.location.pathname || '');
+        var match = path.match(/^\/app\/shell\/([a-z0-9-]+)$/i);
+        if (match && match[1] && match[1] === sub) {
+          var qs = window.location.search || '';
+          var hash = window.location.hash || '';
+          window.history.replaceState({}, '', '/' + qs + hash);
+        }
+      } catch (_) {}
+    })();
+  </script>
+  <div class="shell">
+    <div id="shell-error" class="shell-error"></div>
+    <div class="shell-body">
+      <iframe id="workz-app-frame" class="shell-iframe" src="about:blank" allow="clipboard-write; fullscreen"></iframe>
+    </div>
+  </div>
+
+  <script>
+    window.__WORKZ_SHELL_APP = {
+      id: parseInt('{{APP_ID}}', 10) || 0,
+      slug: '{{APP_SLUG}}' || 'workz-app',
+      name: '{{APP_NAME}}' || 'Workz App',
+      accessLevel: parseInt('{{APP_ACCESS_LEVEL}}', 10) || 0,
+      requiresLogin: '{{APP_REQUIRES_LOGIN}}',
+      runUrl: '{{APP_RUN_URL}}',
+      allowedOrigins: {{APP_ALLOWED_ORIGINS}},
+      events: {{APP_EVENTS}}
+    };
+  </script>
+
+  <script src="/js/core/workz-host-bridge.js"></script>
+  <script>
+    (function () {
+      var appMeta = window.__WORKZ_SHELL_APP || {};
+      var iframe = document.getElementById('workz-app-frame');
+      var errorBox = document.getElementById('shell-error');
+      var shellOrigin = (window.location && window.location.origin) ? window.location.origin : '';
+      var requiresLogin = (function () {
+        if (appMeta.requiresLogin === true || appMeta.requiresLogin === 'true') return true;
+        var lvl = Number(appMeta.accessLevel || 0);
+        return lvl > 0;
+      })();
+
+      function parseTokenFromUrl() {
+        try {
+          var url = new URL(window.location.href);
+          var t = url.searchParams.get('token');
+          if (t) return t;
+          if (window.location.hash) {
+            var h = new URLSearchParams(window.location.hash.slice(1));
+            var t2 = h.get('token');
+            if (t2) return t2;
+          }
+        } catch (_) {}
+        return '';
+      }
+
+      function readCookieToken() {
+        try {
+          var cookie = String(document.cookie || '');
+          if (!cookie) return '';
+          var parts = cookie.split(';');
+          for (var i = 0; i < parts.length; i += 1) {
+            var raw = parts[i].trim();
+            if (!raw) continue;
+            if (raw.indexOf('jwt_token=') === 0) {
+              return decodeURIComponent(raw.slice('jwt_token='.length));
+            }
+          }
+        } catch (_) {}
+        return '';
+      }
+
+      function persistToken(token) {
+        if (!token) return;
+        try {
+          var expires = 60 * 60 * 24 * 30;
+          document.cookie = 'jwt_token=' + encodeURIComponent(token) + '; Domain=.localhost; Path=/; Max-Age=' + expires + '; SameSite=Lax';
+          if (!document.cookie.includes('jwt_token=')) {
+            document.cookie = 'jwt_token=' + encodeURIComponent(token) + '; Path=/; Max-Age=' + expires + '; SameSite=Lax';
+          }
+        } catch (_) {}
+        try {
+          localStorage.setItem('jwt_token', token);
+        } catch (_) {}
+      }
+
+      function clearTokenFromUrl() {
+        try {
+          var url = new URL(window.location.href);
+          var changed = false;
+          if (url.searchParams.has('token')) {
+            url.searchParams.delete('token');
+            changed = true;
+          }
+          if (window.location.hash && window.location.hash.indexOf('token=') !== -1) {
+            url.hash = '';
+            changed = true;
+          }
+          if (changed) {
+            var cleaned = url.pathname + (url.search || '') + (url.hash || '');
+            window.history.replaceState({}, '', cleaned);
+          }
+        } catch (_) {}
+      }
+
+      var urlToken = parseTokenFromUrl();
+      if (urlToken) {
+        persistToken(urlToken);
+        clearTokenFromUrl();
+      }
+      var storedToken = urlToken || readCookieToken() || (function () {
+        try { return localStorage.getItem('jwt_token') || ''; } catch (_) { return ''; }
+      })();
+      var authToken = storedToken || '';
+
+      function normalizeAllowedOrigins(origins) {
+        var list = Array.isArray(origins) ? origins.slice() : [];
+        if (shellOrigin && list.indexOf(shellOrigin) === -1) list.push(shellOrigin);
+        return list;
+      }
+
+      function showError(message) {
+        if (!errorBox) return;
+        errorBox.textContent = message || 'Falha ao inicializar o app.';
+        errorBox.style.display = 'block';
+      }
+
+      if (!iframe || !window.WorkzHostBridge) {
+        showError('Shell invalido: iframe/bridge ausente.');
+        return;
+      }
+
+      window.WorkzHostBridge.registerAppIframe(iframe, {
+        appId: appMeta.id || null,
+        appSlug: appMeta.slug || '',
+        allowedOrigins: normalizeAllowedOrigins(appMeta.allowedOrigins || []),
+        eventsPublish: (appMeta.events && appMeta.events.publish) || [],
+        eventsSubscribe: (appMeta.events && appMeta.events.subscribe) || [],
+        allowAllEvents: !!(appMeta.events && appMeta.events.allowAll)
+      });
+
+      var userCache = null;
+      var userPromise = null;
+      function fetchUser() {
+        if (!requiresLogin) return Promise.resolve(null);
+        if (userCache) return Promise.resolve(userCache);
+        if (userPromise) return userPromise;
+        var headers = {};
+        if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+        userPromise = fetch('/api/me', { credentials: 'same-origin', headers: headers })
+          .then(function (resp) {
+            if (!resp.ok) throw new Error('not_authenticated');
+            return resp.json();
+          })
+          .then(function (data) {
+            userCache = data;
+            return data;
+          })
+          .catch(function () { return null; })
+          .finally(function () {
+            if (!userCache) userPromise = null;
+          });
+        return userPromise;
+      }
+
+      function parseCtxFromUrl() {
+        try {
+          var url = new URL(window.location.href);
+          var type = url.searchParams.get('ctx_type');
+          var id = url.searchParams.get('ctx_id');
+          if (type && id) return { type: type, id: parseInt(id, 10) };
+        } catch (_) {}
+        return null;
+      }
+
+      async function resolveContext() {
+        if (!requiresLogin) return null;
+        var explicit = parseCtxFromUrl();
+        if (explicit && explicit.type && explicit.id) return explicit;
+        var me = await fetchUser();
+        if (me && me.user && me.user.id) return { type: 'user', id: me.user.id };
+        if (me && me.id) return { type: 'user', id: me.id };
+        return null;
+      }
+
+      async function resolveUser() {
+        if (!requiresLogin) return null;
+        var me = await fetchUser();
+        return me && me.user ? me.user : me;
+      }
+
+      async function issueToken(appId, ctx, meta) {
+        if (!requiresLogin) return null;
+        if (!appId) return null;
+        try {
+          var headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+          if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+          var resp = await fetch('/api/apps/sso', {
+            method: 'POST',
+            headers: headers,
+            credentials: 'same-origin',
+            body: JSON.stringify({
+              app_id: appId,
+              app_slug: (meta && meta.appSlug) ? meta.appSlug : appMeta.slug,
+              ctx: ctx || null
+            })
+          });
+          if (!resp.ok) return null;
+          var data = await resp.json();
+          return data && data.token ? data.token : null;
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function resolveLoginTarget() {
+        return '/app/public/' + encodeURIComponent(appMeta.slug || '');
+      }
+
+      async function startApp() {
+        var targetUrl = appMeta.runUrl || '';
+        var isRunUrl = targetUrl && targetUrl.indexOf('/app/run/') === 0;
+        if (isRunUrl) {
+          targetUrl += (targetUrl.indexOf('?') === -1 ? '?' : '&') + 'embed=1';
+          if (authToken) {
+            targetUrl += '&token=' + encodeURIComponent(authToken);
+          }
+        }
+        if (requiresLogin) {
+          var me = await fetchUser();
+          var authed = !!me || !!authToken;
+          if (!authed) targetUrl = resolveLoginTarget();
+        }
+        if (targetUrl) {
+          iframe.src = targetUrl;
+        } else {
+          showError('Run URL invalida para o app.');
+        }
+      }
+
+      try {
+        window.WorkzHostBridge.setContextResolver(resolveContext);
+        window.WorkzHostBridge.setUserResolver(resolveUser);
+        window.WorkzHostBridge.setTokenIssuer(issueToken);
+        window.WorkzHostBridge.enable();
+        startApp();
+      } catch (_) {
+        showError('Falha ao iniciar handshake do host.');
+      }
+    })();
+  </script>
+</body>
+</html>

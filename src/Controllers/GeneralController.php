@@ -59,6 +59,7 @@ class GeneralController
         'workz_data.lke' => ['userField' => 'us', 'required' => ['us','pl'], 'allowed' => ['pl','us','dt']],
         'workz_data.hpl_comments' => ['userField' => 'us', 'required' => ['us','pl','ds'], 'allowed' => ['id','pl','us','ds','dt']],
         'workz_data.usg' => ['userField' => 's0', 'required' => ['s0','s1'], 'allowed' => ['s0','s1','dt']],
+        'workz_data.testimonials' => ['userField' => 'author', 'required' => ['author','content','recipient','recipient_type'], 'allowed' => ['author','content','status','recipient','recipient_type','dt']],
     ];
 
     // Used to log CRUD denials triggered by AuthorizationTrait.
@@ -2481,6 +2482,161 @@ class GeneralController
         exit();
     }
 
+    public function publicSearch(): void
+    {
+        header("Content-Type: application/json");
+        $input = json_decode(file_get_contents('php://input'), true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            http_response_code(400);
+            echo json_encode(['message' => 'Invalid JSON input.', 'status' => 'error']);
+            return;
+        }
+
+        $requiredFields = ['db', 'table'];
+        foreach ($requiredFields as $field) {
+            if (empty($input[$field])) {
+                http_response_code(400);
+                echo json_encode(['message' => ucfirst($field) . ' is required.', 'status' => 'error']);
+                return;
+            }
+        }
+
+        $db = $input['db'];
+        $table = $input['table'];
+        $columns = $input['columns'] ?? ['*'];
+        if (!is_array($columns)) { $columns = [$columns]; }
+        $conditions = $input['conditions'] ?? [];
+        $fetchAll = $input['fetchAll'] ?? true;
+        $limit  = isset($input['limit'])  ? (int)$input['limit']  : null;
+        $offset = isset($input['offset']) ? (int)$input['offset'] : null;
+        $order  = isset($input['order'])  ? $input['order']  : null;
+        $distinct = isset($input['distinct']) ? $input['distinct'] : null;
+        $exists = isset($input['exists']) ? $input['exists'] : [];
+
+        $key = $db . '.' . $table;
+        $publicAllowlist = [
+            'workz_data.hpl' => true,
+            'workz_data.lke' => true,
+            'workz_data.hpl_comments' => true,
+            'workz_data.hus' => true,
+            'workz_companies.companies' => true,
+            'workz_companies.teams' => true,
+        ];
+
+        if (!isset($publicAllowlist[$key])) {
+            http_response_code(403);
+            echo json_encode(['message' => 'Tabela não permitida', 'status' => 'error']);
+            return;
+        }
+
+        if ($key === 'workz_data.hus') {
+            if (!is_array($conditions)) { $conditions = []; }
+            if (!array_key_exists('st', $conditions)) {
+                $conditions['st'] = 1;
+            }
+            if ((int)($conditions['st'] ?? 0) !== 1) {
+                http_response_code(400);
+                echo json_encode(['message' => 'Condição st inválida.', 'status' => 'error']);
+                return;
+            }
+
+            foreach ($conditions as $condKey => $_val) {
+                if (!in_array($condKey, ['id','st'], true)) {
+                    http_response_code(400);
+                    echo json_encode(['message' => 'Condições não permitidas.', 'status' => 'error']);
+                    return;
+                }
+            }
+
+            $allowedCols = ['id','tt','im','feed_privacy','page_privacy'];
+            if (empty($columns) || in_array('*', $columns, true)) {
+                $columns = $allowedCols;
+            } else {
+                foreach ($columns as $col) {
+                    if (!in_array($col, $allowedCols, true)) {
+                        http_response_code(403);
+                        echo json_encode(['message' => 'Colunas não permitidas', 'status' => 'error']);
+                        return;
+                    }
+                }
+            }
+
+            $idCond = $conditions['id'] ?? null;
+            if ($idCond === null) {
+                http_response_code(400);
+                echo json_encode(['message' => 'Condição id é obrigatória.', 'status' => 'error']);
+                return;
+            }
+            if (is_array($idCond)) {
+                $op = strtoupper((string)($idCond['op'] ?? ''));
+                $values = $idCond['value'] ?? null;
+                if ($op !== 'IN' || !is_array($values) || count($values) > 200) {
+                    http_response_code(400);
+                    echo json_encode(['message' => 'Condição id inválida.', 'status' => 'error']);
+                    return;
+                }
+                foreach ($values as $v) {
+                    if (!is_numeric($v)) {
+                        http_response_code(400);
+                        echo json_encode(['message' => 'Condição id inválida.', 'status' => 'error']);
+                        return;
+                    }
+                }
+            } elseif (!is_numeric($idCond)) {
+                http_response_code(400);
+                echo json_encode(['message' => 'Condição id inválida.', 'status' => 'error']);
+                return;
+            }
+        } else {
+            if ($key === 'workz_data.hpl') {
+                if (!is_array($conditions)) { $conditions = []; }
+                $conditions['post_privacy'] = ['op' => '>=', 'value' => 3];
+                $exists = [[
+                    'db' => 'workz_data',
+                    'table' => 'hus',
+                    'local' => 'us',
+                    'remote' => 'id',
+                    'conditions' => ['st' => 1, 'feed_privacy' => 3, 'page_privacy' => 1],
+                ]];
+            }
+
+            $columns = $this->normalizeReadColumns('search', $db, $table, $columns);
+            $this->enforceCrudAuthorization(null, 'search', $db, $table, $conditions, $conditions, null, null, is_array($columns) ? $columns : null, is_array($exists) ? $exists : null);
+        }
+
+        $results = $this->generalModel->search($db, $table, $columns, $conditions, $fetchAll, $limit, $offset, $order, $distinct, $exists);
+
+        if ($results === false && $fetchAll === false) {
+            http_response_code(200);
+            echo json_encode([
+                'message' => 'No record found.',
+                'status' => 'success',
+                'data' => null,
+                'pagination' => [ 'limit' => $limit, 'offset' => $offset ]
+            ]);
+            exit();
+        }
+
+        if ($results !== false) {
+            http_response_code(200);
+            echo json_encode([
+                'message' => 'Records retrieved successfully!',
+                'status' => 'success',
+                'data' => $results,
+                'pagination' => [
+                    'limit'  => $limit,
+                    'offset' => $offset
+                ]
+            ]);
+        } else {
+            http_response_code(500);
+            echo json_encode(['message' => 'Failed to retrieve records.', 'status' => 'error']);
+        }
+
+        exit();
+    }
+
     public function count(?object $payload = null): void
     {
         header("Content-Type: application/json");
@@ -2640,13 +2796,30 @@ class GeneralController
             'teams' => 'teams'
         ];
 
-        $rootDir = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'public' . DIRECTORY_SEPARATOR . 'images';
+        $projectRoot = dirname(__DIR__, 3);
+        $publicDir = $projectRoot . DIRECTORY_SEPARATOR . 'public';
+        if (!is_dir($publicDir)) {
+            $projectRoot = dirname(__DIR__, 2);
+            $publicDir = $projectRoot . DIRECTORY_SEPARATOR . 'public';
+        }
+        $rootDir = $publicDir . DIRECTORY_SEPARATOR . 'images';
         $targetDir = $rootDir . DIRECTORY_SEPARATOR . $subDirs[$entityType];
+        $relativeBase = '/images';
 
         if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true)) {
-            http_response_code(500);
-            echo json_encode(['status' => 'error', 'message' => 'Não foi possível preparar o diretório de imagens.']);
-            return;
+            $targetDir = null;
+        }
+
+        if (!$targetDir || !is_writable($targetDir)) {
+            $fallbackRoot = $publicDir . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'images';
+            $fallbackDir = $fallbackRoot . DIRECTORY_SEPARATOR . $subDirs[$entityType];
+            if (!is_dir($fallbackDir) && !mkdir($fallbackDir, 0755, true)) {
+                http_response_code(500);
+                echo json_encode(['status' => 'error', 'message' => 'Não foi possível preparar o diretório de imagens.']);
+                return;
+            }
+            $targetDir = $fallbackDir;
+            $relativeBase = '/uploads/images';
         }
 
         $extension = $allowedMimes[$mime];
@@ -2659,7 +2832,7 @@ class GeneralController
             return;
         }
 
-        $relativePath = '/images/' . $subDirs[$entityType] . '/' . $filename;
+        $relativePath = $relativeBase . '/' . $subDirs[$entityType] . '/' . $filename;
 
         $mapping = [
             'people' => ['db' => 'workz_data', 'table' => 'hus'],

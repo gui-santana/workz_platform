@@ -8,6 +8,7 @@ use Workz\Platform\Models\General;
 use Workz\Platform\Core\StorageManager;
 use Firebase\JWT\JWT;
 use Workz\Platform\Middleware\AuthMiddleware;
+use Workz\Platform\Services\ManifestNormalizer;
 use Workz\Platform\Controllers\Traits\AuthorizationTrait;
 
 class AppsController
@@ -20,6 +21,18 @@ class AppsController
     public function __construct()
     {
         $this->generalModel = new General();
+    }
+
+    private function hasColumn(string $table, string $column): bool
+    {
+        try {
+            $pdo = \Workz\Platform\Core\Database::getInstance('workz_apps');
+            $quoted = $pdo->quote($column);
+            $stmt = $pdo->query("SHOW COLUMNS FROM `{$table}` LIKE {$quoted}");
+            return (bool)$stmt->fetch();
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     private function getUserBusinessIds(int $userId): array
@@ -153,9 +166,13 @@ class AppsController
         if ($slug === '') {
             return null;
         }
+        $columnsBase = ['id','tt','slug','ds','im','color','app_type','storage_type','version','scopes','access_level','publisher','vl','entity_type','st'];
+        if ($this->hasColumn('apps', 'manifest_json')) {
+            $columnsBase[] = 'manifest_json';
+        }
         $columns = $withCode
             ? ['*']
-            : ['id','tt','slug','ds','im','color','app_type','storage_type','version','scopes','access_level','publisher','vl','entity_type','st'];
+            : $columnsBase;
         $app = $this->generalModel->search('workz_apps', 'apps', $columns, ['slug' => $slug], false);
         if (!$app && !$withCode) {
             $app = $this->generalModel->search('workz_apps', 'apps', ['*'], ['slug' => $slug], false);
@@ -168,9 +185,13 @@ class AppsController
         if ($appId <= 0) {
             return null;
         }
+        $columnsBase = ['id','tt','slug','ds','im','color','app_type','storage_type','version','scopes','access_level','publisher','vl','entity_type','st'];
+        if ($this->hasColumn('apps', 'manifest_json')) {
+            $columnsBase[] = 'manifest_json';
+        }
         $columns = $withCode
             ? ['*']
-            : ['id','tt','slug','ds','im','color','app_type','storage_type','version','scopes','access_level','publisher','vl','entity_type','st'];
+            : $columnsBase;
         $app = $this->generalModel->search('workz_apps', 'apps', $columns, ['id' => $appId], false);
         if (!$app && !$withCode) {
             $app = $this->generalModel->search('workz_apps', 'apps', ['*'], ['id' => $appId], false);
@@ -270,12 +291,85 @@ class AppsController
 
     private function resolveWorkzManifest(array $app): array
     {
-        $base = $this->buildWorkzManifestFromApp($app);
         $provided = $this->coerceManifestPayload($app['manifest_json'] ?? null);
-        if (!$provided) {
-            return $base;
+        $pipe = is_array($provided) ? $provided : [];
+        $appType = strtolower((string)($app['app_type'] ?? 'javascript'));
+        return ManifestNormalizer::buildFromPipe($pipe, $appType, $_SERVER['HTTP_HOST'] ?? null);
+    }
+
+    private function normalizeProxySources($sources): array
+    {
+        if (is_string($sources)) {
+            $sources = preg_split("/\r\n|\n|\r/", $sources) ?: [];
         }
-        return array_replace_recursive($base, $provided);
+        if (!is_array($sources)) {
+            return [];
+        }
+        $out = [];
+        foreach ($sources as $src) {
+            if (is_array($src) || is_object($src)) {
+                continue;
+            }
+            $val = trim((string)$src);
+            if ($val === '') continue;
+            $out[] = $val;
+        }
+        return array_values(array_unique($out));
+    }
+
+    private function isProxyUrlAllowed(string $url, array $sources): bool
+    {
+        $url = trim($url);
+        if ($url === '') return false;
+        $parsed = parse_url($url);
+        if (!$parsed || empty($parsed['scheme']) || empty($parsed['host'])) return false;
+        $scheme = strtolower($parsed['scheme']);
+        if ($scheme !== 'http' && $scheme !== 'https') return false;
+        $host = strtolower($parsed['host']);
+        $port = isset($parsed['port']) ? ':' . $parsed['port'] : '';
+        $origin = $scheme . '://' . $host . $port;
+
+        foreach ($sources as $srcRaw) {
+            $src = trim((string)$srcRaw);
+            if ($src === '') continue;
+            if (str_ends_with($src, '*')) {
+                $prefix = rtrim(substr($src, 0, -1));
+                if ($prefix !== '' && str_starts_with($url, $prefix)) return true;
+                continue;
+            }
+            if (strpos($src, '://') === false) {
+                $hostOnly = strtolower($src);
+                if ($hostOnly === $host) return true;
+                continue;
+            }
+            $srcParsed = parse_url($src);
+            if (!$srcParsed || empty($srcParsed['host'])) continue;
+            $srcScheme = strtolower($srcParsed['scheme'] ?? 'https');
+            $srcHost = strtolower($srcParsed['host']);
+            $srcPort = isset($srcParsed['port']) ? ':' . $srcParsed['port'] : '';
+            $srcOrigin = $srcScheme . '://' . $srcHost . $srcPort;
+            $srcPath = $srcParsed['path'] ?? '';
+            if ($srcPath && $srcPath !== '/') {
+                if (str_starts_with($url, rtrim($src, '/'))) return true;
+                continue;
+            }
+            if ($origin === $srcOrigin) return true;
+        }
+        return false;
+    }
+
+    private function extractHeaderValue(string $headersRaw, string $headerName): ?string
+    {
+        $pattern = '/^' . preg_quote($headerName, '/') . ':\s*(.+)$/im';
+        if (preg_match($pattern, $headersRaw, $m)) {
+            return trim($m[1]);
+        }
+        return null;
+    }
+
+    private function extractContentType(string $headersRaw): ?string
+    {
+        return $this->extractHeaderValue($headersRaw, 'content-type');
     }
 
     private function renderEmbedHtml(array $app): ?string
@@ -340,6 +434,60 @@ class AppsController
             '{{APP_CONTENT}}' => $appContent,
             '{{FLUTTER_WEB_SCRIPTS}}' => '',
             '{{APP_MANIFEST}}' => $manifestJson,
+        ];
+
+        return str_replace(array_keys($replacements), array_values($replacements), $tpl);
+    }
+
+    private function renderShellHtml(array $app): ?string
+    {
+        $templatePath = dirname(__DIR__, 2) . '/public/apps/shell.html';
+        $tpl = @file_get_contents($templatePath);
+        if ($tpl === false) {
+            return null;
+        }
+
+        $name = $this->escapeTemplateValue((string)($app['tt'] ?? 'Workz App'));
+        $slug = $this->escapeTemplateValue((string)($app['slug'] ?? 'workz-app'));
+        $accessLevel = (int)($app['access_level'] ?? 1);
+        $runUrl = ($accessLevel > 0) ? '/app/run/' . $slug : '/app/public/' . $slug;
+        $requiresLogin = $accessLevel > 0;
+
+        $manifestPayload = $this->resolveWorkzManifest($app);
+        $allowedOrigins = [];
+        if (isset($manifestPayload['sandbox']['postMessage']['allowedOrigins']) &&
+            is_array($manifestPayload['sandbox']['postMessage']['allowedOrigins'])) {
+            $allowedOrigins = array_values(array_filter($manifestPayload['sandbox']['postMessage']['allowedOrigins']));
+        }
+
+        $events = $manifestPayload['capabilities']['events'] ?? [];
+        $eventsPayload = [
+            'enabled' => (bool)($events['enabled'] ?? false),
+            'allowAll' => (bool)($events['allowAll'] ?? false),
+            'publish' => array_values(is_array($events['publish'] ?? null) ? $events['publish'] : []),
+            'subscribe' => array_values(is_array($events['subscribe'] ?? null) ? $events['subscribe'] : []),
+        ];
+
+        $allowedOriginsJson = json_encode($allowedOrigins, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $eventsJson = json_encode($eventsPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if (!is_string($allowedOriginsJson) || $allowedOriginsJson === '') {
+            $allowedOriginsJson = '[]';
+        }
+        if (!is_string($eventsJson) || $eventsJson === '') {
+            $eventsJson = '{"enabled":false,"allowAll":false,"publish":[],"subscribe":[]}';
+        }
+        $allowedOriginsJson = str_replace('</script>', '<\\/script>', $allowedOriginsJson);
+        $eventsJson = str_replace('</script>', '<\\/script>', $eventsJson);
+
+        $replacements = [
+            '{{APP_ID}}' => (string)($app['id'] ?? 0),
+            '{{APP_NAME}}' => $name,
+            '{{APP_SLUG}}' => $slug,
+            '{{APP_RUN_URL}}' => $this->escapeTemplateValue($runUrl),
+            '{{APP_ACCESS_LEVEL}}' => (string)$accessLevel,
+            '{{APP_REQUIRES_LOGIN}}' => $requiresLogin ? 'true' : 'false',
+            '{{APP_ALLOWED_ORIGINS}}' => $allowedOriginsJson,
+            '{{APP_EVENTS}}' => $eventsJson,
         ];
 
         return str_replace(array_keys($replacements), array_values($replacements), $tpl);
@@ -545,7 +693,7 @@ class AppsController
 
     /**
      * POST /api/apps/sso
-     * Body JSON: { app_id: number, ctx: { type: 'user'|'business'|'team', id: number } }
+     * Body JSON: { app_id: number, app_slug?: string, ctx: { type: 'user'|'business'|'team', id: number } }
      * Retorna token curto (HS256 por enquanto) com claims: sub, aud, ctx, scopes (placeholder).
      * Protegido por AuthMiddleware.
      */
@@ -554,11 +702,36 @@ class AppsController
         header("Content-Type: application/json");
         $input = json_decode(file_get_contents('php://input'), true) ?: [];
         $appId = (int)($input['app_id'] ?? 0);
+        $appSlug = trim((string)($input['app_slug'] ?? ''));
         $ctx   = $input['ctx'] ?? null; // ['type' => ..., 'id' => ...]
 
-        if ($appId <= 0) { http_response_code(400); echo json_encode(['error' => 'Parâmetro app_id é obrigatório.']); return; }
+        if ($appId <= 0 && $appSlug === '') {
+            http_response_code(400);
+            echo json_encode(['error' => 'Parâmetro app_id ou app_slug é obrigatório.']);
+            return;
+        }
         $userId = (int)($auth->sub ?? 0);
         if ($userId <= 0) { http_response_code(401); echo json_encode(['error' => 'Unauthorized']); return; }
+
+        // Resolver app via id (preferencial) ou slug (fallback)
+        $app = null;
+        if ($appId > 0) {
+            $app = $this->getAppById($appId, true);
+        }
+        if (!$app && $appSlug !== '') {
+            $app = $this->getAppBySlug($appSlug, true);
+            if (is_array($app) && isset($app['id'])) {
+                $appId = (int)$app['id'];
+            }
+        }
+        if (!$app) {
+            echo json_encode([
+                'success' => false,
+                'error' => 'App não encontrado.',
+                'code' => 'app_not_found'
+            ]);
+            return;
+        }
 
         $ctxType = is_array($ctx) ? ($ctx['type'] ?? 'user') : 'user';
         $ctxId = is_array($ctx) ? (int)($ctx['id'] ?? 0) : 0;
@@ -581,23 +754,6 @@ class AppsController
         if (!$allowed) {
             http_response_code(403);
             echo json_encode(['error' => 'Sem permissão', 'reason' => 'forbidden']);
-            return;
-        }
-
-        // Buscar dados do app (para manifesto/escopos)
-        $app = $this->generalModel->search(
-            'workz_apps',
-            'apps',
-            ['id','tt','slug','app_type','entity_type','vl','scopes','color','manifest_json'],
-            ['id' => $appId],
-            false
-        );
-        if (!$app) {
-            echo json_encode([
-                'success' => false,
-                'error' => 'App não encontrado.',
-                'code' => 'app_not_found'
-            ]);
             return;
         }
 
@@ -648,6 +804,194 @@ class AppsController
     }
 
     /**
+     * POST /api/apps/proxy
+     * Body JSON: { app_id?: number, app_slug?: string, url: string, method?: 'GET'|'POST', headers?: object, body?: any }
+     * Encaminha a requisição para uma fonte permitida no manifesto (capabilities.proxy.sources).
+     */
+    public function proxy(object $auth): void
+    {
+        $input = json_decode(file_get_contents('php://input'), true) ?: [];
+        $url = trim((string)($input['url'] ?? ($_GET['url'] ?? '')));
+        if ($url === '') {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'url_required']);
+            return;
+        }
+
+        $appId = (int)($input['app_id'] ?? ($_GET['app_id'] ?? 0));
+        $appSlug = trim((string)($input['app_slug'] ?? ($_GET['app_slug'] ?? '')));
+        if ($appId <= 0 && $appSlug === '') {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'app_id_or_slug_required']);
+            return;
+        }
+
+        $userId = (int)($auth->sub ?? 0);
+        if ($userId <= 0) {
+            http_response_code(401);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'unauthorized']);
+            return;
+        }
+
+        $app = null;
+        if ($appId > 0) {
+            $app = $this->getAppById($appId, true);
+        }
+        if (!$app && $appSlug !== '') {
+            $app = $this->getAppBySlug($appSlug, true);
+            if (is_array($app) && isset($app['id'])) {
+                $appId = (int)$app['id'];
+            }
+        }
+        if (!$app) {
+            http_response_code(404);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'app_not_found']);
+            return;
+        }
+
+        $authResult = $this->getAuthorizationService()->can($this->currentUserFromPayload($auth), 'app.read', ['ap' => $appId]);
+        $allowed = $authResult->allowed;
+        if (!$allowed) {
+            $allowed = $this->userCanAccessApp($userId, $appId);
+        }
+        if (!$allowed) {
+            http_response_code(403);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'forbidden']);
+            return;
+        }
+
+        $manifest = $this->resolveWorkzManifest($app);
+        $sources = $this->normalizeProxySources($manifest['capabilities']['proxy']['sources'] ?? []);
+        if (empty($sources)) {
+            http_response_code(403);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'proxy_not_allowed']);
+            return;
+        }
+        if (!$this->isProxyUrlAllowed($url, $sources)) {
+            http_response_code(403);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'source_not_allowed']);
+            return;
+        }
+
+        $method = strtoupper((string)($input['method'] ?? 'GET'));
+        if ($method !== 'GET' && $method !== 'POST') {
+            http_response_code(400);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'method_not_allowed']);
+            return;
+        }
+
+        $headersIn = is_array($input['headers'] ?? null) ? $input['headers'] : [];
+        $accept = '';
+        $contentType = '';
+        foreach ($headersIn as $key => $value) {
+            $k = strtolower((string)$key);
+            if ($k === 'accept') $accept = trim((string)$value);
+            if ($k === 'content-type') $contentType = trim((string)$value);
+        }
+
+        $body = $input['body'] ?? null;
+        if (is_array($body) || is_object($body)) {
+            $body = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        } elseif (is_bool($body) || is_numeric($body)) {
+            $body = (string)$body;
+        }
+
+        if (!function_exists('curl_init')) {
+            $headerLines = [];
+            if ($accept !== '') $headerLines[] = 'Accept: ' . $accept;
+            if ($contentType !== '') $headerLines[] = 'Content-Type: ' . $contentType;
+            $context = stream_context_create([
+                'http' => [
+                    'method' => $method,
+                    'timeout' => 30,
+                    'ignore_errors' => true,
+                    'header' => implode("\r\n", $headerLines),
+                    'content' => ($method === 'POST' && $body !== null) ? (string)$body : ''
+                ]
+            ]);
+            $respBody = @file_get_contents($url, false, $context);
+            $headersRaw = isset($http_response_header) && is_array($http_response_header)
+                ? implode("\r\n", $http_response_header)
+                : '';
+            $status = 0;
+            if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
+                $status = (int)$m[1];
+            }
+            if ($respBody === false) {
+                http_response_code(502);
+                header('Content-Type: application/json');
+                echo json_encode(['error' => 'proxy_failed']);
+                return;
+            }
+            $contentTypeOut = $this->extractContentType($headersRaw);
+            $contentDisposition = $this->extractHeaderValue($headersRaw, 'content-disposition');
+            $cacheControl = $this->extractHeaderValue($headersRaw, 'cache-control');
+            if ($contentTypeOut) header('Content-Type: ' . $contentTypeOut);
+            if ($contentDisposition) header('Content-Disposition: ' . $contentDisposition);
+            if ($cacheControl) header('Cache-Control: ' . $cacheControl);
+            header('X-Workz-Proxy: 1');
+            if ($status > 0) http_response_code($status);
+            echo $respBody;
+            return;
+        }
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HEADER, true);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        $curlHeaders = ['User-Agent: WorkzProxy/1.0'];
+        if ($accept !== '') $curlHeaders[] = 'Accept: ' . $accept;
+        if ($contentType !== '') $curlHeaders[] = 'Content-Type: ' . $contentType;
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $curlHeaders);
+        if ($method === 'POST') {
+            curl_setopt($ch, CURLOPT_POST, true);
+            if ($body !== null) {
+                curl_setopt($ch, CURLOPT_POSTFIELDS, (string)$body);
+            }
+        }
+
+        $raw = curl_exec($ch);
+        if ($raw === false) {
+            $err = curl_error($ch);
+            curl_close($ch);
+            http_response_code(502);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'proxy_failed', 'message' => $err]);
+            return;
+        }
+        $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $headerSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        curl_close($ch);
+
+        $headersRaw = substr($raw, 0, $headerSize);
+        $respBody = substr($raw, $headerSize);
+        $contentTypeOut = $this->extractContentType($headersRaw);
+        $contentDisposition = $this->extractHeaderValue($headersRaw, 'content-disposition');
+        $cacheControl = $this->extractHeaderValue($headersRaw, 'cache-control');
+
+        if ($contentTypeOut) header('Content-Type: ' . $contentTypeOut);
+        if ($contentDisposition) header('Content-Disposition: ' . $contentDisposition);
+        if ($cacheControl) header('Cache-Control: ' . $cacheControl);
+        header('X-Workz-Proxy: 1');
+        if ($status > 0) {
+            http_response_code($status);
+        }
+        echo $respBody;
+    }
+
+    /**
      * GET /api/app/run/{slug}
      * Runner autenticado para apps.
      */
@@ -667,6 +1011,25 @@ class AppsController
         if (!$this->userCanAccessApp($userId, $appId)) {
             http_response_code(403);
             echo json_encode(['error' => 'Sem permissão', 'reason' => 'forbidden']);
+            return;
+        }
+
+        $tokenParam = isset($_GET['token']) && is_string($_GET['token']) ? trim($_GET['token']) : '';
+        if ($tokenParam !== '') {
+            @setcookie('jwt_token', $tokenParam, [ 'expires' => time()+86400*30, 'path' => '/', 'secure' => false, 'httponly' => false, 'samesite' => 'Lax' ]);
+        }
+
+        $dest = strtolower((string)($_SERVER['HTTP_SEC_FETCH_DEST'] ?? ''));
+        $mode = strtolower((string)($_SERVER['HTTP_SEC_FETCH_MODE'] ?? ''));
+        $isTopDoc = ($dest === 'document' || $mode === 'navigate');
+        $isIframe = ($dest === 'iframe');
+        $embed = isset($_GET['embed']) && $_GET['embed'] === '1';
+        if ($isTopDoc && !$isIframe && !$embed && $tokenParam === '') {
+            $redirectUrl = '/app/shell/' . $slug;
+            if ($tokenParam !== '') {
+                $redirectUrl .= '?token=' . urlencode($tokenParam);
+            }
+            header('Location: ' . $redirectUrl, true, 302);
             return;
         }
 
@@ -736,12 +1099,13 @@ class AppsController
             echo json_encode(['error' => 'App não encontrado.']);
             return;
         }
-        if (!empty($_GET['token'])) {
+        $hasToken = !empty($_GET['token']) || !empty($_COOKIE['jwt_token']) || !empty($_SERVER['HTTP_AUTHORIZATION']);
+        if ($hasToken) {
             $auth = AuthMiddleware::handle();
             $this->run($auth, $slug);
             return;
         }
-        if ((int)($app['access_level'] ?? 0) === 2) {
+        if ((int)($app['access_level'] ?? 0) > 0) {
             $html = $this->renderLoginHtml($app);
             if ($html !== null) {
                 header('Content-Type: text/html; charset=UTF-8');
@@ -806,6 +1170,30 @@ class AppsController
 
         http_response_code(404);
         echo json_encode(['error' => 'App build indisponível.']);
+    }
+
+    /**
+     * GET /app/shell/{slug}
+     * Shell host (parent) para apps JS via iframe.
+     */
+    public function shell(string $slug): void
+    {
+        $app = $this->getAppBySlug($slug, false);
+        if (!$app || (int)($app['st'] ?? 0) !== 1) {
+            http_response_code(404);
+            echo json_encode(['error' => 'App não encontrado.']);
+            return;
+        }
+
+        $html = $this->renderShellHtml($app);
+        if ($html !== null) {
+            header('Content-Type: text/html; charset=UTF-8');
+            echo $html;
+            return;
+        }
+
+        http_response_code(404);
+        echo json_encode(['error' => 'Shell indisponível.']);
     }
 
     /**

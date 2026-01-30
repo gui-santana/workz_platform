@@ -14,23 +14,56 @@ class AuthController
     private General $generalModel;
     private Google $googleProvider;
     private Azure $microsoftProvider;
+    private string $googleClientId;
+    private string $googleClientSecret;
+    private string $microsoftClientId;
+    private string $microsoftClientSecret;
 
     public function __construct()
     {
         $this->generalModel = new General();
+        $this->googleClientId = $_ENV['GOOGLE_CLIENT_ID'];
+        $this->googleClientSecret = $_ENV['GOOGLE_CLIENT_SECRET'];
+        $this->microsoftClientId = $_ENV['MICROSOFT_CLIENT_ID'];
+        $this->microsoftClientSecret = $_ENV['MICROSOFT_CLIENT_SECRET'];
+    }
 
-        // Configura o provedor do Google com as suas credenciais
-        $this->googleProvider = new Google([            
-            'clientId'     => $_ENV['GOOGLE_CLIENT_ID'],
-            'clientSecret' => $_ENV['GOOGLE_CLIENT_SECRET'],
-            'redirectUri'  => 'http://localhost:9090/api/auth/google/callback',
+    private function getOAuthBaseUrl(): string
+    {
+        $envBase = $_ENV['OAUTH_BASE_URL'] ?? '';
+        if (is_string($envBase) && trim($envBase) !== '') {
+            return rtrim(trim($envBase), '/');
+        }
+
+        $host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? 'localhost';
+        $host = trim(explode(',', (string)$host)[0]);
+        $scheme = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? $_SERVER['REQUEST_SCHEME'] ?? null;
+        if (!$scheme) {
+            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        }
+        return $scheme . '://' . $host;
+    }
+
+    private function getRedirectUri(string $provider): string
+    {
+        return $this->getOAuthBaseUrl() . '/api/auth/' . $provider . '/callback';
+    }
+
+    private function initGoogleProvider(): void
+    {
+        $this->googleProvider = new Google([
+            'clientId'     => $this->googleClientId,
+            'clientSecret' => $this->googleClientSecret,
+            'redirectUri'  => $this->getRedirectUri('google'),
         ]);
+    }
 
-        // Configuração para a Microsoft
+    private function initMicrosoftProvider(): void
+    {
         $this->microsoftProvider = new Azure([
-            'clientId'          => $_ENV['MICROSOFT_CLIENT_ID'],
-            'clientSecret'      => $_ENV['MICROSOFT_CLIENT_SECRET'],
-            'redirectUri'       => 'http://localhost:9090/api/auth/microsoft/callback',
+            'clientId'          => $this->microsoftClientId,
+            'clientSecret'      => $this->microsoftClientSecret,
+            'redirectUri'       => $this->getRedirectUri('microsoft'),
             'scopes'            => ['openid', 'profile', 'email', 'User.Read'],
             'defaultEndPointVersion' => '2.0'
         ]);
@@ -43,6 +76,7 @@ class AuthController
     public function redirectToMicrosoft(): void
     {
         session_start();
+        $this->initMicrosoftProvider();
         // Preserve return URL (where to go after OAuth)
         $returnTo = isset($_GET['return_to']) && is_string($_GET['return_to']) ? $_GET['return_to'] : null;
         if ($returnTo) { $_SESSION['oauth_return_to'] = $returnTo; }
@@ -56,6 +90,7 @@ class AuthController
     {
         header("Content-Type: application/json");
         session_start();
+        $this->initMicrosoftProvider();
 
         if (empty($_GET['state']) || (empty($_SESSION['oauth2state']) || $_GET['state'] !== $_SESSION['oauth2state'])) {
             unset($_SESSION['oauth2state']);
@@ -138,6 +173,7 @@ class AuthController
     public function redirectToGoogle(): void
     {        
         session_start();
+        $this->initGoogleProvider();
         $returnTo = isset($_GET['return_to']) && is_string($_GET['return_to']) ? $_GET['return_to'] : null;
         if ($returnTo) { $_SESSION['oauth_return_to'] = $returnTo; }
         $authUrl = $this->googleProvider->getAuthorizationUrl();
@@ -151,6 +187,7 @@ class AuthController
     {        
         header("Content-Type: application/json");
         session_start();
+        $this->initGoogleProvider();
 
         if (empty($_GET['state']) || (empty($_SESSION['oauth2state']) || $_GET['state'] !== $_SESSION['oauth2state'])) {
             unset($_SESSION['oauth2state']);
@@ -254,6 +291,46 @@ class AuthController
         // Se tudo passou, gera o token
         $this->generateAndSendToken($user, 'local');
     }
+
+    private function isAllowedReturnTo(?string $url): bool
+    {
+        if (!is_string($url) || trim($url) === '') return false;
+
+        $p = parse_url($url);
+        $host = strtolower($p['host'] ?? '');
+        $scheme = strtolower($p['scheme'] ?? '');
+
+        if (!in_array($scheme, ['http','https'], true)) return false;
+
+        // dev
+        if ($host === 'localhost' || preg_match('/^[a-z0-9-]+\.localhost$/i', $host)) {
+            return true;
+        }
+
+        // prod
+        if ($host === 'workz.co' || preg_match('/^[a-z0-9-]+\.workz\.co$/i', $host)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function isHttpsRequest(): bool
+{
+    $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ($_SERVER['REQUEST_SCHEME'] ?? '');
+    if (!$proto && !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') $proto = 'https';
+    return strtolower($proto) === 'https';
+}
+
+    private function cookieDomainForHost(string $host): ?string
+    {
+        $h = strtolower($host);
+
+        if ($h === 'localhost' || preg_match('/\.localhost$/', $h)) return '.localhost';
+        if ($h === 'workz.co' || preg_match('/\.workz\.co$/', $h)) return '.workz.co';
+
+        return null; // se cair aqui, não define domain (cookie host-only)
+    }
     
     private function generateAndSendToken(array $user, string $type = 'local'): void
     {
@@ -280,20 +357,37 @@ class AuthController
             unset($_SESSION['oauth_return_to']);
 
             // Fallback seguro
-            $frontendUrl = 'http://localhost:9090';
+            $frontendUrl = ($_ENV['OAUTH_BASE_URL'] ?? '') ?: 'http://localhost:9090';
 
             // Sanitiza e valida return_to para evitar open redirect
             if (is_string($returnTo)) {
                 $parsed = parse_url($returnTo);
                 $host = $parsed['host'] ?? '';
-                $scheme = $parsed['scheme'] ?? 'http';
-                if (in_array($scheme, ['http','https'], true) && ($host === 'localhost' || preg_match('/^[a-z0-9-]+\.localhost$/i', $host))) {
+                $scheme = $parsed['scheme'] ?? 'http';                
+                if ($this->isAllowedReturnTo($returnTo)) {
                     $frontendUrl = $returnTo;
                 }
             }
 
             // Seta cookie no domínio base (quando possível)
-            @setcookie('jwt_token', $jwt, [ 'expires' => time()+86400*30, 'path' => '/', 'domain' => '.localhost', 'secure' => false, 'httponly' => false, 'samesite' => 'Lax' ]);
+            $host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? 'localhost';
+            $host = trim(explode(',', (string)$host)[0]);
+
+            $cookieDomain = $this->cookieDomainForHost($host);
+            $secure = $this->isHttpsRequest();
+
+            $cookieOptions = [
+                'expires'  => time() + 86400*30,
+                'path'     => '/',
+                'secure'   => $secure,
+                'httponly' => false,   // se seu frontend precisa ler o token
+                'samesite' => 'Lax',
+            ];
+
+            // só seta domain se reconheceu
+            if ($cookieDomain) $cookieOptions['domain'] = $cookieDomain;
+
+            @setcookie('jwt_token', $jwt, $cookieOptions);
 
             // Anexa token na URL de retorno
             $sep = (strpos($frontendUrl, '?') === false) ? '?' : '&';

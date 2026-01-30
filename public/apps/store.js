@@ -89,6 +89,55 @@ window.StoreApp = (function () {
   }
 
   // Helpers DOM
+  function renderFatal(message) {
+    const root = document.getElementById('app-root');
+    if (!root) return;
+    root.innerHTML = `
+      <div style="padding:12px;border-radius:12px;background:#fff4ed;color:#b45309;font-size:13px;">
+        ${message || 'Falha ao iniciar o aplicativo.'}
+      </div>
+    `;
+  }
+
+  async function ensureSdkReady() {
+    if (!window.WorkzSDK || typeof WorkzSDK.init !== 'function') {
+      return { ok: false, reason: 'sdk_missing' };
+    }
+    if (!WorkzSDK.isReady || !WorkzSDK.isReady()) {
+      try {
+        const appConfig = window.WorkzAppConfig || {};
+        const mode = (window !== window.top) ? 'embed' : 'standalone';
+        await WorkzSDK.init({
+          mode,
+          appConfig,
+          manifest: appConfig.manifest || appConfig.workzManifest || null
+        });
+      } catch (err) {
+        return { ok: false, reason: 'sdk_init_failed', error: err };
+      }
+    }
+    if (WorkzSDK.isReady && !WorkzSDK.isReady() && typeof WorkzSDK.on === 'function') {
+      await new Promise(resolve => {
+        let done = false;
+        const handler = () => {
+          if (done) return;
+          done = true;
+          if (typeof WorkzSDK.off === 'function') WorkzSDK.off('sdk:ready', handler);
+          resolve();
+        };
+        WorkzSDK.on('sdk:ready', handler);
+        setTimeout(() => {
+          if (done) return;
+          done = true;
+          if (typeof WorkzSDK.off === 'function') WorkzSDK.off('sdk:ready', handler);
+          resolve();
+        }, 6000);
+      });
+    }
+    const ready = !WorkzSDK.isReady || WorkzSDK.isReady();
+    return { ok: ready, reason: ready ? 'ok' : 'sdk_not_ready' };
+  }
+
   function renderShell() {
     const root = document.getElementById('app-root');
     if (!root) {
@@ -211,9 +260,6 @@ window.StoreApp = (function () {
       let url = appData?.embed_url || appData?.src || null;
       if (!url) return;
 
-      if (sso?.token) {
-        url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(sso.token);
-      }
       window.open(url, '_blank');
     } catch (_) { /* ignore */ }
   }
@@ -494,6 +540,15 @@ window.StoreApp = (function () {
       installedSet.delete(String(app.id));
     }
 
+    const businessPicker = (isBusinessCtx && managedBusinesses.length) ? `
+      <div style="display:grid;gap:6px;max-width:360px;margin:6px 0 10px 0;">
+        <label style="font-size:12px;color:#666;">Negócio</label>
+        <select id="free-biz-select" style="padding:8px 10px;border:1px solid #ddd;border-radius:12px;">
+          ${managedBusinesses.map(b => `<option value="${b.id}" ${Number(selectedBusinessId)===Number(b.id)?'selected':''}>${b.name}</option>`).join('')}
+        </select>
+      </div>
+    ` : '';
+
     mount.innerHTML = `
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;">
         <button data-action="back-list" style="padding:6px 10px;border-radius:10px;border:1px solid #ddd;background:#fafafa;">← Voltar</button>
@@ -508,6 +563,7 @@ window.StoreApp = (function () {
             ${isBusinessCtx ? '<span style="background:#f1f1f1;border-radius:10px;padding:3px 8px;font-size:12px;color:#444;">Instalar para: Negócio</span>' : ''}
           </div>
           <p style="margin:10px 0 12px 0;color:#444;white-space:pre-wrap;">${desc}</p>
+          ${!hasPrice ? businessPicker : ''}
           <div id="primary-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"></div>
           <div id="purchase-area" style="margin-top:14px;"></div>
         </div>
@@ -527,13 +583,21 @@ window.StoreApp = (function () {
     });
 
     // Instalação gratuita
+    if (!hasPrice && isBusinessCtx) {
+      const freeBizSelect = mount.querySelector('#free-biz-select');
+      freeBizSelect?.addEventListener('change', (ev) => {
+        const newBizId = Number(ev.target.value || 0);
+        if (newBizId) selectedBusinessId = newBizId;
+      });
+    }
+
     mount.querySelector('[data-action="install-free"]')?.addEventListener('click', async (ev) => {
       const id = Number(ev.currentTarget?.dataset?.appId || 0);
       if (!userId || !id) { alert('Faça login para instalar.'); return; }
-      const today = new Date().toISOString().slice(0,10);
+      if (isBusinessCtx && !selectedBusinessId) { alert('Selecione um negócio válido para instalar.'); return; }
       const data = isBusinessCtx
-        ? { em: Number(ctx.id), ap: id, st: 1, subscription: 0, start_date: today }
-        : { us: userId, ap: id, st: 1, subscription: 0, start_date: today };
+        ? { em: Number(selectedBusinessId), ap: id, st: 1 }
+        : { us: userId, ap: id };
       const r = await WorkzSDK.apiPost('/insert', { db: 'workz_apps', table: 'gapp', data });
       if (!r?.error) {
         installedSet.add(String(id));
@@ -614,10 +678,10 @@ window.StoreApp = (function () {
           btn.addEventListener('click', async (ev) => {
             const id = Number(ev.currentTarget?.dataset?.appId || 0);
             if (!userId || !id) { alert('Faça login para instalar.'); return; }
-            const today = new Date().toISOString().slice(0,10);
+            if (isBusinessCtx && !selectedBusinessId) { alert('Selecione um negócio válido para instalar.'); return; }
             const data = isBusinessCtx
-              ? { em: Number(ctx.id), ap: id, st: 1, subscription: 0, start_date: today }
-              : { us: userId, ap: id, st: 1, subscription: 0, start_date: today };
+              ? { em: Number(selectedBusinessId), ap: id, st: 1 }
+              : { us: userId, ap: id };
             const r = await WorkzSDK.apiPost('/insert', { db: 'workz_apps', table: 'gapp', data });
             if (!r?.error) {
               installedSet.add(String(id));
@@ -649,6 +713,25 @@ window.StoreApp = (function () {
   return {
     async bootstrap() {
       renderShell();
+      const sdk = await ensureSdkReady();
+      if (!sdk.ok) {
+        renderFatal('SDK não inicializado. Verifique o manifesto e tente novamente.');
+        return;
+      }
+      if (WorkzSDK.manifestValidation && WorkzSDK.manifestValidation.ok === false) {
+        const errs = Array.isArray(WorkzSDK.manifestValidation.errors)
+          ? WorkzSDK.manifestValidation.errors.join('; ')
+          : 'Manifesto inválido.';
+        renderFatal(`Manifesto inválido: ${errs}`);
+        return;
+      }
+      if (WorkzSDK.contextAllowed === false && WorkzSDK.contextDenyReason) {
+        const reason = WorkzSDK.contextDenyReason || {};
+        const required = reason.required || 'desconhecido';
+        const received = reason.received || 'desconhecido';
+        renderFatal(`Contexto não permitido (necessário: ${required}, recebido: ${received}).`);
+        return;
+      }
       document.getElementById('store-content')?.addEventListener('click', onListClick);
       document.getElementById('store-search')?.addEventListener('input', renderList);
       await resolveUserAndContext();

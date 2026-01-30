@@ -68,6 +68,7 @@ $router->add('GET', '/api/auth/microsoft/callback', [AuthController::class, 'han
 $router->add('POST', '/api/insert', [GeneralController::class, 'insert'], [AuthMiddleware::class, 'handle']);
 $router->add('POST', '/api/update', [GeneralController::class, 'update'], [AuthMiddleware::class, 'handle']);
 $router->add('POST', '/api/search', [GeneralController::class, 'search'], [AuthMiddleware::class, 'handle']);
+$router->add('POST', '/api/public/search', [GeneralController::class, 'publicSearch']);
 $router->add('POST', '/api/count', [GeneralController::class, 'count'], [AuthMiddleware::class, 'handle']);
 $router->add('POST', '/api/delete', [GeneralController::class, 'delete'], [AuthMiddleware::class, 'handle']);
 

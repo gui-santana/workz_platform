@@ -152,7 +152,9 @@ class AppStorageController
             error_log("KV Set iniciado");
 
             $appId = $this->getAppIdFromToken($auth);
-            error_log("App ID: " . $appId);
+            $aud = $auth->aud ?? '';
+            $sub = $auth->sub ?? '';
+            error_log("KV Set auth: sub={$sub} aud={$aud} app_id={$appId}");
 
             $input = json_decode(file_get_contents('php://input'), true) ?: [];
             error_log("Input recebido: " . json_encode($input));
@@ -163,7 +165,15 @@ class AppStorageController
             $value = $input['value'] ?? null;
             $ttl = $input['ttl'] ?? null;
 
+            $this->authzDenyLogContext = [
+                'action' => 'app.create',
+                'app_id' => $appId,
+                'scope_type' => $scopeType,
+                'scope_id' => $scopeId,
+                'user_id' => (int)($auth->sub ?? 0),
+            ];
             $this->enforceStorageAccess($auth, 'app.create', $scopeType, $scopeId, $appId);
+            error_log("KV Set authorization ok");
 
             error_log("Dados processados - scopeType: $scopeType, scopeId: $scopeId, key: $key");
 
@@ -199,8 +209,31 @@ class AppStorageController
 
             error_log("Dados para inserir: " . json_encode($data));
 
-            // PULAR UPDATE - ir direto para INSERT para debug
-            error_log("Pulando UPDATE, indo direto para INSERT");
+            // Tentar UPDATE primeiro para evitar duplicidade
+            $updated = $this->generalModel->update(
+                'workz_apps',
+                'storage_kv',
+                [
+                    'value' => $data['value'],
+                    'ttl' => $data['ttl'],
+                ],
+                [
+                    'app_id' => $appId,
+                    'scope_type' => $scopeType,
+                    'scope_id' => $scopeId,
+                    'key' => $key
+                ]
+            );
+            error_log("Update resultado: " . ($updated ? 'true' : 'false'));
+
+            if ($updated) {
+                echo json_encode([
+                    'success' => true,
+                    'key' => $key,
+                    'message' => 'Valor atualizado com sucesso'
+                ]);
+                return;
+            }
 
             // Inserir novo registro
             error_log("Tentando inserir novo registro");

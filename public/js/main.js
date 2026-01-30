@@ -149,6 +149,19 @@ document.addEventListener('DOMContentLoaded', () => {
     let listObserver = null;
     let feedVideoObserver = null;
     let feedPlaybackObserver = null;
+    let feedRenderedPostIds = new Set();
+    let feedEnhanceQueue = [];
+    let feedEnhanceRunning = false;
+    let feedLongPressTimer = null;
+    let feedLongPressTriggered = false;
+    let feedLongPressIgnoreUntil = 0;
+    let feedLongPressStartX = 0;
+    let feedLongPressStartY = 0;
+    let feedLongPressPointerId = null;
+    let feedLongPressVideo = null;
+    let feedLongPressWasPlaying = false;
+    const FEED_LONGPRESS_DELAY = 350;
+    const FEED_LONGPRESS_MOVE_TOLERANCE = 8;
     const FEED_AUDIO_STORAGE_KEY = 'workz.feed.audio';
     let feedAudioEnabled = false;
     let feedAudioUnlocked = false;
@@ -361,7 +374,11 @@ document.addEventListener('DOMContentLoaded', () => {
         setMount(el) { this.mount = el; },
         current() { return this.stack[this.stack.length - 1]; },
         prev() { return this.stack[this.stack.length - 2]; },
-        resetRoot(data) { this.stack = [{ view: 'root', title: 'Ajustes', payload: { data }, type: 'root' }]; this.render(); },
+        resetRoot(data, options = {}) {
+            const { silent = false } = options || {};
+            this.stack = [{ view: 'root', title: 'Ajustes', payload: { data }, type: 'root' }];
+            if (!silent) this.render();
+        },
         push(state) { this.stack.push(state); this.render(); },
         back() { if (this.stack.length > 1) { this.stack.pop(); this.render(); } else { this.resetRoot(currentUserData); } },
         async render() {
@@ -1651,6 +1668,17 @@ document.addEventListener('DOMContentLoaded', () => {
         reader.readAsDataURL(file);
     }
 
+    function getImageCropperTitle(entityContext = {}) {
+        if (entityContext?.imageType === 'bk') return 'Ajustar imagem de capa';
+        if (entityContext?.entityType === 'people' || entityContext?.view === ENTITY.PROFILE) {
+            return 'Ajustar imagem de perfil';
+        }
+        if (entityContext?.entityType === 'teams' || entityContext?.view === ENTITY.TEAM) {
+            return 'Ajustar imagem da equipe';
+        }
+        return 'Ajustar imagem da página';
+    }
+
     function openImageCropperView(cropPayload) {
         if (!cropPayload?.entityContext?.entityId) {
             resetImageUploadState();
@@ -1659,7 +1687,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         SidebarNav.push({
             view: 'image-crop',
-            title: 'Ajustar imagem de capa',
+            title: getImageCropperTitle(cropPayload.entityContext),
             payload: {
                 data: cropPayload.entityContext.data,
                 type: cropPayload.entityContext.view,
@@ -2515,7 +2543,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
 
         SidebarNav.push({
             view: 'image-crop',
-            title: 'Ajustar imagem de capa',
+            title: getImageCropperTitle(cropPayload.entityContext),
             payload: {
                 data: cropPayload.entityContext.data,
                 type: cropPayload.entityContext.view,
@@ -3533,22 +3561,26 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
 					</svg>
 					<div class="w-full p-8 bg-gray-100 content-center">
 						<div class="text-center">
-							<a  class=""><a>Workz!</a> © 2025</a><a class="gray"> (Stable 1.0.0)</a>
+							<a  class=""><a>Workz!</a> © 2026</a><a class="gray"></a>
 							<p><small class="" target="_blank">Desenvolvido por <a href="/profile/guisantana" target="_blank" class="font-semibold">Guilherme Santana</a></small></p>
 						</div>
 					</div>
 				</div>
 				<div class="absolute h-full w-full m-0 p-0 z-0">
-					<div class="h-full max-w-screen-xl mx-auto m-0 p-8 grid grid-rows-12 grid-cols-12">
-						<div class="w-full row-span-1 col-span-12 content-center">
-							<img title="Workz!" src="/images/icons/workz_wh/145x60.png"></img>
-						</div>
-						<div id="login" class="px-30 row-span-9 col-span-12 sm:col-span-6 md:col-span-4 content-center justify-center"></div>
-					</div>
+					<div class="h-full max-w-screen-xl mx-auto m-0 py-8 px-4 sm:px-6 grid grid-rows-12 grid-cols-12">
+                        <div class="w-full row-span-1 col-span-12 content-center">
+                            <!--img title="Workz!" src="/images/icons/workz_wh/145x60.png"-->
+                        </div>
+
+                        <!-- SLOT do login -->
+                        <div class="row-span-9 col-span-12 flex justify-center md:justify-end items-center">
+                            <div id="login" class="w-full sm:w-auto md:w-auto"></div>
+                        </div>
+                    </div>
 				</div>
 			</div>
 			<div class="relative w-full bg-gray-100 z-3 clear">
-				<div class="max-w-screen-xl mx-auto grid grid-cols-12">
+				<div class="max-w-screen-xl px-4 sm:px-6 mx-auto grid grid-cols-12">
 					<div class="col-span-12 sm:col-span-8 lg:col-span-9 flex flex-col grid grid-cols-12 gap-x-6">
 						<div id="timeline" class="col-span-12 flex flex-col grid grid-cols-12 gap-6 pt-6"></div>
                         <div id="feed-sentinel" class="h-10"></div>
@@ -3558,7 +3590,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         `,
 
         dashboard: ` 
-            <div id="topbar" class="fixed w-full z-3 content-center">
+            <div id="topbar" class="fixed w-full z-5 content-center">
                 <div class="max-w-screen-xl mx-auto p-6 flex items-center justify-between">
                     <a href="/">
                         <!--img class="logo-menu" style="width: 145px; height: 76px;" title="Workz!" src="/images/logos/workz/145x76.png"-->
@@ -3576,7 +3608,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                 <div class="col-span-12 sm:col-span-8 lg:col-span-9 flex flex-col grid grid-cols-12 gap-x-6 -mt-24">
                     <!-- Coluna da Esquerda (Menu de Navegação) -->
                     <aside class="hidden sm:flex w-full flex col-span-4 lg:col-span-3 flex-col gap-y-6">                                        
-                        <div class="aspect-square w-full rounded-full shadow-lg border-4 border-white overflow-hidden">                        
+                        <div class="aspect-square w-full rounded-full shadow-lg overflow-hidden">                        
                             <img id="profile-image" class="w-full h-full object-cover" src="${resolveImageSrc(currentUserData?.im, currentUserData?.tt, { size: 240 })}" alt="${currentUserData?.tt}">                        
                         </div>
                         <div class="bg-white p-3 rounded-3xl font-semibold shadow-lg grow">
@@ -3828,7 +3860,24 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                         ${statsHtml}
                     </div>
                 </div>
-            </div>
+                <section id="entity-testimonials" class="w-full px-4 sm:px-6">
+                    <div class="flex items-center justify-between gap-3">
+                        <h2 class="text-lg font-semibold text-gray-800">Depoimentos</h2>
+                        <div class="flex items-center gap-2">
+                            <button type="button" class="w-8 h-8 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200" data-role="testimonial-prev" aria-label="Anterior">
+                                <i class="fas fa-chevron-left text-sm"></i>
+                            </button>
+                            <button type="button" class="w-8 h-8 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200" data-role="testimonial-next" aria-label="Próximo">
+                                <i class="fas fa-chevron-right text-sm"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mt-4 overflow-hidden">
+                        <div id="entity-testimonials-track" class="flex gap-4 overflow-x-auto snap-x snap-mandatory scroll-px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"></div>
+                    </div>
+                    <div id="entity-testimonials-empty" class="mt-4 text-sm text-gray-500 text-center hidden">Ainda não há depoimentos.</div>
+                </section>
+            </div>            
         `;
 
         return content;
@@ -3856,30 +3905,15 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
     `;
 
     templates.appLibrary = async ({ appsList }) => {
-        const resolved = Array.isArray(appsList) ? appsList : (appsList ? [appsList] : []);
-
-        const appItems = resolved.map(app => `
-            <button data-app-id="${app.id}" data-app-name="${(app.tt || 'App').toLowerCase()}" class="app-item-button">
-                <div class="w-full aspect-square cursor-pointer ios-icon shadow-md rounded-2xl">
-                    <img src="${resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 160 })}" alt="${app.tt || 'App'}" class="app-icon-image rounded-2xl">
-                </div>
-                <div class="w-full p-1 text-xs text-white text-shadow-lg truncate text-center">
-                    ${app.tt || 'App'}
-                </div>
-            </button>
-        `).join('');
-
         return `
             <div id=\"app-grid-container\" hidden class=\"bg-white/20 backdrop-blur-xl flex-1 min-h-0 max-h-full overflow-hidden backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)] rounded-[2rem] p-3 mb-6 max-w-[400px] lg:max-w-[500px] mx-auto"\u003e
-                <div class="mb-6">
+                <div class="mb-3">
                     <input type="text" id="app-search-input" placeholder="Buscar aplicativos..." class="w-full px-4 py-2 rounded-full border-0 bg-white/30 text-gray outline-none transition-all duration-200 ease-in-out placeholder:text-white/70 focus:bg-white/25 focus:shadow-[0_0_0_2px_rgba(251,146,60,0.5)]">
                 </div>
-                <div id="app-grid" class="grid grid-cols-4 lg:grid-cols-6 gap-4 lg:gap-5 overflow-y-auto max-h-full">
-                    ${appItems}
-                </div>
+                <div id="app-grid" class="app-grid-viewport"></div>
             </div>
-            <div id="app-quickbar" class="absolute left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[740px] bottom-4 lg:w-[calc(100%-40px)] lg:max-w-[880px] lg:bottom-4 rounded-full bg-white/20 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]"\u003e
-                <div id="quickbar-track" class="flex items-center justify-center gap-1 p-3 overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Barra de tarefas">
+            <div id="app-quickbar" class="absolute left-1/2 -translate-x-1/2 w-[calc(100%-32px)] max-w-[740px] bottom-4 lg:w-[calc(100%-40px)] lg:max-w-[880px] lg:bottom-4 rounded-full overflow-hidden bg-white/20 backdrop-blur-xl backdrop-saturate-150 shadow-[0_10px_30px_rgba(0,0,0,0.25),_inset_0_0_0_1px_rgba(255,255,255,0.15)]"\u003e
+                <div id="quickbar-track" class="flex items-center justify-start gap-1 py-3 px-4 overflow-x-auto snap-x snap-mandatory scroll-px-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Barra de tarefas">
                     <!-- itens da barra de tarefas são injetados pelo JS em initAppLibrary() -->
                 </div>
             </div>
@@ -4308,6 +4342,20 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                     ${passwordCard}
                     <button type="submit" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Alterar Senha</button>
                 </form>
+            `;
+        } else if (view === 'testimonial-create') {
+            const entityId = data?.id || viewData?.id || 0;
+            const entityType = type || viewType || '';
+            html += UI.renderHeader({ backAction: 'stack-back', backLabel: prevTitle, title: navTitle });
+            html += `
+            <div class="grid gap-4 w-full" data-role="testimonial-create" data-entity-id="${entityId}" data-entity-type="${entityType}">
+                <div class="w-full shadow-md rounded-2xl grid grid-cols-1 overflow-hidden bg-white">
+                    <label class="p-4 text-gray-500 text-sm">Depoimento</label>
+                    <textarea name="testimonial-content" class="border-0 focus:outline-none p-4 min-h-[140px] resize-none" placeholder="Escreva seu depoimento..."></textarea>
+                </div>
+                <button data-action="submit-testimonial" class="shadow-md w-full py-2 px-4 bg-orange-600 text-white font-semibold rounded-3xl hover:bg-orange-700 transition-colors">Enviar</button>
+                <div data-role="message" class="w-full"></div>
+            </div>
             `;
         } else if (view === 'share-link') {
             html += UI.renderCloseHeader();
@@ -4840,16 +4888,21 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                 const cards = await Promise.all(list.map(async t => {
                     const author = await fetchByIds(t.author, 'people');
                     const avatar = resolveImageSrc(author?.im, author?.tt, { size: 100 });
+                    const statusLabel = (t.status === 1) ? 'Aceito' : (t.status === 2 ? 'Rejeitado' : 'Pendente');
+                    const statusClass = (t.status === 1) ? 'text-emerald-700 bg-emerald-100' : (t.status === 2 ? 'text-red-700 bg-red-100' : 'text-amber-700 bg-amber-100');
                     const primaryBtn = (t.status === 0)
                         ? `<button title="Aceitar" data-action="accept-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-bl-2xl"><i class="fas fa-check"></i></button>`
                         : `<button title="Reverter" data-action="revert-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-bl-2xl"><i class="fas fa-undo"></i></button>`;
                     const rejectBtn = `<button title="Rejeitar" data-action="reject-testmonial" data-id="${t.id}" class="col-span-1 p-3 bg-red-100 hover:bg-red-200 text-red-800 rounded-br-2xl"><i class="fas fa-ban"></i></button>`;
 
                     return `
-                        <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4">
-                        <div class="pt-4 px-4 col-span-4 flex items-center truncate">
+                        <div class="w-full bg-white shadow-md rounded-2xl grid grid-cols-1 gap-y-4" data-role="testimonial-card" data-id="${t.id}" data-status="${t.status}">
+                        <div class="pt-4 px-4 col-span-4 flex items-center justify-between gap-2 truncate">
+                            <div class="flex items-center truncate">
                             <img class="w-7 h-7 mr-2 rounded-full pointer" src="${avatar}" />
                             <a class="font-semibold">${author?.tt ?? 'Autor'}</a>
+                            </div>
+                            <span class="text-[11px] px-2 py-1 rounded-full ${statusClass}" data-role="testimonial-status">${statusLabel}</span>
                         </div>
                         <div class="col-span-4 px-4">${t.content ?? ''}</div>
                         <div class="grid grid-cols-2 rounded-b-2xl border-t border-gray-200 bg-white">
@@ -5387,6 +5440,69 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         `);
     }
 
+    async function renderEntityTestimonials() {
+        if (viewType === 'dashboard' || !viewData?.id) return;
+        const mount = document.querySelector('#entity-testimonials');
+        const track = mount?.querySelector('#entity-testimonials-track');
+        const empty = mount?.querySelector('#entity-testimonials-empty');
+        if (!mount || !track) return;
+
+        const recipientType = viewType;
+        const recipientId = Number(viewData?.id || 0);
+        if (!recipientId || !recipientType) return;
+
+        let list = [];
+        try {
+            const res = await apiClient.post('/search', {
+                db: 'workz_data',
+                table: 'testimonials',
+                columns: ['id', 'author', 'content', 'status', 'recipient', 'recipient_type', 'dt'],
+                conditions: { recipient: recipientId, recipient_type: recipientType, status: 1 },
+                order: { by: 'dt', dir: 'DESC' },
+                fetchAll: true
+            });
+            list = Array.isArray(res?.data) ? res.data : [];
+        } catch (_) { list = []; }
+
+        if (!list.length) {
+            track.innerHTML = '';
+            if (empty) empty.classList.remove('hidden');
+            mount.classList.add('hidden');
+            return;
+        } else {
+            mount.classList.remove('hidden');
+            if (empty) empty.classList.add('hidden');
+            const authorIds = [...new Set(list.map((t) => Number(t.author)).filter((id) => Number.isFinite(id)))];
+            const authors = await fetchByIds(authorIds, 'people');
+            const authorList = Array.isArray(authors) ? authors : (authors ? [authors] : []);
+            const authorMap = new Map(authorList.map((a) => [Number(a.id), a]));
+            track.innerHTML = list.map((t) => {
+                const author = authorMap.get(Number(t.author)) || {};
+                const name = author?.tt || 'Autor';
+                const avatar = resolveImageSrc(author?.im, name, { size: 80 });
+                const content = escapeHtml(t?.content || '');
+                const date = escapeHtml(t?.dt || '');
+                return `
+                    <article class="min-w-[240px] max-w-[280px] sm:min-w-[260px] sm:max-w-[320px] snap-start bg-white shadow-lg rounded-3xl p-4 text-gray-700">
+                        <div class="flex items-center gap-3">
+                            <img src="${avatar}" alt="${name}" class="w-10 h-10 rounded-full object-cover">
+                            <div class="min-w-0">
+                                <div class="font-semibold truncate">${name}</div>
+                                ${date ? `<div class="text-[11px] text-gray-500 truncate">${date}</div>` : ''}
+                            </div>
+                        </div>
+                        <p class="mt-3 text-sm leading-relaxed">${content}</p>
+                    </article>`;
+            }).join('');
+        }
+
+        const prevBtn = mount.querySelector('[data-role="testimonial-prev"]');
+        const nextBtn = mount.querySelector('[data-role="testimonial-next"]');
+        const scrollByAmount = () => Math.max(240, Math.round((track?.clientWidth || 0) * 0.8));
+        if (prevBtn) prevBtn.onclick = () => { try { track.scrollBy({ left: -scrollByAmount(), behavior: 'smooth' }); } catch (_) {} };
+        if (nextBtn) nextBtn.onclick = () => { try { track.scrollBy({ left: scrollByAmount(), behavior: 'smooth' }); } catch (_) {} };
+    }
+
     async function pageAction() {
         const actionContainer = document.querySelector('#action-container');
 
@@ -5480,7 +5596,8 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
             }
             customMenu.insertAdjacentHTML('beforeend',
                 UI.menuItem({ action: 'dashboard', icon: 'fa-home', label: 'Início' }) +
-                UI.menuItem({ action: 'share-page', icon: 'fa-share', label: 'Compartilhar' })
+                UI.menuItem({ action: 'share-page', icon: 'fa-share', label: 'Compartilhar' }) +
+                (authed && viewType !== ENTITY.TEAM ? UI.menuItem({ action: 'create-testimonial', icon: 'fa-comment-dots', label: 'Criar Depoimento' }) : '')
             );
         }
 
@@ -5666,11 +5783,16 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         const missing = normalized.filter((id) => !feedUserCache.has(String(id)));
         if (!missing.length) return;
         try {
-            const res = await apiClient.post('/search', {
+            const isPublicView = viewType === 'public';
+            const userEndpoint = isPublicView ? '/public/search' : '/search';
+            const userConditions = isPublicView
+                ? { id: { op: 'IN', value: missing }, st: 1 }
+                : { id: { op: 'IN', value: missing } };
+            const res = await apiClient.post(userEndpoint, {
                 db: 'workz_data',
                 table: 'hus',
                 columns: ['id', 'tt', 'im', 'feed_privacy', 'page_privacy'],
-                conditions: { id: { op: 'IN', value: missing } },
+                conditions: userConditions,
                 fetchAll: true,
             });
             const rows = Array.isArray(res?.data) ? res.data : [];
@@ -5775,7 +5897,8 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         const likeMap = new Map();
         if (!normalized.length) return likeMap;
         try {
-            const res = await apiClient.post('/search', {
+            const likesEndpoint = (viewType === 'public') ? '/public/search' : '/search';
+            const res = await apiClient.post(likesEndpoint, {
                 db: 'workz_data',
                 table: 'lke',
                 columns: ['pl', 'us'],
@@ -5804,7 +5927,8 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         const commentsMap = new Map();
         if (!normalized.length) return commentsMap;
         try {
-            const res = await apiClient.post('/search', {
+            const commentsEndpoint = (viewType === 'public') ? '/public/search' : '/search';
+            const res = await apiClient.post(commentsEndpoint, {
                 db: 'workz_data',
                 table: 'hpl_comments',
                 columns: ['id', 'pl', 'us', 'ds', 'dt'],
@@ -6029,7 +6153,8 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         });
 
         let mediaBatchMap = new Map();
-        if (mediaIdSet.size) {
+        const canBatchFetchMedia = mediaIdSet.size && (viewType !== 'public' || localStorage.getItem('jwt_token'));
+        if (canBatchFetchMedia) {
             const ids = Array.from(mediaIdSet);
             try {
                 const res = await apiClient.post('/media/batch', { ids });
@@ -6158,14 +6283,14 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         const timeline = document.querySelector('#timeline');
         if (!timeline || !Array.isArray(items) || !items.length) return;
 
-        // Verificar posts duplicados
-        const existingPostIds = new Set();
-        timeline.querySelectorAll('[data-post-id]').forEach(post => {
-            existingPostIds.add(post.dataset.postId);
+        // Filtrar apenas posts que ainda não foram renderizados
+        const newItems = items.filter((post) => {
+            const id = String(post?.id ?? '');
+            if (!id) return false;
+            if (feedRenderedPostIds.has(id)) return false;
+            feedRenderedPostIds.add(id);
+            return true;
         });
-
-        // Filtrar apenas posts que não existem
-        const newItems = items.filter(post => !existingPostIds.has(String(post?.id ?? '')));
         if (!newItems.length) return;
 
         const html = newItems.map((post) => {
@@ -6342,8 +6467,41 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         }).join('');
 
         timeline.insertAdjacentHTML('beforeend', html);
-        enhanceFeedCards(newItems);
+        queueFeedEnhancements(newItems);
         ensureFeedInteractions();
+    }
+
+    function queueFeedEnhancements(items) {
+        if (!Array.isArray(items) || !items.length) return;
+        feedEnhanceQueue.push(...items);
+        if (feedEnhanceRunning) return;
+        feedEnhanceRunning = true;
+
+        const run = () => {
+            const start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+            const batch = [];
+            while (feedEnhanceQueue.length) {
+                batch.push(feedEnhanceQueue.shift());
+                const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                if (now - start > 12) break;
+            }
+            if (batch.length) enhanceFeedCards(batch);
+            if (feedEnhanceQueue.length) {
+                if (typeof requestIdleCallback === 'function') {
+                    requestIdleCallback(run, { timeout: 200 });
+                } else {
+                    requestAnimationFrame(run);
+                }
+            } else {
+                feedEnhanceRunning = false;
+            }
+        };
+
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(run, { timeout: 200 });
+        } else {
+            requestAnimationFrame(run);
+        }
     }
 
     function waitForVideoReady(video) {
@@ -6507,9 +6665,8 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
 
     function isDesktopFeedAudioMode() {
         try {
-            const wide = window.matchMedia ? window.matchMedia('(min-width: 1024px)').matches : (window.innerWidth >= 1024);
-            const fine = window.matchMedia ? window.matchMedia('(pointer: fine)').matches : true;
-            return wide && fine;
+            // Use per-post audio on desktop/tablet (sm+ breakpoint). Mobile keeps global toggle.
+            return window.matchMedia ? window.matchMedia('(min-width: 640px)').matches : (window.innerWidth >= 640);
         } catch (_) { return false; }
     }
 
@@ -6768,6 +6925,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         timeline.addEventListener('click', handleFeedClick);
         timeline.addEventListener('click', handleFeedMediaClick);
         timeline.addEventListener('submit', handleFeedSubmit);
+        installFeedLongPressHandlers(timeline);
         feedInteractionsAttached = true;
     }
 
@@ -7027,7 +7185,117 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         applyMediaViewerTransform();
     }
 
+    function getFeedVideoFromTarget(target) {
+        if (!target || !target.closest) return null;
+        const directVideo = target.closest('video[data-feed-media="1"]');
+        if (directVideo) return directVideo;
+        const carousel = target.closest('[data-role="carousel"]');
+        if (carousel) {
+            const track = carousel.querySelector('[data-carousel-track]');
+            const index = Number(carousel.dataset.index || '0') || 0;
+            return track?.children?.[index]?.querySelector('video[data-feed-media="1"]') || null;
+        }
+        return null;
+    }
+
+    function getEventClientPoint(ev) {
+        if (ev?.touches?.length) {
+            return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+        }
+        if (ev?.changedTouches?.length) {
+            return { x: ev.changedTouches[0].clientX, y: ev.changedTouches[0].clientY };
+        }
+        return { x: ev?.clientX ?? 0, y: ev?.clientY ?? 0 };
+    }
+
+    function cancelFeedLongPress() {
+        if (feedLongPressTimer) {
+            clearTimeout(feedLongPressTimer);
+        }
+        feedLongPressTimer = null;
+        feedLongPressTriggered = false;
+        feedLongPressPointerId = null;
+        feedLongPressVideo = null;
+        feedLongPressWasPlaying = false;
+    }
+
+    function startFeedLongPress(ev) {
+        const target = ev?.target;
+        if (!target || !target.closest) return;
+        if (target.closest('[data-feed-action]')) return;
+        if (ev.type === 'mousedown' && ev.button !== 0) return;
+        if (ev.pointerType && ev.pointerType === 'mouse' && ev.button !== 0) return;
+        const video = getFeedVideoFromTarget(target);
+        if (!video) return;
+
+        cancelFeedLongPress();
+        feedLongPressVideo = video;
+        feedLongPressWasPlaying = !!(video && !video.paused && !video.ended);
+        feedLongPressPointerId = ev.pointerId ?? null;
+        const point = getEventClientPoint(ev);
+        feedLongPressStartX = point.x;
+        feedLongPressStartY = point.y;
+
+        feedLongPressTimer = setTimeout(() => {
+            feedLongPressTriggered = true;
+            feedLongPressIgnoreUntil = Date.now() + 500;
+            try { video.pause(); } catch (_) {}
+            try { video.dataset.playing = '0'; } catch (_) {}
+        }, FEED_LONGPRESS_DELAY);
+    }
+
+    function moveFeedLongPress(ev) {
+        if (!feedLongPressTimer) return;
+        if (feedLongPressPointerId != null && ev.pointerId != null && ev.pointerId !== feedLongPressPointerId) return;
+        const point = getEventClientPoint(ev);
+        const dx = point.x - feedLongPressStartX;
+        const dy = point.y - feedLongPressStartY;
+        if (Math.abs(dx) > FEED_LONGPRESS_MOVE_TOLERANCE || Math.abs(dy) > FEED_LONGPRESS_MOVE_TOLERANCE) {
+            cancelFeedLongPress();
+        }
+    }
+
+    function endFeedLongPress(ev, { resume = true } = {}) {
+        if (feedLongPressPointerId != null && ev.pointerId != null && ev.pointerId !== feedLongPressPointerId) return;
+        const wasTriggered = feedLongPressTriggered;
+        const video = feedLongPressVideo;
+        const shouldResume = wasTriggered && resume && feedLongPressWasPlaying;
+        if (wasTriggered) {
+            feedLongPressIgnoreUntil = Date.now() + 500;
+        }
+        cancelFeedLongPress();
+        if (shouldResume && video) {
+            try { hydrateFeedVideo(video); } catch (_) {}
+            try { applyFeedAudioToVideo(video); } catch (_) {}
+            const owner = video.closest?.('[data-role="carousel"]') || video;
+            safePlayVideo(video, owner);
+            try { video.dataset.playing = '1'; } catch (_) {}
+        }
+    }
+
+    function installFeedLongPressHandlers(timeline) {
+        if (!timeline || timeline._feedLongPressInstalled) return;
+        timeline._feedLongPressInstalled = true;
+        const supportsPointer = typeof window !== 'undefined' && 'PointerEvent' in window;
+        if (supportsPointer) {
+            timeline.addEventListener('pointerdown', startFeedLongPress, { passive: true });
+            timeline.addEventListener('pointermove', moveFeedLongPress, { passive: true });
+            timeline.addEventListener('pointerup', endFeedLongPress, { passive: true });
+            timeline.addEventListener('pointercancel', (ev) => endFeedLongPress(ev, { resume: false }), { passive: true });
+            timeline.addEventListener('pointerleave', (ev) => endFeedLongPress(ev, { resume: false }), { passive: true });
+        } else {
+            timeline.addEventListener('mousedown', startFeedLongPress, false);
+            timeline.addEventListener('mousemove', moveFeedLongPress, false);
+            timeline.addEventListener('mouseup', endFeedLongPress, false);
+            timeline.addEventListener('touchstart', startFeedLongPress, { passive: true });
+            timeline.addEventListener('touchmove', moveFeedLongPress, { passive: true });
+            timeline.addEventListener('touchend', endFeedLongPress, { passive: true });
+            timeline.addEventListener('touchcancel', (ev) => endFeedLongPress(ev, { resume: false }), { passive: true });
+        }
+    }
+
     function handleFeedMediaClick(event) {
+        if (Date.now() < feedLongPressIgnoreUntil) return;
         const timeline = event.currentTarget;
         const target = event.target;
         if (!(timeline instanceof Element) || !target) return;
@@ -7840,6 +8108,13 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         },
         'my-profile': ({ state }) => navigateTo(`/profile/${state.user?.id}`),
         'share-page': () => sharePage(),
+        'create-testimonial': async () => {
+            const authed = !!localStorage.getItem('jwt_token') && !!(currentUserData && currentUserData.id != null);
+            if (!authed) return;
+            const mock = document.createElement('div');
+            mock.dataset.sidebarAction = 'testimonial-create';
+            try { await toggleSidebar(mock, true); } catch (_) { try { toggleSidebar(mock, true); } catch (_) {} }
+        },
         'list-people': () => navigateTo('/people'),
         'list-businesses': () => navigateTo('/businesses'),
         'list-teams': () => navigateTo('/teams'),
@@ -8330,7 +8605,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                     SidebarNav.back();
                 } else {
                     // Caso contrário, garanta que mostramos a lista de apps sem fechar o sidebar
-                    SidebarNav.resetRoot(currentUserData);
+                    SidebarNav.resetRoot(currentUserData, { silent: true });
                     SidebarNav.push({ view: 'apps', title: 'Aplicativos', payload: { data: currentUserData } });
                 }
             }
@@ -8391,7 +8666,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                     if (prev && prev.view === 'businesses') {
                         SidebarNav.back();
                     } else {
-                        SidebarNav.resetRoot(currentUserData);
+                        SidebarNav.resetRoot(currentUserData, { silent: true });
                         SidebarNav.push({ view: 'businesses', title: 'Negócios', payload: { data: currentUserData } });
                     }
                 }
@@ -8434,7 +8709,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                 if (prev && prev.view === 'teams') {
                     SidebarNav.back();
                 } else {
-                    SidebarNav.resetRoot(currentUserData);
+                    SidebarNav.resetRoot(currentUserData, { silent: true });
                     SidebarNav.push({ view: 'teams', title: 'Equipes', payload: { data: currentUserData } });
                 }
             }
@@ -8853,8 +9128,23 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
             try {
                 await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 1 }, conditions: { id } });
                 notifySuccess('Depoimento aceito.');
+                const card = document.querySelector(`[data-role="testimonial-card"][data-id="${id}"]`);
+                if (card) {
+                    card.dataset.status = '1';
+                    const statusEl = card.querySelector('[data-role="testimonial-status"]');
+                    if (statusEl) {
+                        statusEl.textContent = 'Aceito';
+                        statusEl.className = 'text-[11px] px-2 py-1 rounded-full text-emerald-700 bg-emerald-100';
+                    }
+                    const primary = card.querySelector('[data-action="accept-testmonial"]');
+                    if (primary) {
+                        primary.setAttribute('data-action', 'revert-testmonial');
+                        primary.title = 'Reverter';
+                        primary.className = 'col-span-1 p-3 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-bl-2xl';
+                        primary.innerHTML = '<i class="fas fa-undo"></i>';
+                    }
+                }
             } catch (_) { notifyError('Falha ao aceitar depoimento.'); }
-            loadPage();
         },
         'reject-testmonial': async ({ button }) => {
             const id = button?.dataset?.id;
@@ -8862,8 +9152,11 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
             try {
                 await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 2 }, conditions: { id } });
                 notifySuccess('Depoimento rejeitado.');
+                const card = document.querySelector(`[data-role="testimonial-card"][data-id="${id}"]`);
+                if (card) {
+                    card.remove();
+                }
             } catch (_) { notifyError('Falha ao rejeitar depoimento.'); }
-            loadPage();
         },
         'revert-testmonial': async ({ button }) => {
             const id = button?.dataset?.id;
@@ -8871,8 +9164,69 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
             try {
                 await apiClient.post('/update', { db: 'workz_data', table: 'testimonials', data: { status: 0 }, conditions: { id } });
                 notifySuccess('Depoimento revertido.');
+                const card = document.querySelector(`[data-role="testimonial-card"][data-id="${id}"]`);
+                if (card) {
+                    card.dataset.status = '0';
+                    const statusEl = card.querySelector('[data-role="testimonial-status"]');
+                    if (statusEl) {
+                        statusEl.textContent = 'Pendente';
+                        statusEl.className = 'text-[11px] px-2 py-1 rounded-full text-amber-700 bg-amber-100';
+                    }
+                    const primary = card.querySelector('[data-action="revert-testmonial"]');
+                    if (primary) {
+                        primary.setAttribute('data-action', 'accept-testmonial');
+                        primary.title = 'Aceitar';
+                        primary.className = 'col-span-1 p-3 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-bl-2xl';
+                        primary.innerHTML = '<i class="fas fa-check"></i>';
+                    }
+                }
             } catch (_) { notifyError('Falha ao reverter depoimento.'); }
-            loadPage();
+        },
+        'submit-testimonial': async ({ button }) => {
+            const authed = !!localStorage.getItem('jwt_token') && !!(currentUserData && currentUserData.id != null);
+            if (!authed) return;
+            const mount = button?.closest?.('[data-role="testimonial-create"]');
+            const textArea = mount?.querySelector?.('textarea[name="testimonial-content"]');
+            const container = mount?.querySelector?.('[data-role="message"]') || document.getElementById('message');
+            const content = (textArea?.value || '').trim();
+            const recipientId = Number(mount?.dataset?.entityId || 0);
+            const recipientType = mount?.dataset?.entityType || viewType;
+            if (!content) {
+                if (container) await showMessage(container, 'Digite o depoimento.', 'warning', { dismissAfter: 3000 });
+                return;
+            }
+            if (!recipientId || !recipientType) {
+                if (container) await showMessage(container, 'Destino inválido.', 'error', { dismissAfter: 3000 });
+                return;
+            }
+            setButtonLoading(button, true, 'Enviando...');
+            try {
+                const now = new Date();
+                const dt = now.toISOString().slice(0, 19).replace('T', ' ');
+                const payload = {
+                    db: 'workz_data',
+                    table: 'testimonials',
+                    data: {
+                        author: currentUserData.id,
+                        content,
+                        status: 0,
+                        recipient: recipientId,
+                        recipient_type: recipientType,
+                        dt
+                    }
+                };
+                const res = await apiClient.post('/insert', payload);
+                if (res?.error || res?.status === 'error') {
+                    throw new Error(res?.message || 'Falha ao enviar depoimento.');
+                }
+                if (textArea) textArea.value = '';
+                if (container) await showMessage(container, 'Depoimento enviado. Aguardando aprovação.', 'success', { dismissAfter: 3000 });
+                try { renderEntityTestimonials(); } catch (_) {}
+            } catch (err) {
+                if (container) await showMessage(container, err?.message || 'Falha ao enviar depoimento.', 'error', { dismissAfter: 4000 });
+            } finally {
+                setButtonLoading(button, false);
+            }
         },
         // Jobs (experiências)
         'delete-job': async ({ button }) => {
@@ -9393,6 +9747,14 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         });
     }
 
+    function resetContactRow(row) {
+        if (!row) return;
+        row.querySelectorAll('input, select, textarea').forEach((el) => {
+            if (el.tagName === 'SELECT') el.selectedIndex = 0;
+            else el.value = '';
+        });
+    }
+
     async function toggleSidebar(el = null, toggle = true) {
 
         if (sidebarWrapper.innerHTML.trim() !== '') {
@@ -9409,6 +9771,9 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                 sidebarWrapper.classList.remove('w-0');
                 sidebarWrapper.classList.add('xl:w-1/3', 'lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
             } else if (el && el.dataset.sidebarAction === 'link-share') {
+                sidebarWrapper.classList.remove('w-0');
+                sidebarWrapper.classList.add('xl:w-1/3', 'lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
+            } else if (el && el.dataset.sidebarAction === 'testimonial-create') {
                 sidebarWrapper.classList.remove('w-0');
                 sidebarWrapper.classList.add('xl:w-1/3', 'lg:w-1/3', 'sm:w-1/2', 'w-full', 'shadow-2xl');
             } else {
@@ -9506,11 +9871,36 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                     try { setupPostPrivacyBindings(sidebarWrapper); } catch (_) {}
                     try { initLinkShareView(sidebarWrapper); } catch (_) {}
                 });
+            } else if (action === 'testimonial-create') {
+                SidebarNav.setMount(sidebarContent);
+                renderTemplate(sidebarContent, templates.sidebarPageSettings, {
+                    view: 'testimonial-create',
+                    data: viewData,
+                    type: viewType,
+                    navTitle: 'Criar Depoimento',
+                    prevTitle: 'Voltar',
+                    origin: 'stack'
+                }, () => {
+                    if (sidebarContent._actionsHandler) {
+                        sidebarContent.removeEventListener('click', sidebarContent._actionsHandler);
+                    }
+                    const handler = (e) => {
+                        const btn = e.target.closest('[data-action]');
+                        if (!btn || !sidebarContent.contains(btn)) return;
+                        const actionName = btn.dataset.action;
+                        const fn = ACTIONS[actionName];
+                        if (!fn) return;
+                        e.preventDefault();
+                        try { Promise.resolve(fn({ event: e, button: btn, state: getState() })); } catch (_) {}
+                    };
+                    sidebarContent.addEventListener('click', handler);
+                    sidebarContent._actionsHandler = handler;
+                });
 
             } else if (action === 'page-settings') {
                 // Entrou em Ajustes a partir da página atual (fora do stack ou entidade corrente)
                 SidebarNav.setMount(sidebarContent);
-                SidebarNav.resetRoot(currentUserData);
+                SidebarNav.resetRoot(currentUserData, { silent: true });
                 const containerEl = el.closest('[data-sidebar-type]') || el.parentNode;
                 let pageSettingsView = (containerEl?.dataset?.sidebarType === 'current-user') ? ENTITY.PROFILE : viewType;
                 let pageSettingsData = (containerEl?.dataset?.sidebarType === 'current-user') ? currentUserData : viewData;
@@ -9562,6 +9952,8 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                                 row.remove();
                                 fixRoundings(container);
                             });
+                        } else {
+                            resetContactRow(container.firstElementChild);
                         }
                     }
                 });
@@ -9607,10 +9999,14 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                     enterRow(newRow);
                     fixRoundings(container);
                 }
-                if (rmBtn && container.children.length > 1) {
-                    const row = container.lastElementChild;
-                    row.style.willChange = 'height, opacity, transform';
-                    leaveRow(row, () => { row.remove(); fixRoundings(container); });
+                if (rmBtn) {
+                    if (container.children.length > 1) {
+                        const row = container.lastElementChild;
+                        row.style.willChange = 'height, opacity, transform';
+                        leaveRow(row, () => { row.remove(); fixRoundings(container); });
+                    } else {
+                        resetContactRow(container.firstElementChild);
+                    }
                 }
             };
             settingsForm.addEventListener('click', clickHandler);
@@ -10721,6 +11117,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
             document.querySelector('#profile-image').src = entityImage
         ]).then(() => {
             try { insertContentPrivacyNotice(); } catch (_) {}
+            try { renderEntityTestimonials(); } catch (_) {}
 
             const widgetWrapper = document.querySelector('#widget-wrapper');
 
@@ -10855,65 +11252,73 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
     async function launchApp(app, opts = {}) {
         if (!app || !app.slug) { return; }
 
-        let baseUrl = `/api/app/run/${app.slug}`;
+        let baseUrl = `/app/shell/${app.slug}`;
 
         let ctx = null;
         if (viewType === ENTITY.BUSINESS && viewId) ctx = { type: 'business', id: viewId };
         else if (viewType === ENTITY.TEAM && viewId) ctx = { type: 'team', id: viewId };
         else if (currentUserData?.id) ctx = { type: 'user', id: currentUserData.id };
 
-        let finalUrl = baseUrl;
-        const wantSSO = opts.sso !== false; // SSO é para o app, não para o runner
-        const mainToken = localStorage.getItem('jwt_token');
-        let runToken = mainToken;
-
-        if (wantSSO) { // Usa token do app (aud app:{id}) quando disponível
-            const trySso = async (ctxPayload) => {
-                const sso = await apiClient.post('/apps/sso', { app_id: app.id, ctx: ctxPayload });
-                return sso?.token || null;
-            };
-            try {
-                const token = await trySso(ctx);
-                if (token) {
-                    runToken = token;
-                }
-            } catch (_) {
-                try {
-                    if (ctx?.type !== 'user' && currentUserData?.id) {
-                        const token = await trySso({ type: 'user', id: currentUserData.id });
-                        if (token) {
-                            runToken = token;
-                        }
-                    }
-                } catch (__) {}
-            }
-        }
-
-        // O runner precisa de um token para autenticar o carregamento.
-        if (runToken) {
-            finalUrl += `?token=${encodeURIComponent(runToken)}`;
-        }
-        newWindow(finalUrl, `app_${app.id}`, app.im, app.tt);
+        newWindow(baseUrl, `app_${app.id}`, app.im, app.tt);
     }
 
 
-    // Handshake fallback: respond with auth to embedded apps requesting it
+    // Host bridge: handshake + event routing for embedded apps
+    try {
+        if (window.WorkzHostBridge) {
+            const appIdCache = new Map();
+            const resolveContext = async () => {
+                if (viewType === ENTITY.BUSINESS && viewId) return { type: 'business', id: viewId };
+                if (viewType === ENTITY.TEAM && viewId) return { type: 'team', id: viewId };
+                if (currentUserData?.id) return { type: 'user', id: currentUserData.id };
+                return null;
+            };
+            const resolveUser = async () => currentUserData || null;
+            const resolveAppId = async (slug) => {
+                if (!slug) return null;
+                if (appIdCache.has(slug)) return appIdCache.get(slug);
+                try {
+                    const res = await apiClient.post('/search', {
+                        db: 'workz_apps',
+                        table: 'apps',
+                        columns: ['id', 'slug'],
+                        conditions: { slug: slug }
+                    });
+                    const app = Array.isArray(res?.data) ? res.data[0] : res?.data;
+                    if (app && app.id) {
+                        appIdCache.set(slug, app.id);
+                        return app.id;
+                    }
+                } catch (_) {}
+                return null;
+            };
+            const issueToken = async (appId, ctx, meta) => {
+                if (!appId) return null;
+                try {
+                    const sso = await apiClient.post('/apps/sso', {
+                        app_id: appId,
+                        app_slug: meta?.appSlug || null,
+                        ctx: ctx || null
+                    });
+                    return sso?.token || null;
+                } catch (_) {
+                    return null;
+                }
+            };
+
+            window.WorkzHostBridge.setContextResolver(resolveContext);
+            window.WorkzHostBridge.setUserResolver(resolveUser);
+            window.WorkzHostBridge.setAppResolver(resolveAppId);
+            window.WorkzHostBridge.setTokenIssuer(issueToken);
+            window.WorkzHostBridge.enable();
+        }
+    } catch (_) {}
+
     try {
         window.addEventListener('message', (ev) => {
             const data = ev?.data || {};
             if (!data || typeof data !== 'object') return;
-            if (data.type === 'workz-sdk:init') {
-                const jwt = localStorage.getItem('jwt_token') || null;
-                // Deriva contexto atual
-                let ctx = null;
-                if (viewType === ENTITY.BUSINESS && viewId) ctx = { type: 'business', id: viewId };
-                else if (viewType === ENTITY.TEAM && viewId) ctx = { type: 'team', id: viewId };
-                else if (currentUserData?.id) ctx = { type: 'user', id: currentUserData.id };
-                try {
-                    ev.source?.postMessage({ type: 'workz-sdk:auth', jwt, user: currentUserData || null, context: ctx }, '*');
-                } catch (_) {}
-            } else if (data.type === 'app:launch') {
-                // App embutido está pedindo para abrir outro app
+            if (data.type === 'app:launch') {
                 const appIdToLaunch = data?.payload?.appId;
                 if (appIdToLaunch) {
                     launchAppById(appIdToLaunch);
@@ -11023,6 +11428,12 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         window._startKeyHandlerCapture = keyHandler;
 
         const clickHandler = async (event) => {
+            const closeLibrary = () => {
+                try {
+                    setStartOpen(false);
+                    applyStartState();
+                } catch (_) {}
+            };
             const startBtn = event.target.closest('[data-start]');
             if (startBtn) {
                 try {
@@ -11035,6 +11446,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
             const storeBtn = event.target.closest('[data-store]');
             if (storeBtn) {
                 // Abre a loja (sem SSO - usa handshake embed para obter JWT)
+                closeLibrary();
                 try { await launchAppBySlug('store', { sso: false }); } catch (_) {}
                 return;
             }
@@ -11044,6 +11456,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
             if (appButton) {
                 const appId = Number(appButton.dataset.appId);
                 if (!appId) return;
+                closeLibrary();
                 try { await launchAppById(appId); } catch (_) {}
                 return;
             }
@@ -11054,6 +11467,48 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         // Search + Hide favorites filter
         const searchInput = el.querySelector('#app-search-input');
         const appGrid = el.querySelector('#app-grid');
+        const allApps = Array.isArray(appsData) ? appsData : [];
+        function buildAppButton(app) {
+            return `
+                <button data-app-id="${app.id}" data-app-name="${(app.tt || 'App').toLowerCase()}" class="app-item-button">
+                    <div class="w-full aspect-square cursor-pointer ios-icon shadow-md rounded-2xl">
+                        <img src="${resolveImageSrc(app?.im, app?.tt, { fallbackUrl: '/images/app-default.png', size: 160 })}" alt="${app.tt || 'App'}" class="app-icon-image rounded-2xl">
+                    </div>
+                    <div class="app-item-label w-full text-xs text-white text-shadow-lg truncate text-center">
+                        ${app.tt || 'App'}
+                    </div>
+                </button>
+            `;
+        }
+
+        function getGridVars() {
+            if (!appGrid) return { columns: 4, rows: 2 };
+            const styles = window.getComputedStyle(appGrid);
+            const cols = parseInt(styles.getPropertyValue('--app-grid-cols'), 10);
+            const rows = parseInt(styles.getPropertyValue('--app-grid-rows'), 10);
+            return {
+                columns: Number.isFinite(cols) && cols > 0 ? cols : 4,
+                rows: Number.isFinite(rows) && rows > 0 ? rows : 2
+            };
+        }
+
+        function renderPagedGrid(apps) {
+            if (!appGrid) return;
+            const layout = getGridVars();
+            const pageSize = Math.max(1, layout.columns * layout.rows);
+            const pages = [];
+            for (let i = 0; i < apps.length; i += pageSize) {
+                const slice = apps.slice(i, i + pageSize);
+                const items = slice.map(buildAppButton).join('');
+                pages.push(`
+                    <div class="app-grid-page">
+                        <div class="app-grid-inner">${items}</div>
+                    </div>
+                `);
+            }
+            appGrid.innerHTML = pages.join('');
+            try { appGrid.scrollTop = 0; } catch (_) {}
+        }
         // Apply initial Start menu state (default collapsed) and ensure dock is visible
         try { applyStartState && applyStartState(); } catch(_) {}
 
@@ -11067,15 +11522,15 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
             let favIds = [];
             try { favIds = await fetchQuickFromServer(); } catch (_) { favIds = quickCache || []; }
             const favSet = new Set((favIds || []).map(n => Number(n)));
-            const appItems = appGrid.querySelectorAll('.app-item-button');
-            appItems.forEach(item => {
-                const appName = (item.dataset.appName || '').toLowerCase();
-                const id = Number(item.dataset.appId);
-                const matchesSearch = appName.includes(searchTerm);
-                const isFav = favSet.has(id);
-                const shouldHide = !matchesSearch || (hideFav && isFav);
-                item.style.display = shouldHide ? 'none' : '';
+            const filtered = allApps.filter(app => {
+                const appName = String(app?.tt || '').toLowerCase();
+                const matchesSearch = !searchTerm || appName.includes(searchTerm);
+                const isFav = favSet.has(Number(app?.id));
+                if (!matchesSearch) return false;
+                if (hideFav && isFav) return false;
+                return true;
             });
+            renderPagedGrid(filtered);
         }
 
         if (searchInput && appGrid) {
@@ -11085,6 +11540,15 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
             const inputHandler = () => { applyAppGridFilters(); };
             searchInput.addEventListener('input', inputHandler);
             searchInput._appSearchHandler = inputHandler;
+        }
+
+        if (appGrid) {
+            if (appGrid._resizeHandler) {
+                try { window.removeEventListener('resize', appGrid._resizeHandler); } catch (_) {}
+            }
+            const onResize = () => { applyAppGridFilters(); };
+            window.addEventListener('resize', onResize);
+            appGrid._resizeHandler = onResize;
         }
 
         // Expor para que outras views possam reaplicar o filtro
@@ -11123,6 +11587,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                     try {
                         if (!track) { prevBtn.style.display = 'none'; nextBtn.style.display = 'none'; return; }
                         const overflow = (track.scrollWidth - track.clientWidth) > 3;
+                        track.classList.toggle('is-centered', !overflow);
                         if (!overflow) { prevBtn.style.display = 'none'; nextBtn.style.display = 'none'; return; }
                         prevBtn.style.display = (track.scrollLeft <= 2) ? 'none' : '';
                         const rightEdge = Math.ceil(track.scrollLeft + track.clientWidth);
@@ -11189,11 +11654,11 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
             if (!track) return;
             const ids = await fetchQuickFromServer();
             // Envolve os itens em um contêiner centrado e com largura do conteúdo
-            let html = '<div class="flex items-center gap-3 w-max mx-auto">';
+            let html = '<div class="flex items-center gap-3 w-max px-2">';
             // Botão iniciar (abre/fecha a grade de apps)
             html += `
                 <button data-start="1" class="relative shrink-0 snap-start" title="Início">
-                    <div class="w-12 h-12 rounded-2xl overflow-hidden bg-white/10 text-white flex items-center justify-center shadow-md transition-transform duration-200 ease-in-out hover:scale-[1.03]">
+                    <div class="w-11 h-11 rounded-2xl overflow-hidden text-white flex items-center justify-center transition-colors duration-200 ease-in-out hover:bg-white/10">
                         <img src="/images/apps/inicio.png" alt="Início" class="app-icon-image" />
                     </div>
                 </button>`;
@@ -11204,13 +11669,16 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                 const name = app?.tt || 'App';
                 html += `                    
                 <button data-app-id="${app.id}" title="${name}" class="relative shrink-0 snap-start" data-quick-id="${app.id}">
-                    <div class="w-12 h-12 rounded-2xl overflow-hidden bg-white/5 shadow-md transition-transform duration-200 ease-in-out hover:scale-[1.03]">
+                    <div class="w-11 h-11 rounded-2xl overflow-hidden bg-white/5 shadow-md transition-transform duration-200 ease-in-out hover:scale-[1.03]">
                         <img src="${img}" alt="${name}" class="app-icon-image" />
                     </div>
                 </button>`;
             });
             html += '</div>';
             track.innerHTML = html;
+            try {
+                requestAnimationFrame(() => { track.scrollLeft = 0; });
+            } catch (_) {}
             try { if (el.querySelector('#app-quickbar')?._updateNav) el.querySelector('#app-quickbar')._updateNav(); } catch (_) {}
             // Atualiza variável CSS com a altura do dock (quickbar)
             try {
@@ -11255,7 +11723,7 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         try {
             const mount = document.querySelector('.sidebar-content');
             SidebarNav.setMount(mount);
-            SidebarNav.resetRoot(currentUserData);
+            SidebarNav.resetRoot(currentUserData, { silent: true });
             setTimeout(() => {                
                 try { SidebarNav.push({ view: 'desktop', title: 'Área de Trabalho', payload: { data: currentUserData } }); } catch (_) {}
             }, 60);
@@ -11270,6 +11738,9 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
         feedFinished = false;
         feedInteractionsAttached = false;
         feedPostAudioMap.clear();
+        feedRenderedPostIds.clear();
+        feedEnhanceQueue = [];
+        feedEnhanceRunning = false;
 
         // Limpar o conteúdo do timeline
         const timeline = document.querySelector('#timeline');
@@ -11350,7 +11821,8 @@ function cleanupPostMediaState({ startCamera = false } = {}) {
                 conditions: { st: 1, feed_privacy: 3, page_privacy: 1 }
             }];
         }
-        const res = await apiClient.post('/search', feedPayload);
+        const feedEndpoint = (viewType === 'public') ? '/public/search' : '/search';
+        const res = await apiClient.post(feedEndpoint, feedPayload);
         if (requestId !== feedRequestId) return;
 
         let items = res?.data || [];

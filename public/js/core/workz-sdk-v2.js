@@ -1,6 +1,12 @@
 // public/js/core/workz-sdk-v2.js
 // Unified WorkzSDK Core - Version 2.0.0
 // Supports both JavaScript and Flutter applications with consistent API
+// PIPE compliance rules:
+// - docs.types defaults to ["user_data"] when storage.docs enabled and types not provided; empty types is invalid.
+// - Embed requires a manifest when running in iframe or when appConfig.slug is set.
+// - Embed disallows "*" in sandbox.postMessage.allowedOrigins; normalize to referrer origin when present, else invalidate.
+// - sdk:ready/sdk:telemetry/sdk:security/app:context_denied always emit locally; parent posting still gated (sdk:security allowed).
+// - Embed handshake validates origin/source and uses a concrete targetOrigin (referrer origin or window.location.origin).
 
 (function(global) {
   'use strict';
@@ -32,6 +38,8 @@
       this.isAppToken = false;
       this.ready = false;
       this.onAuthUpdate = typeof options.onAuthUpdate === 'function' ? options.onAuthUpdate : null;
+      this.allowedOrigins = Array.isArray(options.allowedOrigins) ? options.allowedOrigins.slice() : null;
+      this.enforceEmbed = !!options.enforceEmbed;
     }
 
     decodeJwtPayload(token) {
@@ -126,52 +134,60 @@
     }
 
     async initEmbed(apiClient) {
-      this.token = this.parseTokenFromUrl();
-      this.isAppToken = this.isAppScopedToken(this.token);
-      if (this.token) {
-        if (!this.isAppToken) {
-          localStorage.setItem('jwt_token', this.token);
-        }
-      }
-      if (!this.context && this.token) {
-        this.context = this.getContextFromToken(this.token);
-      }
+      this.token = null;
+      this.isAppToken = false;
 
       return new Promise((resolve) => {
+        let gotAuth = false;
+        const targetOrigin = this.getHandshakeTargetOrigin() || '*';
         const onMessage = (ev) => {
           const data = ev?.data || {};
           if (!data || typeof data !== 'object') return;
           
           if (data.type === 'workz-sdk:auth') {
-            if (!this.isAppToken) {
-              this.token = data.jwt || null;
+            if (ev?.source !== window.parent) return;
+            if (!this.isOriginAllowed(ev?.origin)) return;
+            gotAuth = true;
+            this.token = data.jwt || null;
+            this.isAppToken = this.isAppScopedToken(this.token);
+            if (this.token && !this.isAppToken) {
+              console.warn('WorkzSDK embed: token sem aud app:*, ignorando.');
+              this.token = null;
             }
             this.user = data.user || null;
-            this.context = data.context || null;
-            
-            if (this.token && !this.isAppToken) {
-              localStorage.setItem('jwt_token', this.token);
-            }
+            this.context = data.context || (this.token ? this.getContextFromToken(this.token) : null);
 
             this.notifyAuthUpdate();
             this.finishInit(apiClient, resolve);
+            window.removeEventListener('message', onMessage, false);
           }
         };
 
         window.addEventListener('message', onMessage, false);
 
-        // If we already have token from URL, proceed without handshake
-        if (this.token) {
-          this.finishInit(apiClient, resolve);
-          // Continua o handshake para obter user/context quando possível.
-        }
-
         // Initiate handshake with parent
-        try {
-          window.parent.postMessage({ type: 'workz-sdk:init' }, '*');
-        } catch(e) {
-          console.warn('Failed to initiate handshake:', e);
-        }
+        const sendInit = () => {
+          try {
+            window.parent.postMessage({ type: 'workz-sdk:init' }, targetOrigin);
+          } catch (e) {
+            console.warn('Failed to initiate handshake:', e);
+          }
+        };
+
+        sendInit();
+
+        const startedAt = Date.now();
+        const timer = setInterval(() => {
+          if (gotAuth) {
+            clearInterval(timer);
+            return;
+          }
+          if (Date.now() - startedAt > 6000) {
+            clearInterval(timer);
+            return;
+          }
+          sendInit();
+        }, 250);
       });
     }
 
@@ -208,6 +224,27 @@
     isReady() {
       return this.ready;
     }
+
+    isOriginAllowed(origin) {
+      const origins = this.allowedOrigins;
+      if (!Array.isArray(origins) || origins.length === 0) {
+        return this.enforceEmbed ? false : true;
+      }
+      if (origins.includes('*')) return true;
+      if (!origin) return false;
+      return origins.includes(origin);
+    }
+
+    getHandshakeTargetOrigin() {
+      try {
+        const ref = document.referrer ? new URL(document.referrer).origin : '';
+        if (ref) return ref;
+      } catch (_) {}
+      if (typeof window !== 'undefined' && window.location && window.location.origin) {
+        return window.location.origin;
+      }
+      return null;
+    }
   }
 
   // API Client Module
@@ -216,6 +253,7 @@
       this.baseUrl = config.baseUrl || '/api';
       this.authModule = config.authModule;
       this.guard = config.guard || null;
+      this.telemetryHook = typeof config.telemetryHook === 'function' ? config.telemetryHook : null;
     }
 
     buildUrl(path) {
@@ -236,11 +274,22 @@
     }
 
     async request(method, path, body = null) {
+      const startTs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       const url = this.buildUrl(path);
       if (typeof this.guard === 'function') {
         try {
           const guardResult = this.guard({ method, path, body });
           if (guardResult && guardResult.blocked) {
+            if (this.telemetryHook) {
+              const endTs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+              this.telemetryHook({
+                type: 'api',
+                method: String(method || '').toUpperCase(),
+                path: String(path || ''),
+                durationMs: Math.max(0, Math.round(endTs - startTs)),
+                ok: false
+              });
+            }
             return {
               success: false,
               status: guardResult.status || 403,
@@ -302,6 +351,18 @@
         } catch (_) {}
       }
 
+      if (this.telemetryHook) {
+        const endTs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        const ok = response.ok && !(data && data.success === false);
+        this.telemetryHook({
+          type: 'api',
+          method: String(method || '').toUpperCase(),
+          path: String(path || ''),
+          durationMs: Math.max(0, Math.round(endTs - startTs)),
+          ok: ok
+        });
+      }
+
       return data;
     }
 
@@ -324,12 +385,45 @@
 
   // Storage Module
   class StorageModule {
-    constructor(apiClient, authModule) {
+    constructor(apiClient, authModule, guard, telemetryHook, scopeResolver) {
       this.apiClient = apiClient;
       this.authModule = authModule;
+      this.guard = typeof guard === 'function' ? guard : null;
+      this.telemetryHook = typeof telemetryHook === 'function' ? telemetryHook : null;
+      this.scopeResolver = typeof scopeResolver === 'function' ? scopeResolver : null;
+    }
+
+    checkGuard(action) {
+      if (this.guard) {
+        try {
+          const res = this.guard(action);
+          if (res && res.blocked) {
+            if (this.telemetryHook && action && action.action) {
+              this.telemetryHook({
+                type: 'storage',
+                op: action.action,
+                ok: false,
+                reason: res.reason || res.code || res.message || 'blocked'
+              });
+            }
+            return {
+              success: false,
+              status: res.status || 403,
+              code: res.code || 'blocked',
+              message: res.message || 'Ação bloqueada pelo SDK'
+            };
+          }
+        } catch (e) {
+          return { success: false, status: 500, code: 'guard_error', message: e?.message || 'Erro no guard' };
+        }
+      }
+      return null;
     }
 
     getContextScope() {
+      if (this.scopeResolver && this.scopeResolver() === 'user') {
+        return this.getUserScope();
+      }
       const ctx = this.authModule.getContext ? this.authModule.getContext() : null;
       if (ctx && typeof ctx === 'object') {
         const rawType = String(ctx.type || '').toLowerCase();
@@ -355,16 +449,25 @@
     // Key-Value Storage
     get kv() {
       return {
-        set: async (data) => {
+        set: async (data, value, ttl) => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'kv.set' });
+          if (blocked) return blocked;
+          let payload = data;
+          if (typeof data === 'string') {
+            payload = { key: data, value: value, ttl: ttl };
+          }
+          payload = payload && typeof payload === 'object' ? payload : {};
           return this.apiClient.post('/appdata/kv', {
-            key: data.key,
-            value: data.value,
-            ttl: data.ttl,
+            key: payload.key,
+            value: payload.value,
+            ttl: payload.ttl,
             ...this.getContextScope()
           });
         },
 
         get: async (key) => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'kv.get' });
+          if (blocked) return blocked;
           const params = new URLSearchParams({
             key: key,
             ...this.getContextScope()
@@ -373,19 +476,18 @@
         },
 
         delete: async (key) => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'kv.delete' });
+          if (blocked) return blocked;
           const params = new URLSearchParams({
             key: key,
             ...this.getContextScope()
           });
-          const url = this.apiClient.buildUrl(`/appdata/kv?${params}`);
-          const response = await fetch(url, {
-            method: 'DELETE',
-            headers: this.apiClient.getHeaders()
-          });
-          return response.json();
+          return this.apiClient.delete(`/appdata/kv?${params}`);
         },
 
         list: async () => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'kv.list' });
+          if (blocked) return blocked;
           const params = new URLSearchParams(this.getContextScope());
           return this.apiClient.get(`/appdata/kv?${params}`);
         }
@@ -396,6 +498,8 @@
     get docs() {
       return {
         save: async (id, document) => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'docs.save', docType: 'user_data' });
+          if (blocked) return blocked;
           return this.apiClient.post('/appdata/docs/upsert', {
             docType: 'user_data',
             docId: id,
@@ -405,6 +509,8 @@
         },
 
         get: async (id) => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'docs.get', docType: 'user_data' });
+          if (blocked) return blocked;
           return this.apiClient.post('/appdata/docs/query', {
             docType: 'user_data',
             filters: { docId: id },
@@ -413,16 +519,15 @@
         },
 
         delete: async (id) => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'docs.delete', docType: 'user_data' });
+          if (blocked) return blocked;
           const params = new URLSearchParams(this.getContextScope());
-          const url = this.apiClient.buildUrl(`/appdata/docs/user_data/${encodeURIComponent(id)}?${params}`);
-          const response = await fetch(url, {
-            method: 'DELETE',
-            headers: this.apiClient.getHeaders()
-          });
-          return response.json();
+          return this.apiClient.delete(`/appdata/docs/user_data/${encodeURIComponent(id)}?${params}`);
         },
 
         list: async () => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'docs.list', docType: 'user_data' });
+          if (blocked) return blocked;
           return this.apiClient.post('/appdata/docs/query', {
             docType: 'user_data',
             filters: {},
@@ -431,6 +536,8 @@
         },
 
         query: async (query) => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'docs.query', docType: 'user_data' });
+          if (blocked) return blocked;
           return this.apiClient.post('/appdata/docs/query', {
             docType: 'user_data',
             filters: query,
@@ -444,6 +551,8 @@
     get blobs() {
       return {
         upload: async (name, file) => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'blobs.upload' });
+          if (blocked) return blocked;
           const formData = new FormData();
           formData.append('name', name);
           formData.append('file', file);
@@ -452,17 +561,21 @@
           formData.append('scopeId', scope.scopeId);
 
           const url = this.apiClient.buildUrl('/appdata/blobs/upload');
+          const headers = {};
+          if (this.authModule.getToken()) {
+            headers['Authorization'] = 'Bearer ' + this.authModule.getToken();
+          }
           const response = await fetch(url, {
             method: 'POST',
-            headers: {
-              'Authorization': this.authModule.getToken() ? 'Bearer ' + this.authModule.getToken() : undefined
-            },
+            headers,
             body: formData
           });
           return response.json();
         },
 
         get: async (id) => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'blobs.get' });
+          if (blocked) return blocked;
           const params = new URLSearchParams(this.getContextScope());
           if (this.authModule.getToken()) {
             params.set('token', this.authModule.getToken());
@@ -479,16 +592,15 @@
         },
 
         delete: async (id) => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'blobs.delete' });
+          if (blocked) return blocked;
           const params = new URLSearchParams(this.getContextScope());
-          const url = this.apiClient.buildUrl(`/appdata/blobs/delete/${encodeURIComponent(id)}?${params}`);
-          const response = await fetch(url, {
-            method: 'DELETE',
-            headers: this.apiClient.getHeaders()
-          });
-          return response.json();
+          return this.apiClient.delete(`/appdata/blobs/delete/${encodeURIComponent(id)}?${params}`);
         },
 
         list: async () => {
+          const blocked = this.checkGuard({ type: 'storage', action: 'blobs.list' });
+          if (blocked) return blocked;
           const params = new URLSearchParams(this.getContextScope());
           return this.apiClient.get(`/appdata/blobs/list?${params}`);
         }
@@ -511,7 +623,9 @@
     async postMessage(type, payload) {
       // Override in platform-specific adapters
       try {
-        window.parent.postMessage(Object.assign({ type }, payload || {}), '*');
+        const targetOrigin = this.sdk ? this.sdk.getPostMessageTargetOrigin() : undefined;
+        if (!targetOrigin) return;
+        window.parent.postMessage(Object.assign({ type }, payload || {}), targetOrigin);
       } catch(e) {
         console.warn('Failed to post message:', e);
       }
@@ -557,7 +671,10 @@
       // Enhanced message posting for Flutter Web
       const message = Object.assign({ type, platform: 'flutter-web' }, payload || {});
       try {
-        window.parent.postMessage(message, '*');
+        const targetOrigin = this.sdk ? this.sdk.getPostMessageTargetOrigin() : undefined;
+        if (targetOrigin) {
+          window.parent.postMessage(message, targetOrigin);
+        }
         // Also try to send to Flutter if available
         if (window.flutter && window.flutter.postMessage) {
           window.flutter.postMessage(message);
@@ -582,9 +699,12 @@
       this.initialized = false;
       this.appConfig = null;
       this.manifest = null;
+      this.manifestValidation = null;
       this.contextAllowed = true;
       this.contextDenyReason = null;
       this._postMessageHandler = null;
+      this._telemetryBuffer = [];
+      this._telemetryBufferSize = 200;
     }
 
     async init(config = {}) {
@@ -595,24 +715,52 @@
 
       // Detect platform
       this.platform = PlatformDetector.detect();
+
+      this.appConfig = config.appConfig || global.WorkzAppConfig || {};
+      const mode = config.mode || (this.platform.isIframe ? 'embed' : 'standalone');
+      const requireManifest = mode === 'embed' || !!this.appConfig.slug;
+      const manifestRaw = this.appConfig.manifest || this.appConfig.workzManifest || null;
+      const manifestResult = this.validateManifest(manifestRaw, {
+        requireManifest: requireManifest,
+        embed: mode === 'embed',
+        referrerOrigin: this.getReferrerOrigin()
+      });
+      this.manifestValidation = manifestResult;
+      if (manifestResult.ok) {
+        this.manifest = manifestResult.normalizedManifest;
+        this.refreshContextAccess();
+      } else {
+        this.manifest = manifestResult.normalizedManifest || null;
+        this.contextAllowed = false;
+        this.contextDenyReason = { code: 'manifest_invalid', errors: manifestResult.errors.slice() };
+      }
       
       // Initialize authentication module
       this.auth = new AuthenticationModule({
         onAuthUpdate: () => {
-          if (this.manifest) {
+          if (this.manifest && this.manifestValidation?.ok !== false) {
             this.refreshContextAccess();
           }
-        }
+        },
+        allowedOrigins: this.manifest?.sandbox?.postMessage?.allowedOrigins || null,
+        enforceEmbed: mode === 'embed'
       });
       
       // Initialize API client
       this.apiClient = new ApiClient({
         baseUrl: config.baseUrl || '/api',
-        authModule: this.auth
+        authModule: this.auth,
+        telemetryHook: (payload) => this.handleTelemetry(payload)
       });
       
       // Initialize storage module
-      this.storage = new StorageModule(this.apiClient, this.auth);
+      this.storage = new StorageModule(
+        this.apiClient,
+        this.auth,
+        (action) => this.storageGuard(action),
+        (payload) => this.handleTelemetry(payload),
+        () => this.getStorageScopeMode()
+      );
       
       // Initialize payments module (Phase 1: one-time purchases)
       this.payments = {
@@ -683,22 +831,15 @@
       await this.adapter.initialize();
       
       // Initialize authentication based on mode
-      const mode = config.mode || (this.platform.isIframe ? 'embed' : 'standalone');
-      
       let authResult;
       if (mode === 'embed') {
         authResult = await this.auth.initEmbed(this.apiClient);
       } else {
         authResult = await this.auth.initStandalone(this.apiClient);
       }
-
-      this.appConfig = config.appConfig || global.WorkzAppConfig || {};
-      this.manifest = this.resolveManifest(this.appConfig.manifest || this.appConfig.workzManifest || null);
-      this.refreshContextAccess();
       this.apiClient.guard = ({ method, path }) => {
-        if (this.contextAllowed) return null;
-        const p = String(path || '');
-        const m = String(method || '').toUpperCase();
+        const p = this.normalizeApiPath(path);
+        const m = this.normalizeApiMethod(method);
         // Allow bootstrapping endpoints before context is chosen.
         const allowlist = [
           'GET /me',
@@ -706,14 +847,35 @@
           'GET /apps/storage/stats'
         ];
         if (allowlist.includes(`${m} ${p}`)) return null;
-        const required = this.contextDenyReason?.required || 'unknown';
-        const received = this.contextDenyReason?.received || 'unknown';
-        return {
-          blocked: true,
-          status: 403,
-          code: 'context_not_allowed',
-          message: `Contexto inválido para o app (necessário: ${required}, recebido: ${received}).`
-        };
+        if (!this.contextAllowed) {
+          const reason = this.contextDenyReason || {};
+          if (reason.code === 'manifest_invalid') {
+            const details = Array.isArray(reason.errors) ? reason.errors.join('; ') : 'Manifesto inválido';
+            return {
+              blocked: true,
+              status: 403,
+              code: 'manifest_invalid',
+              message: `Manifesto inválido: ${details}`
+            };
+          }
+          const required = reason.required || 'unknown';
+          const received = reason.received || 'unknown';
+          return {
+            blocked: true,
+            status: 403,
+            code: 'context_not_allowed',
+            message: `Contexto inválido para o app (necessário: ${required}, recebido: ${received}).`
+          };
+        }
+        if (!this.isApiAllowed(m, p)) {
+          return {
+            blocked: true,
+            status: 403,
+            code: 'capability_denied',
+            message: 'Rota de API não permitida pelo manifesto.'
+          };
+        }
+        return null;
       };
 
       this.initialized = true;
@@ -725,6 +887,24 @@
           const type = data.type;
           if (!type || typeof type !== 'string') return;
           if (type === 'workz-sdk:init' || type === 'workz-sdk:auth') return;
+          if (mode === 'embed' && this.platform && this.platform.isIframe) {
+            if (ev?.source !== window.parent) {
+              this.emitSecurity('postMessage', 'source_mismatch', { type, origin: ev?.origin || '' });
+              return;
+            }
+            if (!this.isOriginAllowed(ev?.origin)) {
+              this.emitSecurity('postMessage', 'origin_not_allowed', { type, origin: ev?.origin || '' });
+              return;
+            }
+          }
+          if (!this.contextAllowed) {
+            this.emitSecurity('event_subscribe', 'context_not_allowed', { type });
+            return;
+          }
+          if (!this.isEventSubscribeAllowed(type)) {
+            this.emitSecurity('event_subscribe', 'event_not_allowed', { type });
+            return;
+          }
           const payload = (data.payload !== undefined) ? data.payload : data;
           this.dispatchLocal(type, payload);
         };
@@ -754,6 +934,538 @@
       return null;
     }
 
+    normalizeApiPath(path) {
+      let p = String(path || '').trim();
+      if (!p) return '';
+      p = p.split('?')[0];
+      if (!p.startsWith('/')) p = '/' + p;
+      if (p === '/api') return '/';
+      if (p.indexOf('/api/') === 0) p = p.slice(4) || '/';
+      return p.toLowerCase();
+    }
+
+    normalizeApiMethod(method) {
+      return String(method || '').trim().toUpperCase();
+    }
+
+    parseApiAllowEntry(entry, index, errors) {
+      if (typeof entry === 'string') {
+        const raw = entry.trim();
+        const match = raw.match(/^([A-Za-z]+)\s+(.+)$/);
+        if (!match) {
+          errors.push(`manifest.capabilities.api.allow[${index}] deve ser 'METODO /rota'.`);
+          return null;
+        }
+        const method = this.normalizeApiMethod(match[1]);
+        const path = this.normalizeApiPath(match[2]);
+        if (!method || !path) {
+          errors.push(`manifest.capabilities.api.allow[${index}] inválido.`);
+          return null;
+        }
+        return { method, path };
+      }
+      if (entry && typeof entry === 'object') {
+        const method = this.normalizeApiMethod(entry.method);
+        const path = this.normalizeApiPath(entry.path);
+        if (!method || !path) {
+          errors.push(`manifest.capabilities.api.allow[${index}] deve ter method e path.`);
+          return null;
+        }
+        return { method, path };
+      }
+      errors.push(`manifest.capabilities.api.allow[${index}] deve ser string ou objeto.`);
+      return null;
+    }
+
+    normalizeAllowedOrigins(origins, errors) {
+      if (origins === undefined || origins === null) return ['*'];
+      let list = origins;
+      if (typeof origins === 'string') {
+        list = [origins];
+      }
+      if (!Array.isArray(list)) {
+        errors.push('manifest.sandbox.postMessage.allowedOrigins deve ser array ou string.');
+        return ['*'];
+      }
+      const normalized = list.map((item, index) => {
+        if (typeof item !== 'string') {
+          errors.push(`manifest.sandbox.postMessage.allowedOrigins[${index}] deve ser string.`);
+          return '';
+        }
+        return item.trim();
+      }).filter(Boolean);
+      return normalized.length ? normalized : ['*'];
+    }
+
+    validateManifest(rawManifest, options = {}) {
+      const errors = [];
+      let manifest = rawManifest;
+      const requireManifest = !!options.requireManifest;
+      const isEmbed = !!options.embed;
+      const referrerOrigin = options.referrerOrigin || '';
+
+      if (manifest === null || manifest === undefined) {
+        if (requireManifest) {
+          errors.push('manifest é obrigatório neste contexto.');
+          return { ok: false, errors };
+        }
+        return {
+          ok: true,
+          errors: [],
+          normalizedManifest: {
+            runtime: null,
+            contextRequirements: { mode: 'hybrid' },
+            capabilities: {
+              api: { allowAll: true, allow: [] },
+              storage: {
+                enabled: true,
+                kv: true,
+                docs: true,
+                docsTypes: ['user_data'],
+                blobs: true,
+                scope: 'context'
+              },
+              events: { enabled: true, allowAll: true, allow: [], publish: [], subscribe: [] }
+            },
+            telemetry: { enabled: false },
+            sandbox: { postMessage: { allowedOrigins: ['*'] } }
+          }
+        };
+      }
+
+      if (typeof manifest === 'string') {
+        const raw = manifest.trim();
+        if (!raw) {
+          if (requireManifest) {
+            errors.push('manifest é obrigatório neste contexto.');
+            return { ok: false, errors };
+          }
+          return {
+            ok: true,
+            errors: [],
+            normalizedManifest: {
+              runtime: null,
+              contextRequirements: { mode: 'hybrid' },
+              capabilities: {
+                api: { allowAll: true, allow: [] },
+                storage: {
+                  enabled: true,
+                  kv: true,
+                  docs: true,
+                  docsTypes: ['user_data'],
+                  blobs: true,
+                  scope: 'context'
+                },
+                events: { enabled: true, allowAll: true, allow: [], publish: [], subscribe: [] }
+              },
+              telemetry: { enabled: false },
+              sandbox: { postMessage: { allowedOrigins: ['*'] } }
+            }
+          };
+        } else {
+          try {
+            manifest = JSON.parse(raw);
+          } catch (_) {
+            errors.push('manifest JSON inválido.');
+            manifest = null;
+          }
+        }
+      }
+
+      if (!manifest || typeof manifest !== 'object') {
+        errors.push('manifest deve ser um objeto.');
+        return { ok: false, errors };
+      }
+
+      const normalized = {
+        runtime: null,
+        contextRequirements: { mode: 'hybrid' },
+        capabilities: {
+          api: { allowAll: true, allow: [] },
+          storage: {
+            enabled: true,
+            kv: true,
+            docs: true,
+            docsTypes: ['user_data'],
+            blobs: true,
+            scope: 'context'
+          },
+          events: { enabled: true, allowAll: true, allow: [], publish: [], subscribe: [] }
+        },
+        telemetry: { enabled: false },
+        sandbox: { postMessage: { allowedOrigins: ['*'] } }
+      };
+
+      if (typeof manifest.runtime !== 'string' || !manifest.runtime.trim()) {
+        errors.push('manifest.runtime deve ser string não vazia.');
+      } else {
+        normalized.runtime = manifest.runtime.trim().toLowerCase();
+      }
+
+      if (!manifest.contextRequirements || typeof manifest.contextRequirements !== 'object') {
+        errors.push('manifest.contextRequirements deve ser um objeto.');
+      } else {
+        const mode = String(manifest.contextRequirements.mode || '').trim().toLowerCase();
+        const allowedModes = ['user', 'business', 'team', 'hybrid'];
+        if (!mode || !allowedModes.includes(mode)) {
+          errors.push(`manifest.contextRequirements.mode deve ser um de: ${allowedModes.join(', ')}.`);
+        } else {
+          normalized.contextRequirements.mode = mode;
+        }
+        if (typeof manifest.contextRequirements.allowContextSwitch === 'boolean') {
+          normalized.contextRequirements.allowContextSwitch = manifest.contextRequirements.allowContextSwitch;
+        }
+      }
+
+      if (!manifest.capabilities || typeof manifest.capabilities !== 'object') {
+        errors.push('manifest.capabilities deve ser um objeto.');
+      } else {
+        const api = manifest.capabilities.api;
+        if (!api || typeof api !== 'object') {
+          errors.push('manifest.capabilities.api deve ser um objeto.');
+        } else if (api.allow !== undefined) {
+          let allowList = api.allow;
+          if (typeof allowList === 'string') {
+            allowList = [allowList];
+          }
+          if (!Array.isArray(allowList)) {
+            errors.push('manifest.capabilities.api.allow deve ser array ou string.');
+          } else {
+            normalized.capabilities.api.allowAll = false;
+            allowList.forEach((entry, index) => {
+              const parsed = this.parseApiAllowEntry(entry, index, errors);
+              if (parsed) normalized.capabilities.api.allow.push(parsed);
+            });
+          }
+        }
+
+        const storage = manifest.capabilities.storage;
+        if (storage !== undefined) {
+          let docsTypesProvided = false;
+          if (typeof storage === 'boolean') {
+            normalized.capabilities.storage.enabled = storage;
+            normalized.capabilities.storage.kv = storage;
+            normalized.capabilities.storage.docs = storage;
+            normalized.capabilities.storage.blobs = storage;
+            normalized.capabilities.storage.docsTypes = storage ? ['user_data'] : [];
+          } else if (storage && typeof storage === 'object') {
+            const kv = (storage.kv !== undefined) ? Boolean(storage.kv) : normalized.capabilities.storage.kv;
+            let docs = normalized.capabilities.storage.docs;
+            let docsTypes = normalized.capabilities.storage.docsTypes.slice();
+            let docsTypesSource = '';
+            if (storage.docs !== undefined) {
+              if (typeof storage.docs === 'boolean') {
+                docs = storage.docs;
+              } else if (storage.docs && typeof storage.docs === 'object') {
+                if (storage.docs.enabled !== undefined) {
+                  docs = Boolean(storage.docs.enabled);
+                } else {
+                  docs = true;
+                }
+                if (Array.isArray(storage.docs.types)) {
+                  docsTypesProvided = true;
+                  docsTypesSource = 'docs.types';
+                  docsTypes = storage.docs.types.map((item, index) => {
+                    if (typeof item !== 'string') {
+                      errors.push(`manifest.capabilities.storage.docs.types[${index}] deve ser string.`);
+                      return '';
+                    }
+                    return item.trim().toLowerCase();
+                  }).filter(Boolean);
+                }
+              } else {
+                errors.push('manifest.capabilities.storage.docs deve ser boolean ou objeto.');
+              }
+            }
+            const blobs = (storage.blobs !== undefined) ? Boolean(storage.blobs) : normalized.capabilities.storage.blobs;
+            normalized.capabilities.storage.kv = kv;
+            normalized.capabilities.storage.docs = docs;
+            if (!docsTypesProvided && Array.isArray(storage.docsTypes)) {
+              docsTypesProvided = true;
+              docsTypesSource = 'docsTypes';
+              docsTypes = storage.docsTypes.map((item, index) => {
+                if (typeof item !== 'string') {
+                  errors.push(`manifest.capabilities.storage.docsTypes[${index}] deve ser string.`);
+                  return '';
+                }
+                return item.trim().toLowerCase();
+              }).filter(Boolean);
+            }
+            if (docs) {
+              if (!docsTypesProvided) {
+                docsTypes = ['user_data'];
+              } else if (docsTypes.length === 0) {
+                // PIPE rule: empty docs.types is invalid when docs is enabled.
+                errors.push(
+                  docsTypesSource === 'docsTypes'
+                    ? 'manifest.capabilities.storage.docsTypes não pode ser vazio.'
+                    : 'manifest.capabilities.storage.docs.types não pode ser vazio.'
+                );
+              }
+            }
+            if (!docs) docsTypes = [];
+            normalized.capabilities.storage.docsTypes = docsTypes;
+            normalized.capabilities.storage.blobs = blobs;
+            normalized.capabilities.storage.enabled = kv || docs || blobs;
+
+            if (storage.scope !== undefined) {
+              const scope = String(storage.scope || '').trim().toLowerCase();
+              if (!scope || (scope !== 'user' && scope !== 'context')) {
+                errors.push('manifest.capabilities.storage.scope deve ser "user" ou "context".');
+              } else {
+                normalized.capabilities.storage.scope = scope;
+              }
+            }
+          } else {
+            errors.push('manifest.capabilities.storage deve ser boolean ou objeto.');
+          }
+        }
+
+        const events = manifest.capabilities.events;
+        if (events !== undefined) {
+          if (typeof events === 'boolean') {
+            normalized.capabilities.events.enabled = events;
+            normalized.capabilities.events.allowAll = events;
+          } else if (Array.isArray(events)) {
+            normalized.capabilities.events.allowAll = false;
+            normalized.capabilities.events.allow = events.map((item, index) => {
+              if (typeof item !== 'string') {
+                errors.push(`manifest.capabilities.events[${index}] deve ser string.`);
+                return '';
+              }
+              return item.trim();
+            }).filter(Boolean);
+            normalized.capabilities.events.publish = normalized.capabilities.events.allow.slice();
+            normalized.capabilities.events.subscribe = normalized.capabilities.events.allow.slice();
+            normalized.capabilities.events.enabled = normalized.capabilities.events.allow.length > 0;
+          } else if (events && typeof events === 'object') {
+            const hasLists = events.allow !== undefined || events.publish !== undefined || events.subscribe !== undefined;
+            if (events.allow !== undefined) {
+              if (!Array.isArray(events.allow)) {
+                errors.push('manifest.capabilities.events.allow deve ser array.');
+              } else {
+                normalized.capabilities.events.allowAll = false;
+                normalized.capabilities.events.allow = events.allow.map((item, index) => {
+                  if (typeof item !== 'string') {
+                    errors.push(`manifest.capabilities.events.allow[${index}] deve ser string.`);
+                    return '';
+                  }
+                  return item.trim();
+                }).filter(Boolean);
+                normalized.capabilities.events.publish = normalized.capabilities.events.allow.slice();
+                normalized.capabilities.events.subscribe = normalized.capabilities.events.allow.slice();
+              }
+            }
+            if (events.publish !== undefined) {
+              if (!Array.isArray(events.publish)) {
+                errors.push('manifest.capabilities.events.publish deve ser array.');
+              } else {
+                normalized.capabilities.events.allowAll = false;
+                normalized.capabilities.events.publish = events.publish.map((item, index) => {
+                  if (typeof item !== 'string') {
+                    errors.push(`manifest.capabilities.events.publish[${index}] deve ser string.`);
+                    return '';
+                  }
+                  return item.trim();
+                }).filter(Boolean);
+              }
+            }
+            if (events.subscribe !== undefined) {
+              if (!Array.isArray(events.subscribe)) {
+                errors.push('manifest.capabilities.events.subscribe deve ser array.');
+              } else {
+                normalized.capabilities.events.allowAll = false;
+                normalized.capabilities.events.subscribe = events.subscribe.map((item, index) => {
+                  if (typeof item !== 'string') {
+                    errors.push(`manifest.capabilities.events.subscribe[${index}] deve ser string.`);
+                    return '';
+                  }
+                  return item.trim();
+                }).filter(Boolean);
+              }
+            }
+            if (events.enabled !== undefined) {
+              normalized.capabilities.events.enabled = Boolean(events.enabled);
+              if (!normalized.capabilities.events.enabled) {
+                normalized.capabilities.events.allowAll = false;
+                normalized.capabilities.events.allow = [];
+                normalized.capabilities.events.publish = [];
+                normalized.capabilities.events.subscribe = [];
+              }
+            } else if (hasLists) {
+              const hasAny = normalized.capabilities.events.publish.length > 0 ||
+                normalized.capabilities.events.subscribe.length > 0;
+              normalized.capabilities.events.enabled = hasAny;
+            } else {
+              normalized.capabilities.events.allowAll = false;
+            }
+          } else {
+            errors.push('manifest.capabilities.events deve ser boolean, array ou objeto.');
+          }
+        }
+      }
+
+      if (manifest.telemetry !== undefined) {
+        if (!manifest.telemetry || typeof manifest.telemetry !== 'object') {
+          errors.push('manifest.telemetry deve ser um objeto.');
+        } else if (manifest.telemetry.enabled !== undefined) {
+          normalized.telemetry.enabled = Boolean(manifest.telemetry.enabled);
+        }
+      }
+
+      if (!manifest.sandbox || typeof manifest.sandbox !== 'object') {
+        errors.push('manifest.sandbox deve ser um objeto.');
+      } else {
+        const postMessage = manifest.sandbox.postMessage;
+        if (!postMessage || typeof postMessage !== 'object') {
+          errors.push('manifest.sandbox.postMessage deve ser um objeto.');
+        } else {
+          normalized.sandbox.postMessage.allowedOrigins = this.normalizeAllowedOrigins(
+            postMessage.allowedOrigins,
+            errors
+          );
+          if (isEmbed && normalized.sandbox.postMessage.allowedOrigins.includes('*')) {
+            if (referrerOrigin) {
+              normalized.sandbox.postMessage.allowedOrigins = [referrerOrigin];
+            } else {
+              errors.push('manifest.sandbox.postMessage.allowedOrigins não pode conter "*" em embed.');
+              normalized.sandbox.postMessage.allowedOrigins = [];
+            }
+          }
+        }
+      }
+
+      return {
+        ok: errors.length === 0,
+        errors,
+        normalizedManifest: normalized
+      };
+    }
+
+    isApiAllowed(method, path) {
+      if (!this.manifest || !this.manifest.capabilities || !this.manifest.capabilities.api) {
+        return true;
+      }
+      const api = this.manifest.capabilities.api;
+      if (api.allowAll) return true;
+      const allow = Array.isArray(api.allow) ? api.allow : [];
+      const normalizedMethod = this.normalizeApiMethod(method);
+      const normalizedPath = this.normalizeApiPath(path);
+      return allow.some((rule) => {
+        if (!rule || !rule.method || !rule.path) return false;
+        if (rule.method !== normalizedMethod) return false;
+        if (rule.path === '*' || rule.path === '/*') return true;
+        if (rule.path.endsWith('*')) {
+          const prefix = rule.path.slice(0, -1);
+          return normalizedPath.startsWith(prefix);
+        }
+        return rule.path === normalizedPath;
+      });
+    }
+
+    isStorageAllowed(action) {
+      if (!this.manifest || !this.manifest.capabilities || !this.manifest.capabilities.storage) {
+        return true;
+      }
+      const storage = this.manifest.capabilities.storage;
+      if (storage.enabled === false) return false;
+      const enabled = (storage.enabled === true)
+        || Boolean(storage.kv || (storage.docs && (storage.docs.enabled || Array.isArray(storage.docs.types))) || storage.blobs);
+      if (!action) return enabled;
+      if (action.indexOf('kv.') === 0) return storage.kv;
+      if (action.indexOf('docs.') === 0) return storage.docs;
+      if (action.indexOf('blobs.') === 0) return storage.blobs;
+      return enabled;
+    }
+
+    isDocTypeAllowed(docType) {
+      if (!this.manifest || !this.manifest.capabilities || !this.manifest.capabilities.storage) {
+        return true;
+      }
+      const storage = this.manifest.capabilities.storage;
+      if (!storage.docs) return false;
+      const types = Array.isArray(storage.docsTypes) ? storage.docsTypes : [];
+      if (!types.length) return false;
+      if (!docType) return false;
+      return types.includes(String(docType).toLowerCase());
+    }
+
+    getStorageScopeMode() {
+      const scope = this.manifest?.capabilities?.storage?.scope;
+      return scope === 'user' ? 'user' : 'context';
+    }
+
+    matchEventRule(rule, type) {
+      const r = String(rule || '').trim();
+      if (!r) return false;
+      if (r === '*') return true;
+      if (r.endsWith('*')) {
+        const prefix = r.slice(0, -1);
+        return String(type || '').startsWith(prefix);
+      }
+      return r === type;
+    }
+
+    isEventPublishAllowed(type) {
+      if (!this.manifest || !this.manifest.capabilities || !this.manifest.capabilities.events) {
+        return true;
+      }
+      const events = this.manifest.capabilities.events;
+      if (!events.enabled) return false;
+      if (events.allowAll) return true;
+      const allow = Array.isArray(events.publish) ? events.publish : [];
+      if (!allow.length) return false;
+      return allow.some((rule) => this.matchEventRule(rule, type));
+    }
+
+    isEventSubscribeAllowed(type) {
+      if (!this.manifest || !this.manifest.capabilities || !this.manifest.capabilities.events) {
+        return true;
+      }
+      const events = this.manifest.capabilities.events;
+      if (!events.enabled) return false;
+      if (events.allowAll) return true;
+      const allow = Array.isArray(events.subscribe) ? events.subscribe : [];
+      if (!allow.length) return false;
+      return allow.some((rule) => this.matchEventRule(rule, type));
+    }
+
+    isOriginAllowed(origin) {
+      const origins = this.manifest?.sandbox?.postMessage?.allowedOrigins;
+      if (!Array.isArray(origins) || origins.length === 0) return true;
+      if (origins.includes('*')) return true;
+      if (!origin) return false;
+      return origins.includes(origin);
+    }
+
+    getReferrerOrigin() {
+      try {
+        const ref = document.referrer ? new URL(document.referrer).origin : '';
+        if (ref) return ref;
+      } catch (_) {}
+      return '';
+    }
+
+    getPostMessageTargetOrigin() {
+      const origins = this.manifest?.sandbox?.postMessage?.allowedOrigins;
+      if (Array.isArray(origins)) {
+        const primary = origins.find((item) => item && item !== '*');
+        if (primary) return primary;
+      }
+      try {
+        const referrer = document.referrer ? new URL(document.referrer).origin : '';
+        if (referrer) return referrer;
+      } catch (_) {}
+      if (typeof window !== 'undefined' && window.location && window.location.origin) {
+        return window.location.origin;
+      }
+      return null;
+    }
+
+    isTelemetryEnabled() {
+      return Boolean(this.manifest?.telemetry?.enabled);
+    }
+
     enforceContextRequirements() {
       if (!this.manifest || !this.manifest.contextRequirements) {
         this.contextDenyReason = null;
@@ -768,7 +1480,7 @@
       const ctxType = String(ctx.type || '').toLowerCase();
       const allowed = (ctxType === mode);
       if (!allowed) {
-        this.contextDenyReason = { required: mode, received: ctxType || 'none' };
+        this.contextDenyReason = { code: 'context_not_allowed', required: mode, received: ctxType || 'none' };
         this.emit('app:context_denied', {
           required: mode,
           received: ctxType || 'none',
@@ -781,8 +1493,57 @@
     }
 
     refreshContextAccess() {
+      if (this.manifestValidation && this.manifestValidation.ok === false) {
+        this.contextAllowed = false;
+        return this.contextAllowed;
+      }
       this.contextAllowed = this.enforceContextRequirements();
       return this.contextAllowed;
+    }
+
+    storageGuard(action) {
+      if (!this.contextAllowed) {
+        const reason = this.contextDenyReason || {};
+        if (reason.code === 'manifest_invalid') {
+          return {
+            blocked: true,
+            status: 403,
+            code: 'manifest_invalid',
+            message: 'Manifesto inválido: storage bloqueado.',
+            reason: 'manifest_invalid'
+          };
+        }
+        return {
+          blocked: true,
+          status: 403,
+          code: 'context_not_allowed',
+          message: 'Contexto inválido para storage.',
+          reason: 'context_not_allowed'
+        };
+      }
+      const actionId = action?.action || '';
+      if (!this.isStorageAllowed(actionId)) {
+        return {
+          blocked: true,
+          status: 403,
+          code: 'storage_capability_denied',
+          message: 'Storage não permitido pelo manifesto.',
+          reason: 'storage_capability_denied'
+        };
+      }
+      if (actionId.indexOf('docs.') === 0) {
+        const docType = action?.docType || '';
+        if (!this.isDocTypeAllowed(docType)) {
+          return {
+            blocked: true,
+            status: 403,
+            code: 'storage_capability_denied',
+            message: 'DocType não permitido pelo manifesto.',
+            reason: 'doc_type_not_allowed'
+          };
+        };
+      }
+      return null;
     }
 
     loadAdapter() {
@@ -797,6 +1558,11 @@
 
     // Event system
     on(type, callback) {
+      if (!this.isEventSubscribeAllowed(type)) {
+        console.warn('Evento não permitido para subscribe pelo manifesto:', type);
+        this.emitSecurity('event_subscribe', 'event_subscribe_denied', { type: type });
+        return;
+      }
       if (!this.listeners[type]) {
         this.listeners[type] = [];
       }
@@ -824,12 +1590,77 @@
       }
     }
 
+    isInternalEvent(type) {
+      return type === 'sdk:ready' ||
+        type === 'sdk:telemetry' ||
+        type === 'sdk:security' ||
+        type === 'app:context_denied';
+    }
+
     emit(type, payload) {
+      const internal = this.isInternalEvent(type);
+      if (!internal) {
+        if (!this.contextAllowed) {
+          this.emitSecurity('event_publish', 'context_not_allowed', { type: type });
+          return false;
+        }
+        if (!this.isEventPublishAllowed(type)) {
+          console.warn('Evento não permitido para publish pelo manifesto:', type);
+          this.emitSecurity('event_publish', 'event_publish_denied', { type: type, code: 'event_publish_denied' });
+          return false;
+        }
+      }
       this.dispatchLocal(type, payload);
       // Also emit to parent if in iframe
       if (this.adapter) {
-        this.adapter.postMessage(type, payload);
+        const canPublish = this.contextAllowed && this.isEventPublishAllowed(type);
+        if (type === 'sdk:security' || canPublish) {
+          this.adapter.postMessage(type, payload);
+        }
       }
+      return true;
+    }
+
+    emitSecurity(action, reason, details) {
+      const payload = Object.assign(
+        { action: action, reason: reason },
+        (details && typeof details === 'object') ? details : {}
+      );
+      this.dispatchLocal('sdk:security', payload);
+      if (this.adapter) {
+        this.adapter.postMessage('sdk:security', payload);
+      }
+    }
+
+    handleTelemetry(payload) {
+      if (!this.isTelemetryEnabled()) return;
+      if (!payload || (payload.type !== 'api' && payload.type !== 'storage')) return;
+      if (payload.type === 'api') {
+        this._telemetryBuffer.push({
+          durationMs: Number(payload.durationMs) || 0,
+          ok: Boolean(payload.ok)
+        });
+        if (this._telemetryBuffer.length > this._telemetryBufferSize) {
+          this._telemetryBuffer.splice(0, this._telemetryBuffer.length - this._telemetryBufferSize);
+        }
+      }
+      this.emit('sdk:telemetry', payload);
+    }
+
+    getTelemetrySnapshot() {
+      const samples = this._telemetryBuffer.slice();
+      const count = samples.length;
+      if (!count) {
+        return { count: 0, avgMs: 0, p95Ms: 0 };
+      }
+      const total = samples.reduce((sum, item) => sum + (item.durationMs || 0), 0);
+      const durations = samples.map(item => item.durationMs || 0).sort((a, b) => a - b);
+      const idx = Math.max(0, Math.ceil(0.95 * durations.length) - 1);
+      return {
+        count: count,
+        avgMs: Math.round(total / count),
+        p95Ms: durations[idx] || 0
+      };
     }
 
     // Convenience getters
@@ -843,6 +1674,38 @@
 
     getContext() {
       return this.auth ? this.auth.getContext() : null;
+    }
+
+    setContext(ctx) {
+      if (!this.auth) {
+        console.warn('WorkzSDK.setContext: auth module indisponivel.');
+        return false;
+      }
+      if (this.platform && this.platform.isIframe) {
+        const isPreview = !!(this.appConfig && this.appConfig.preview) ||
+          !!(global && global.WorkzAppConfig && global.WorkzAppConfig.preview);
+        if (!isPreview) {
+          console.warn('WorkzSDK.setContext: blocked in embed (not preview).');
+          return false;
+        }
+        console.warn('WorkzSDK.setContext: allowed in preview iframe.');
+      }
+      if (!ctx || typeof ctx !== 'object') {
+        console.warn('WorkzSDK.setContext: contexto invalido.');
+        return false;
+      }
+      const mode = String(ctx.mode || ctx.type || '').toLowerCase();
+      const id = parseInt(ctx.id, 10);
+      if (!mode || !Number.isFinite(id) || id <= 0) {
+        console.warn('WorkzSDK.setContext: contexto invalido.');
+        return false;
+      }
+      this.auth.context = { type: mode, id: id };
+      if (typeof this.auth.notifyAuthUpdate === 'function') {
+        try { this.auth.notifyAuthUpdate(); } catch (_) {}
+      }
+      this.contextAllowed = this.enforceContextRequirements();
+      return this.contextAllowed;
     }
 
     getPlatform() {
@@ -883,6 +1746,11 @@
 
   // Create singleton instance
   const sdkInstance = new WorkzSDK();
+  if (typeof sdkInstance.validateManifest !== 'function') {
+    sdkInstance.validateManifest = function(manifest) {
+      return WorkzSDK.prototype.validateManifest.call(sdkInstance, manifest);
+    };
+  }
 
   // Export both the class and instance for flexibility
   global.WorkzSDK = sdkInstance;
@@ -892,5 +1760,15 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { WorkzSDK: sdkInstance, WorkzSDKClass };
   }
+
+  /*
+  Manual tests (validateManifest):
+  A) docs true, no docsTypes/docs.types -> ok, docsTypes ["user_data"]
+     WorkzSDK.validateManifest({ runtime: 'js', contextRequirements:{mode:'hybrid'}, capabilities:{ storage:{ docs:true } }, sandbox:{postMessage:{allowedOrigins:['https://x']}} })
+  B) docs true, docsTypes [] -> ok=false, errors include "manifest.capabilities.storage.docsTypes não pode ser vazio."
+     WorkzSDK.validateManifest({ runtime: 'js', contextRequirements:{mode:'hybrid'}, capabilities:{ storage:{ docs:true, docsTypes:[] } }, sandbox:{postMessage:{allowedOrigins:['https://x']}} })
+  C) docs false, docsTypes ["user_data"] -> ok=true, docsTypes []
+     WorkzSDK.validateManifest({ runtime: 'js', contextRequirements:{mode:'hybrid'}, capabilities:{ storage:{ docs:false, docsTypes:['user_data'] } }, sandbox:{postMessage:{allowedOrigins:['https://x']}} })
+  */
 
 })(typeof window !== 'undefined' ? window : globalThis);

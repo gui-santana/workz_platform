@@ -93,6 +93,7 @@ function newWindow(target, id, icon, title) {
     title: title,
     iconSrc: iconSrc
   });
+  try { normalizeWindowPlacement(windowEl); } catch (_) {}
 
   desktop();
   if (target !== null) {
@@ -176,6 +177,48 @@ function newWindow(target, id, icon, title) {
         console.warn('Falha ao aplicar aspect ratio do app:', e);
       }
     });
+  }
+}
+
+function normalizeWindowPlacement(windowEl) {
+  if (!windowEl) return;
+  const wrapper = windowEl.closest('.parentResize') || windowEl;
+  const viewportW = window.innerWidth || document.documentElement.clientWidth || 1024;
+  const viewportH = window.innerHeight || document.documentElement.clientHeight || 768;
+  const minWidth = 320;
+  const minHeight = 240;
+  const maxWidth = 640;
+  const maxHeight = 480;
+  let width = parseInt(windowEl.style.width || '', 10);
+  let height = parseInt(windowEl.style.height || '', 10);
+
+  if (!Number.isFinite(width) || width <= 0) {
+    width = Math.min(maxWidth, Math.max(minWidth, viewportW - 32));
+  }
+  if (!Number.isFinite(height) || height <= 0) {
+    height = Math.min(maxHeight, Math.max(minHeight, viewportH - 48));
+  }
+
+  const left = Math.max(8, Math.round((viewportW - width) / 2));
+  const top = Math.max(8, Math.round((viewportH - height) / 2));
+
+  windowEl.style.width = width + "px";
+  windowEl.style.height = height + "px";
+
+  if (wrapper.classList.contains('parentResize')) {
+    wrapper.style.left = left + "px";
+    wrapper.style.top = top + "px";
+    wrapper.style.margin = "0px";
+    wrapper.style.gridTemplateColumns = "5px " + width + "px 5px";
+    wrapper.style.gridTemplateRows = "5px " + height + "px 5px";
+    wrapper.style.transform = '';
+    wrapper.style.opacity = '';
+  } else {
+    windowEl.style.left = left + "px";
+    windowEl.style.top = top + "px";
+    windowEl.style.margin = "0px";
+    windowEl.style.transform = '';
+    windowEl.style.opacity = '';
   }
 }
 

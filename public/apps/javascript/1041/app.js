@@ -225,9 +225,6 @@ try {
       let url = appData?.embed_url || appData?.src || null;
       if (!url) return;
 
-      if (sso?.token) {
-        url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(sso.token);
-      }
       window.open(url, '_blank');
     } catch (_) { /* ignore */ }
   }

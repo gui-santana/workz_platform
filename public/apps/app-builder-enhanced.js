@@ -1,6218 +1,2627 @@
-// Enhanced App Builder with Storage Management UI
-window.StoreApp = {
-    currentStep: 1,
-    maxSteps: 6,
-    editMode: false,
-    editingAppId: null,
-    appType: "javascript",
-    // Modo simples: preferir sempre o editor de uma única textarea (inclusive para Flutter)
-    // NEW: Control the current view mode: 'list' (my apps) or 'form' (create/edit app)
-    viewMode: 'list', // Default to showing the list of apps
-    useSimpleEditor: true,
-    // Controle de polling do modal de build
-    _buildWatchTimer: null,
-    _buildWatchAppId: null,
-    // Preview (live) controls
-    _activePreviewToken: null,
-    _activePreviewBase: null,
-    _livePreviewMode: null, // 'js' | 'flutter'
-    _livePreviewDebounce: null,
-    _codeMirrorInstance: null,
-    _depsPromise: null, // Promise para rastrear o carregamento de dependências
-    companyFilterId: 'all', // NEW: To filter apps by company
-
-    goToStep(stepNumber) {
-        this.currentStep = stepNumber;
-        this.updateStepDisplay();
-    },
-
-    userCompanies: [],
-    storageStats: null,
-        appData: {
-        company: null,
-        // Novo estado para o editor de arquivos
-        appFiles: {}, // Ex: { 'main.dart': '...', 'pubspec.yaml': '...' }
-        activeFile: null,
-        buildPlatforms: ['web'], // plataformas alvo padrão para build Flutter
-        unsavedChanges: new Set(),
-        title: "",
-        slug: "",
-        description: "",
-        icon: null,
-        color: "#3b82f6",
-        accessLevel: 1,
-        version: "1.0.0",
-        entityType: 1,
-        contextMode: "user",
-        allowContextSwitch: true,
-        usesSdk: true,
-        shellHeader: true,
-        shellSidebar: true,
-        shellFooterMenu: false,
-        shellHeaderActions: "",
-        shellSidebarItems: "",
-        shellSidebarForms: "",
-        shellFooterItems: "",
-        termsAccepted: false,
-        price: 0,
-        scopes: [],
-        privateCompanies: [], // Changed to array for multi-select
-        code: "",
-        dartCode: "",
-        token: null,
-        aspectRatio: '4:3',
-        supportsPortrait: true,
-        supportsLandscape: true
-    },
-
-    async bootstrap() {
-        try {
-            // Prevent double bootstrap in case the script is loaded twice or app-runner also triggers it
-            if (window.__storeAppBootstrapped) {
-                console.log('⏭️ App Studio bootstrap skipped (already bootstrapped)');
-                return;
-            }
-            window.__storeAppBootstrapped = true;
-            console.log('🚀 Starting App Studio bootstrap...');
-
-            // Inicia o carregamento de dependências e armazena a promise
-            this._depsPromise = (async () => {
-                this.loadCSS("https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css");
-                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css");
-
-                // Carregar dependências do CodeMirror
-                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css");
-                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/monokai.min.css");
-                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/dialog/dialog.min.css");
-                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/fold/foldgutter.min.css");
-                this.loadCSS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/display/fullscreen.min.css");
-
-                await this.loadJS("https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js");
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js");
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js");
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/dart/dart.min.js");
-                // Addons do CodeMirror
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/dialog/dialog.min.js");
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/search/searchcursor.min.js");
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/search/search.min.js");
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/edit/matchbrackets.min.js");
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/fold/foldcode.min.js");
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/fold/foldgutter.min.js");
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/fold/brace-fold.min.js");
-                await this.loadJS("https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/display/fullscreen.min.js");
-            })();
-
-            await this._depsPromise;
-
-            console.log('📦 Dependencies loaded, rendering UI...');
-            this.render();
-
-            console.log('🎯 Setting up event listeners...');
-            this.setupFormEventListeners();
-
-            console.log('🏢 Loading user companies...');
-            await this.loadUserCompanies();
-
-            console.log('📊 Loading storage stats...');
-            await this.loadStorageStats();
-
-            console.log('🔄 Updating company select...');
-            this.updateCompanySelect();
-
-            console.log('✅ Validating current step...');
-            this.validateCurrentStep();
-
-            this.setupFormEventListeners();
-            console.log('👁️ Setting up preview listener...');
-            this.setupPreviewListener();
-
-            console.log('🎉 App Studio bootstrap completed successfully!');
-        } catch (e) {
-            console.error("❌ Erro ao inicializar App Studio:", e);
-            this.renderError("Erro ao carregar o App Studio: " + e.message);
-        }
-    },
-
-    loadCSS(href) {
-        if (!document.querySelector(`link[href="${href}"]`)) {
-            const link = document.createElement("link");
-            link.rel = "stylesheet";
-            link.href = href;
-            document.head.appendChild(link);
-        }
-    },
-
-    loadJS: (src) => new Promise((resolve, reject) => {
-        if (document.querySelector(`script[src="${src}"]`)) {
-            resolve();
-            return;
-        }
-        const script = document.createElement("script");
-        script.src = src;
-        // enforce execution order for dynamically inserted scripts
-        script.async = false;
-        script.onload = resolve;
-        script.onerror = reject;
-        document.head.appendChild(script);
-    }),
-
-    async loadUserCompanies() {
-        try {
-            const response = await WorkzSDK.api.get("/me");
-            if (response && response.companies) {
-                this.userCompanies = response.companies.filter(company => company.nv >= 3);
-            } else {
-                this.userCompanies = [];
-            }
-            // Re-render the UI to populate the company filter dropdown
-            if (this.viewMode === 'list') {
-                this.render();
-            }
-        } catch (e) {
-            console.error("Erro ao carregar negócios:", e);
-            this.userCompanies = [];
-        }
-    },
-
-    async loadStorageStats() {
-        try {
-            const response = await WorkzSDK.api.get("/apps/storage/stats");
-            const httpOk = response && typeof response.status === 'number' && response.status >= 200 && response.status < 300;
-            let ok = !!(response && (response.success === true || httpOk || response.app_id || (response.data && (response.data.id || response.data.app_type || typeof response.data === 'object'))));
-            if (!ok && this.editMode && this.editingAppId) {
-                try {
-                    const verify = await this.apiGet(`/apps/${this.editingAppId}`);
-                    if (verify && verify.success && verify.data) {
-                        response = {
-                            success: true,
-                            app_id: this.editingAppId,
-                            app_type: verify.data.app_type || appData.app_type || this.appType,
-                            build_status: verify.data.build_status || null
-                        };
-                        ok = true;
-                    }
-                } catch (_) { /* ignore */ }
-            }
-            if (ok) {
-                this.storageStats = response.data;
-            }
-        } catch (e) {
-            console.error("Erro ao carregar estatísticas de storage:", e);
-            this.storageStats = null;
-        }
-    },
-
-    updateCompanySelect() {
-        const select = document.getElementById("company-select");
-        if (select) {
-            if (this.userCompanies && this.userCompanies.length > 0) {
-                select.innerHTML = '<option value="">Selecione um negócio</option>' +
-                    this.userCompanies.map(company =>
-                        `<option value="${company.id}" data-cnpj="${company.cnpj || ""}">${company.name}</option>`
-                    ).join("");
-            } else {
-                select.innerHTML = '<option value="">Você não tem permissão de moderador em nenhum negócio</option>';
-            }
-        }
-    },
-
-    render() {
-        const appRoot = document.getElementById("app-root");
-        if (!appRoot) {
-            console.error("Element #app-root not found.");
-            return;
-        }
-
-        let contentHtml = '';
-        if (this.viewMode === 'list') {
-            contentHtml = this.renderAppListPage();
-        } else { // viewMode === 'form'
-            contentHtml = this.renderAppFormPage();
-        }
-
-        appRoot.innerHTML = `
-            <style>
-                .app-builder-container {
-                    max-width: 100%;
-                    margin: 0 auto;
-                    padding: 20px;
-                }
-                /* Existing styles */
-                .storage-indicator {
-                    display: inline-flex;
-                    align-items: center;
-                    padding: 4px 8px;
-                    border-radius: 12px;
-                    font-size: 12px;
-                    font-weight: 500;
-                    margin-left: 8px;
-                }
-                .storage-database {
-                    background-color: #e3f2fd;
-                    color: #1976d2;
-                }
-                .storage-filesystem {
-                    background-color: #f3e5f5;
-                    color: #7b1fa2;
-                }
-                .storage-stats-card {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin-bottom: 20px;
-                }
-                .migration-badge {
-                    background-color: #fff3cd;
-                    color: #856404;
-                    border: 1px solid #ffeaa7;
-                    padding: 2px 6px;
-                    border-radius: 4px;
-                    font-size: 11px;
-                }
-                .step-indicator {
-                    display: flex;
-                    justify-content: center;
-                    margin-bottom: 30px;
-                }
-                .step {
-                    display: flex;
-                    align-items: center;
-                    margin: 0 10px;
-                }
-                .step-number {
-                    width: 30px;
-                    height: 30px;
-                    border-radius: 50%;
-                    background: #e9ecef;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    margin-right: 10px;
-                    font-weight: bold;
-                }
-                .step.active .step-number {
-                    background: #0d6efd;
-                    color: white;
-                }
-                .step.completed .step-number {
-                    background: #198754;
-                    color: white;
-                }
-                .form-section {
-                    display: none;
-                    background: white;
-                    border-radius: 8px;
-                    padding: 30px;
-                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-                }
-                .form-section.active {
-                    display: block;
-                }
-                
-                /* Filesystem Editor Styles */
-                .file-tree {
-                    max-height: 400px;
-                    overflow-y: auto;
-                }
-                .file-item {
-                    padding: 8px 12px;
-                    cursor: pointer;
-                }
-                
-                /* App type selection styles */
-                .app-type-card {
-                    cursor: pointer;
-                    transition: all 0.3s ease;
-                    border: 2px solid #dee2e6;
-                }
-                .app-type-card:hover {
-                    border-color: #0d6efd;
-                    transform: translateY(-2px);
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                }
-                .app-type-card.selected {
-                    border-color: #0d6efd;
-                    background-color: #f8f9ff;
-                    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2);
-                }
-                
-                /* CNPJ validation styles */
-                .cnpj-validation {
-                    margin-top: 5px;
-                    font-size: 14px;
-                }
-                .cnpj-validation.valid {
-                    color: #198754;
-                }
-                .cnpj-validation.invalid {
-                    color: #dc3545;
-                }
-                
-                /* Scopes/Permissions styles */
-                .form-check {
-                    margin-bottom: 12px;
-                    padding: 8px 12px;
-                    border-radius: 6px;
-                    transition: background-color 0.2s ease;
-                }
-                .form-check:hover {
-                    background-color: #f8f9fa;
-                }
-                .form-check-input:checked ~ .form-check-label {
-                    font-weight: 500;
-                }
-                .form-check-label {
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                }
-                .form-check-label i {
-                    width: 16px;
-                    text-align: center;
-                }
-                    display: flex;
-                    align-items: center;
-                    border-bottom: 1px solid #f0f0f0;
-                    transition: background-color 0.2s;
-                }
-                .file-item:hover {
-                    background-color: #f8f9fa;
-                }
-                .file-item.selected {
-                    background-color: #e3f2fd;
-                    border-left: 3px solid #1976d2;
-                }
-                .file-item.nested {
-                    padding-left: 24px;
-                }
-                .file-item i {
-                    margin-right: 8px;
-                    width: 16px;
-                }
-                .file-status {
-                    margin-left: auto;
-                    font-size: 12px;
-                    font-weight: bold;
-                }
-                .file-status.modified {
-                    color: #ff9800;
-                }
-                .file-status.new {
-                    color: #4caf50;
-                }
-                
-                /* Collaborative Indicators */
-                .collaborative-indicators {
-                    border-bottom: 1px solid #dee2e6;
-                }
-                .collaborator-avatars {
-                    display: flex;
-                    gap: 8px;
-                }
-                .collaborator-avatar {
-                    position: relative;
-                }
-                .avatar-circle {
-                    width: 24px;
-                    height: 24px;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: white;
-                    font-size: 10px;
-                    font-weight: bold;
-                }
-                .editing-indicator {
-                    position: absolute;
-                    top: -2px;
-                    right: -2px;
-                    width: 8px;
-                    height: 8px;
-                    background-color: #4caf50;
-                    border-radius: 50%;
-                    animation: pulse 1.5s infinite;
-                }
-                @keyframes pulse {
-                    0% { opacity: 1; }
-                    50% { opacity: 0.5; }
-                    100% { opacity: 1; }
-                }
-                
-                /* Code Editor */
-                .filesystem-editor {
-                    height: 400px;
-                }
-                .filesystem-editor textarea {
-                    height: 100%;
-                    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-                    font-size: 14px;
-                    border: none;
-                    resize: none;
-                }
-                .code-editor-toolbar {
-                    background: #f8f9fa;
-                    padding: 8px;
-                    border-bottom: 1px solid #dee2e6;
-                }
-                
-                /* Git History */
-                .git-history {
-                    max-height: 400px;
-                    overflow-y: auto;
-                }
-                .commit-item {
-                    padding: 16px;
-                    border-bottom: 1px solid #f0f0f0;
-                }
-                .commit-item:last-child {
-                    border-bottom: none;
-                }
-                .commit-avatar .avatar-circle {
-                    width: 32px;
-                    height: 32px;
-                    font-size: 12px;
-                }
-                .commit-message {
-                    font-size: 14px;
-                    margin-bottom: 4px;
-                }
-                .commit-meta {
-                    margin-bottom: 8px;
-                }
-                .commit-hash {
-                    font-family: monospace;
-                    background: #f1f3f4;
-                    padding: 2px 4px;
-                    border-radius: 3px;
-                }
-                .commit-files {
-                    font-family: monospace;
-                }
-                
-                /* Diff Viewer */
-                .diff-viewer {
-                    font-family: monospace;
-                    font-size: 13px;
-                    background: #f8f9fa;
-                    border-radius: 4px;
-                    max-height: 400px;
-                    overflow-y: auto;
-                }
-                .diff-line {
-                    display: flex;
-                    padding: 2px 8px;
-                    line-height: 1.4;
-                }
-                .diff-line.added {
-                    background-color: #d4edda;
-                    border-left: 3px solid #28a745;
-                }
-                .diff-line.removed {
-                    background-color: #f8d7da;
-                    border-left: 3px solid #dc3545;
-                }
-                .diff-line.unchanged {
-                    background-color: #ffffff;
-                }
-                .line-number {
-                    width: 60px;
-                    text-align: right;
-                    margin-right: 16px;
-                    color: #6c757d;
-                    user-select: none;
-                }
-                .line-content {
-                    flex: 1;
-                }
-                
-                /* Build Management Styles */
-                .build-status-badge {
-                    display: flex;
-                    align-items: center;
-                }
-                .build-actions {
-                    margin-top: 8px;
-                }
-                .build-actions .btn-group {
-                    width: 100%;
-                }
-                .build-actions .btn {
-                    flex: 1;
-                    font-size: 11px;
-                    padding: 4px 8px;
-                }
-
-                /* Estilo de editor de código simples */
-                .simple-code-editor {
-                    background-color: #272822; /* Fundo escuro (Monokai) */
-                    color: #F8F8F2;            /* Texto claro */
-                    font-family: 'Consolas', 'Monaco', 'Menlo', 'Courier New', monospace;
-                    font-size: 14px;
-                    line-height: 1.5;
-                    padding: 15px;
-                    border: 1px solid #444;
-                    border-radius: 4px;
-                    white-space: pre;          /* Desativa quebra de linha */
-                    overflow-wrap: normal;
-                    overflow-x: auto;          /* Adiciona scroll horizontal */
-                }
-                
-                /* Build Status Modal */
-                .build-log {
-                    max-height: 300px;
-                    overflow-y: auto;
-                }
-                .build-log pre {
-                    font-size: 12px;
-                    line-height: 1.4;
-                    margin: 0;
-                }
-                
-                /* Artifacts Grid */
-                .artifacts-grid {
-                    max-height: 400px;
-                    overflow-y: auto;
-                }
-                .artifact-card .card {
-                    border: 1px solid #e9ecef;
-                    transition: box-shadow 0.2s;
-                }
-                .artifact-card .card:hover {
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-                }
-                .artifact-icon {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 48px;
-                    height: 48px;
-                }
-                
-                /* Build History */
-                .build-history-list {
-                    max-height: 500px;
-                    overflow-y: auto;
-                }
-                .build-history-item .card {
-                    border-left: 4px solid transparent;
-                }
-                .build-history-item .card:has(.text-success) {
-                    border-left-color: #28a745;
-                }
-                .build-history-item .card:has(.text-danger) {
-                    border-left-color: #dc3545;
-                }
-                .build-history-item .card:has(.text-info) {
-                    border-left-color: #17a2b8;
-                }
-                .build-status-icon {
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 32px;
-                }
-                .platform-badges {
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 4px;
-                    justify-content: flex-end;
-                }
-                .platform-badges .badge {
-                    font-size: 10px;
-                }
-                .build-actions {
-                    display: flex;
-                    gap: 4px;
-                    justify-content: flex-end;
-                }
-                
-                /* Deploy Info */
-                .deploy-info {
-                    background: #f8f9fa;
-                    border-radius: 8px;
-                    padding: 16px;
-                    border: 1px solid #e9ecef;
-                }
-                
-                /* Summary panel */
-                .summary-panel {
-                    position: sticky;
-                    top: 12px;
-                }
-                .summary-card {
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-                    border: 1px solid #e9ecef;
-                }
-                .summary-chip {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 6px;
-                    padding: 4px 10px;
-                    border-radius: 999px;
-                    font-size: 12px;
-                    background: #f8f9fa;
-                    border: 1px solid #e9ecef;
-                    margin-right: 6px;
-                    margin-bottom: 6px;
-                }
-                .summary-chip i { font-size: 13px; }
-                .summary-actions .btn { width: 100%; }
-            </style>
-            <div class="app-builder-container">                
-                ${contentHtml}
-            </div>
-        `;
-
-        // After rendering, perform specific actions based on viewMode
-        if (this.viewMode === 'list') {
-            this.loadAndShowMyApps();
-            this.removeFormEventListeners(); // Clean up form listeners
-        } else { // viewMode === 'form'
-            this.updateStepDisplay(); // Ensure correct step is shown
-            this.updateCompanySelect(); // Re-populate company select if needed
-            this.validateCurrentStep(); // Validate current step for button states
-            this.toggleTokenField(); // Ensure token field visibility is correct
-            // If on step 5, initialize editor
-            if (this.currentStep === 5) {
-                if (!this.useSimpleEditor && (this.appType === 'flutter' || this.appData.storage_type === 'filesystem')) {
-                    setTimeout(() => this.setupFilesystemEditor(), 100);
-                } else {
-                    setTimeout(() => this.initializeCodeMirror(), 100);
-                    setTimeout(() => this.setupDatabaseEditor(), 100);
-                }
-            }
-            this.setupFormEventListeners(); // Attach listeners to the newly rendered form
-            this.updateSummaryPanel();
-        }
-    },
-
-    renderAppListPage() {
-        const companyFilterOptions = this.userCompanies.map(company =>
-            `<option value="${company.id}" ${this.companyFilterId == company.id ? 'selected' : ''}>${company.name}</option>`
-        ).join('');
-
-        return `
-            <div class="pt-4">
-                <div class="d-flex justify-content-between align-items-center mb-4">                    
-                    <div class="d-flex align-items-center">
-                        <div class="me-3">
-                            <label for="company-filter" class="form-label visually-hidden">Filtrar por negócio</label>
-                            <select id="company-filter" class="form-select form-select-sm" onchange="StoreApp.filterByCompany(this.value)">
-                                <option value="all" ${this.companyFilterId === 'all' ? 'selected' : ''}>Todas os Negócios</option>
-                                ${companyFilterOptions}
-                            </select>
-                        </div>
-                        <button type="button" class="btn btn-primary me-2" onclick="StoreApp.startNewApp()">
-                            <i class="fas fa-plus"></i> Novo App
-                        </button>
-                        <button type="button" class="btn btn-outline-primary" onclick="StoreApp.loadAndShowMyApps()" title="Atualizar lista de apps">
-                            <i class="fas fa-sync-alt"></i> Atualizar
-                        </button>
-                    </div>
-                </div>
-                <div id="my-apps-container">
-                    <div class="text-center py-4">
-                        <i class="fas fa-spinner fa-spin fa-2x text-muted"></i>
-                        <p class="text-muted mt-2">Carregando seus apps...</p>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    renderAppFormPage() {
-        const backButton = `
-            <button type="button" class="btn btn-secondary mb-4" onclick="StoreApp.goBackToList()">
-                <i class="fas fa-arrow-left"></i> Voltar para Meus Apps
-            </button>
-        `;
-        return `
-            ${backButton}
-            <div class="row">
-                <div class="col-lg-8">
-                    <!-- Step Indicator -->
-                    <div class="step-indicator">
-                        <div class="step active" data-step="1">
-                            <div class="step-number">1</div>
-                            <span>Negócio</span>
-                        </div>
-                        <div class="step" data-step="2">
-                            <div class="step-number">2</div>
-                            <span>Tipo</span>
-                        </div>
-                        <div class="step" data-step="3">
-                            <div class="step-number">3</div>
-                            <span>Informações</span>
-                        </div>
-                        <div class="step" data-step="4">
-                            <div class="step-number">4</div>
-                            <span>Distribuição</span>
-                        </div>
-                        <div class="step" data-step="5">
-                            <div class="step-number">5</div>
-                            <span>Código</span>
-                        </div>
-                        <div class="step" data-step="6">
-                            <div class="step-number">6</div>
-                            <span>Revisão</span>
-                        </div>
-                    </div>
-
-                    ${this.renderStep1()}
-                    ${this.renderStep2()}
-                    ${this.renderStep3()}
-                    ${this.renderStep4()}
-                    ${this.renderStep5()}
-                    ${this.renderStep6()}
-                </div>
-                <div class="col-lg-4">
-                    <div class="summary-panel">
-                        ${this.renderSummaryPanel()}
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    renderSummaryPanel() {
-        return `
-            <div class="card summary-card mb-4">
-                <div class="card-body">
-                    <div class="d-flex align-items-start mb-2">
-                        <div class="flex-grow-1">
-                            <small class="text-muted">App</small>
-                            <h5 class="mb-1" id="summary-title">Sem título</h5>
-                            <div class="text-muted small" id="summary-slug">slug indefinido</div>
-                        </div>
-                        <span class="badge bg-light text-dark" id="summary-access">Acesso: N/A</span>
-                    </div>
-                    <div class="mb-2">
-                        <small class="text-muted">Desenvolvedor</small><br>
-                        <span id="summary-company">Não selecionada</span>
-                    </div>
-                    <div class="mb-2">
-                        <small class="text-muted">Plataformas</small><br>
-                        <div id="summary-platforms"></div>
-                        <div class="text-muted small">Android gera APK em modo debug (leve)</div>
-                    </div>
-                    <div class="mb-3">
-                        <small class="text-muted">Preço</small><br>
-                        <span id="summary-price">Gratuito</span>
-                    </div>
-                    <div class="summary-actions d-grid gap-2">
-                        <button class="btn btn-primary" onclick="StoreApp.saveApp()">
-                            <i class="fas fa-save"></i> Salvar
-                        </button>
-                        <button class="btn btn-outline-secondary" onclick="StoreApp.showCodePreview()">
-                            <i class="fas fa-eye"></i> Preview
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    renderStorageStatsCard() {
-        if (!this.storageStats) {
-            return '';
-        }
-
-        const stats = this.storageStats;
-        const totalApps = stats.database.count + stats.filesystem.count;
-        const totalSize = stats.database.total_size + stats.filesystem.total_size;
-
-        return `
-            <div class="storage-stats-card">
-                <div class="row">
-                    <div class="col-md-3">
-                        <div class="text-center">
-                            <h4>${totalApps}</h4>
-                            <small>Total de Apps</small>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="text-center">
-                            <h4>${stats.database.count}</h4>
-                            <small>Database Storage</small>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="text-center">
-                            <h4>${stats.filesystem.count}</h4>
-                            <small>Filesystem Storage</small>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="text-center">
-                            <h4>${stats.migration_candidates.length}</h4>
-                            <small>Migração Recomendada</small>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    renderStep1() {
-        let companyOptions = '<option value="">Carregando negócios...</option>';
-
-        if (this.userCompanies && this.userCompanies.length > 0) {
-            companyOptions = '<option value="">Selecione um negócio</option>' +
-                this.userCompanies.map(company =>
-                    `<option value="${company.id}" data-cnpj="${company.cnpj || ""}">${company.name}</option>`
-                ).join("");
-        } else if (this.userCompanies && this.userCompanies.length === 0) {
-            companyOptions = '<option value="">Você não tem permissão de moderador em nenhum negócio</option>';
-        }
-
-        return `
-            <div class="form-section active" id="step-1">
-                <h3><i class="fas fa-building"></i> Validação de Negócio</h3>
-                <p class="text-muted">Apenas negócios com CNPJ válido podem publicar aplicativos</p>
-                
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="mb-3">
-                            <label for="company-select" class="form-label">Selecione seu negócio</label>
-                            <select class="form-select" id="company-select" required>
-                                ${companyOptions}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="mb-3">
-                            <label for="cnpj-display" class="form-label">CNPJ</label>
-                            <input type="text" class="form-control" id="cnpj-display" readonly>
-                            <div class="cnpj-validation" id="cnpj-validation"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="alert alert-info">
-                    <i class="fas fa-info-circle"></i>
-                    <strong>Requisitos:</strong>
-                    <ul class="mb-0 mt-2">
-                        <li>Você deve ter nível de moderador ou superior no negócio</li>
-                        <li>O negócio deve ter um CNPJ válido cadastrado</li>
-                        <li>O aplicativo será publicado em nome do negócio</li>
-                    </ul>
-                </div>
-
-                <div class="d-flex justify-content-end">
-                    <button type="button" class="btn btn-primary" onclick="StoreApp.nextStep()" id="step-1-next" disabled>
-                        Próximo <i class="fas fa-arrow-right"></i>
-                    </button>
-                </div>
-            </div>
-        `;
-    },
-
-    renderStep2() {
-        return `
-            <div class="form-section" id="step-2">
-                <h3><i class="fas fa-mobile-alt"></i> Tipo de Aplicativo</h3>
-                <p class="text-muted">Escolha a tecnologia para seu aplicativo</p>
-                
-                <div class="row app-type-selector">
-                    <div class="col-md-6">
-                        <div class="card app-type-card h-100" id="js-type-card" onclick="StoreApp.selectAppType('javascript')">
-                            <div class="card-body text-center">
-                                <div class="mb-3">
-                                    <i class="fab fa-js-square fa-4x text-warning"></i>
-                                </div>
-                                <h4>JavaScript</h4>
-                                <p class="text-muted">Aplicativo Web tradicional</p>
-                                <div class="mb-3">
-                                    <span class="badge bg-info me-1"><i class="fas fa-globe"></i> Web</span>
-                                    <span class="storage-indicator storage-database">
-                                        <i class="fas fa-database"></i> Database Storage
-                                    </span>
-                                </div>
-                                <ul class="list-unstyled text-start small">
-                                    <li><i class="fas fa-check text-success"></i> Tecnologia familiar</li>
-                                    <li><i class="fas fa-check text-success"></i> Desenvolvimento rápido</li>
-                                    <li><i class="fas fa-check text-success"></i> Execução instantânea</li>
-                                    <li><i class="fas fa-check text-success"></i> Armazenamento otimizado</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card app-type-card h-100 opacity-50" id="flutter-type-card" aria-disabled="true">
-                            <div class="card-body text-center">
-                                <div class="mb-3">
-                                    <i class="fas fa-mobile-alt fa-4x text-muted"></i>
-                                </div>
-                                <h4>Flutter</h4>
-                                <p class="text-muted">Indisponível no MVP (Free Tier)</p>
-                                <div class="mb-3">
-                                    <span class="badge bg-info me-1"><i class="fas fa-globe"></i> Web</span>
-                                    <span class="badge bg-success me-1"><i class="fas fa-mobile-alt"></i> iOS</span>
-                                    <span class="badge bg-success me-1"><i class="fab fa-android"></i> Android</span>
-                                    <span class="storage-indicator storage-filesystem">
-                                        <i class="fas fa-folder"></i> Filesystem Storage
-                                    </span>
-                                </div>
-                                <ul class="list-unstyled text-start small">
-                                    <li><i class="fas fa-check text-muted"></i> Performance nativa</li>
-                                    <li><i class="fas fa-check text-muted"></i> Controle de versão Git</li>
-                                    <li><i class="fas fa-check text-muted"></i> Build multiplataforma</li>
-                                    <li><i class="fas fa-check text-muted"></i> Colaboração avançada</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="alert alert-info mt-4">
-                    <h6><i class="fas fa-info-circle"></i> Storage Information:</h6>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <strong>Database Storage:</strong> Ideal para apps JavaScript pequenos (< 50KB). Execução rápida e armazenamento eficiente.
-                        </div>
-                        <div class="col-md-6">
-                            <strong>Filesystem Storage:</strong> Para apps Flutter e projetos complexos. Suporte a Git, builds multiplataforma e colaboração.
-                        </div>
-                    </div>
-                </div>
-
-                <div class="d-flex justify-content-between">
-                    <button type="button" class="btn btn-secondary" onclick="StoreApp.prevStep()">
-                        <i class="fas fa-arrow-left"></i> Anterior
-                    </button>
-                    <button type="button" class="btn btn-primary" onclick="StoreApp.nextStep()" id="step-2-next">
-                        Próximo <i class="fas fa-arrow-right"></i>
-                    </button>
-                </div>
-            </div>
-        `;
-    },
-
-    renderStep3() {
-        return `
-            <div class="form-section" id="step-3">
-                <h3><i class="fas fa-info-circle"></i> Informações do Aplicativo</h3>
-                <div class="row">
-                    <div class="col-md-8">
-                        <div class="mb-3">
-                            <label for="app-title" class="form-label">Nome do Aplicativo *</label>
-                            <input type="text" class="form-control" id="app-title" required maxlength="150">
-                            <div class="form-text">Máximo 150 caracteres</div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="app-slug" class="form-label">Slug (URL) *</label>
-                            <div class="input-group">
-                                <span class="input-group-text">workz.app/</span>
-                                <input type="text" class="form-control" id="app-slug" required maxlength="60">
-                            </div>
-                            <div class="form-text">Apenas letras minúsculas, números e hífens. Será usado na URL do app.</div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="app-description" class="form-label">Descrição</label>
-                            <textarea class="form-control" id="app-description" rows="3" maxlength="500"></textarea>
-                            <div class="form-text">Descreva o que seu aplicativo faz (máximo 500 caracteres)</div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="mb-3">
-                            <label for="app-icon" class="form-label">Ícone do Aplicativo</label>
-                            <input type="file" class="form-control" id="app-icon" accept="image/*">
-                            <div class="form-text">Recomendado: 512x512px, PNG ou JPG</div>
-                            <img id="icon-preview" class="app-icon-preview mt-2" style="display: none;">
-                        </div>
-                        <div class="mb-3">
-                            <label for="app-color" class="form-label">Cor Principal</label>
-                            <div class="d-flex align-items-center">
-                                <input type="color" class="color-picker me-2" id="app-color" value="#3b82f6">
-                                <input type="text" class="form-control" id="app-color-hex" value="#3b82f6" maxlength="7">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="d-flex justify-content-between">
-                    <button type="button" class="btn btn-secondary" onclick="StoreApp.prevStep()">
-                        <i class="fas fa-arrow-left"></i> Anterior
-                    </button>
-                    <button type="button" class="btn btn-primary" onclick="StoreApp.nextStep()" id="step-3-next">
-                        Próximo <i class="fas fa-arrow-right"></i>
-                    </button>
-                </div>
-            </div>
-        `;
-    },
-
-    renderStep4() {
-        return `
-            <div class="form-section" id="step-4">
-                <h3><i class="fas fa-cog"></i> Configuração do Aplicativo</h3>
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="mb-3">
-                            <label for="access-level" class="form-label">Distribuição *</label>                            
-                            <select class="form-select" id="access-level" required aria-describedby="access-level-help">
-                                <option value="0">Toda a Internet</option>
-                                <option value="1">Plataforma</option>
-                                <option value="2">Exclusiva</option>
-                            </select>
-                            <div id="access-level-help" class="form-text">
-                                <ul class="list-unstyled mb-0 small mt-2">
-                                    <li><i class="fas fa-globe text-info"></i> <strong>Toda a Internet:</strong> Disponível para qualquer pessoa, gratuitamente e sem login. Ideal para apps que não usam Workz SDK. É listado na Workz! Store.</li>
-                                    <li><i class="fas fa-users text-primary"></i> <strong>Plataforma:</strong> Distribuído para entidades registradas na plataforma. Requer login Workz!. É listado na Workz! Store.</li>
-                                    <li><i class="fas fa-lock text-secondary"></i> <strong>Exlusiva:</strong> Disponibilizado para negócios com permissão explícita. Membros do negócio recebem acesso direto via Área de Trabalho.</li>
-                                </ul>
-                            </div>
-                            <div class="form-check mt-2" id="sdk-required-container">
-                                <input class="form-check-input" type="checkbox" id="uses-sdk" checked>
-                                <label class="form-check-label" for="uses-sdk">
-                                    <i class="fas fa-plug text-primary"></i> Este app usa WorkzSDK (requer login)
-                                </label>
-                                <div class="form-text small">
-                                    Ative quando seu app precisa de usuário/contexto, storage ou APIs protegidas.
-                                </div>
-                            </div>
-                        </div>
-                        <!-- Seletor de negócio (apenas quando Privado) -->
-                        <div class="mb-3" id="private-company-container" style="display:none;">
-                            <label for="private-company-search" class="form-label">Negócio Cliente</label>
-                            <div class="position-relative">
-                                <input type="text" class="form-control" id="private-company-search" placeholder="Digite para pesquisar negócios...">
-                                <div id="private-company-results" class="list-group" style="position:absolute; z-index:10; width:100%; max-height:220px; overflow:auto;"></div>
-                            </div>
-                            <div class="form-text">Selecione o negócio para o qual este app será disponibilizado.</div>
-                            <div id="private-company-selected" class="mt-2"></div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="app-version" class="form-label">Versão *</label>
-                            <input type="text" class="form-control" id="app-version" value="1.0.0" required maxlength="20">
-                            <div class="form-text">Ex: 1.0.0, 2.1.3</div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="mb-3">
-                            <label for="entity-type" class="form-label">Entidade Cliente</label>
-                            <select class="form-select" id="entity-type">
-                                <option value="1">Usuários</option>
-                                <option value="2">Negócios</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label for="context-mode" class="form-label">Contexto do App (Workz)</label>
-                            <select class="form-select" id="context-mode">
-                                <option value="user">Usuários</option>
-                                <option value="business">Negócios</option>
-                                <option value="team">Equipes</option>
-                                <option value="hybrid">Híbrido (user + business + team)</option>
-                            </select>
-                            <div class="form-check mt-2">
-                                <input class="form-check-input" type="checkbox" id="context-switch" checked>
-                                <label class="form-check-label" for="context-switch">
-                                    Permitir troca de contexto dentro do app
-                                </label>
-                            </div>
-                            <div class="form-text small">
-                                Define qual entidade será usada como contexto do WorkzSDK.
-                            </div>
-                        </div>
-                        <!-- Plataformas alvo para build (apenas apps Flutter) -->
-                        <div class="mb-3" id="build-platforms-container" style="display:none;">
-                            <label class="form-label">Plataformas para novo build:</label>
-                            <div class="d-flex align-items-center flex-wrap gap-2">
-                                <div class="form-check form-check-inline">
-                                    <input class="form-check-input" type="checkbox" id="config-build-web" value="web">
-                                    <label class="form-check-label" for="config-build-web">
-                                        <i class="fas fa-globe text-info"></i> Web
-                                    </label>
-                                </div>
-                                <div class="form-check form-check-inline">
-                                    <input class="form-check-input" type="checkbox" id="config-build-android" value="android">
-                                    <label class="form-check-label" for="config-build-android">
-                                        <i class="fab fa-android text-success"></i> Android
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="form-text small">
-                                Essas plataformas serão usadas como padrão ao iniciar builds para este app Flutter.
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="app-price" class="form-label">Preço (R$)</label>
-                            <input type="number" class="form-control" id="app-price" min="0" step="0.01" value="0.00">
-                            <div class="form-text">0.00 para aplicativo gratuito</div>
-                            <div id="price-terms-container" class="form-check mt-2" style="display:none;">
-                                <input class="form-check-input" type="checkbox" id="price-terms">
-                                <label class="form-check-label" for="price-terms">
-                                    Concordo com os <a href="#" target="_blank">termos de remuneração</a> e política de repasse.
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Seção de Permissões -->
-                <div class="mb-4">
-                    <label class="form-label">Permissões (Scopes)</label>
-                    <p class="text-muted small">Selecione as permissões que seu aplicativo precisa para funcionar</p>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="scope-profile" value="profile.read">
-                                <label class="form-check-label" for="scope-profile">
-                                    <i class="fas fa-user text-primary"></i> Ler perfil do usuário
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="scope-companies" value="companies.read">
-                                <label class="form-check-label" for="scope-companies">
-                                    <i class="fas fa-building text-info"></i> Ler dados de negócios
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="scope-teams" value="teams.read">
-                                <label class="form-check-label" for="scope-teams">
-                                    <i class="fas fa-users text-success"></i> Ler dados de equipes
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="scope-posts" value="posts.read">
-                                <label class="form-check-label" for="scope-posts">
-                                    <i class="fas fa-newspaper text-secondary"></i> Ler posts e feed
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="scope-posts-write" value="posts.write">
-                                <label class="form-check-label" for="scope-posts-write">
-                                    <i class="fas fa-pen text-secondary"></i> Escrever posts e feed
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="scope-storage-kv" value="storage.kv.write">
-                                <label class="form-check-label" for="scope-storage-kv">
-                                    <i class="fas fa-database text-warning"></i> Armazenar configurações (KV)
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="scope-storage-docs" value="storage.docs.write">
-                                <label class="form-check-label" for="scope-storage-docs">
-                                    <i class="fas fa-file-alt text-info"></i> Armazenar documentos (DOCS)
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="scope-storage-blobs" value="storage.blobs.write">
-                                <label class="form-check-label" for="scope-storage-blobs">
-                                    <i class="fas fa-cloud-upload-alt text-primary"></i> Upload de arquivos (BLOBS)
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="scope-notifications" value="notifications.send">
-                                <label class="form-check-label" for="scope-notifications">
-                                    <i class="fas fa-bell text-danger"></i> Enviar notificações
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-text mt-2">
-                        <i class="fas fa-info-circle"></i> 
-                        Seu app só poderá acessar os recursos marcados aqui. Você pode alterar essas permissões depois.
-                    </div>
-                </div>
-
-                <!-- Shell padrão Workz -->
-                <div class="mb-4">
-                    <label class="form-label">Shell padrão Workz</label>
-                    <p class="text-muted small">Ative o layout padrão e configure ações básicas para o seu app.</p>
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="shell-header" checked>
-                                <label class="form-check-label" for="shell-header">
-                                    Header padrão
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="shell-sidebar" checked>
-                                <label class="form-check-label" for="shell-sidebar">
-                                    Menu lateral padrão
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="shell-footer">
-                                <label class="form-check-label" for="shell-footer">
-                                    Menu de rodapé (mobile)
-                                </label>
-                            </div>
-                        </div>
-                        <div class="col-md-8">
-                            <div class="row">
-                                <div class="col-md-6 mb-3">
-                                    <label for="shell-header-actions" class="form-label">Botões do header</label>
-                                    <textarea class="form-control" id="shell-header-actions" rows="3" placeholder="Ex: Novo pedido | action:new-order"></textarea>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label for="shell-sidebar-items" class="form-label">Itens do menu lateral</label>
-                                    <textarea class="form-control" id="shell-sidebar-items" rows="3" placeholder="Ex: Dashboard | route:/dashboard"></textarea>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label for="shell-sidebar-forms" class="form-label">Formulários rápidos</label>
-                                    <textarea class="form-control" id="shell-sidebar-forms" rows="3" placeholder="Ex: Solicitar suporte | form:support"></textarea>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label for="shell-footer-items" class="form-label">Itens do menu de rodapé</label>
-                                    <textarea class="form-control" id="shell-footer-items" rows="3" placeholder="Ex: Início | route:/inicio"></textarea>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-text small">
-                        Use uma linha por item. Formato sugerido: <code>Título | ação</code>.
-                    </div>
-                </div>
-
-                <!-- Token Field (para apps Flutter) -->
-                <div id="token-field-container" class="mb-3" style="display: none;">
-                    <label for="app-token" class="form-label">
-                        <i class="fas fa-key"></i> Token de Acesso (API)
-                    </label>
-                    <div class="input-group">
-                        <input type="text" class="form-control" id="app-token" readonly placeholder="Gerado automaticamente ao salvar o app">
-                        <button class="btn btn-outline-secondary" type="button" id="copy-token-btn">
-                            <i class="fas fa-copy"></i> Copiar
-                        </button>
-                    </div>
-                    <div class="form-text">
-                        Use este token para autenticar seu app Flutter via WorkzSDK.
-                    </div>
-                </div>
-
-                <!-- Layout / Aspect Ratio -->
-                <div class="mb-4">
-                    <label class="form-label">Layout e Orientação</label>
-                    <p class="text-muted small">Defina a proporção da tela e se o app suporta layouts diferentes em cada orientação.</p>
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="mb-3">
-                                <label for="aspect-ratio" class="form-label">Aspect Ratio</label>
-                                <select class="form-select" id="aspect-ratio">
-                                    <option value="4:3">4:3 (padrão)</option>
-                                    <option value="16:9">16:9 (wide)</option>
-                                    <option value="3:2">3:2</option>
-                                    <option value="1:1">1:1</option>
-                                    <option value="custom">Personalizado…</option>
-                                </select>
-                                <input type="text" class="form-control mt-2 d-none" id="aspect-ratio-custom" placeholder="Ex: 21:9">
-                                <div class="form-text">
-                                    Usado para dimensionar o iframe do app nos players e previews.
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-8">
-                            <div class="mb-2">
-                                <label class="form-label">Orientações suportadas</label>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="supports-portrait" checked>
-                                    <label class="form-check-label" for="supports-portrait">
-                                        <i class="fas fa-mobile-alt"></i> Retrato (vertical)
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="supports-landscape" checked>
-                                    <label class="form-check-label" for="supports-landscape">
-                                        <i class="fas fa-mobile-alt fa-rotate-90"></i> Paisagem (horizontal)
-                                    </label>
-                                </div>
-                                <div class="form-text">
-                                    Quando ambas estiverem marcadas, o player pode alternar entre orientações.
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="d-flex justify-content-between">
-                    <button type="button" class="btn btn-secondary" onclick="StoreApp.prevStep()">
-                        <i class="fas fa-arrow-left"></i> Anterior
-                    </button>
-                    <button type="button" class="btn btn-primary" onclick="StoreApp.nextStep()" id="step-4-next">
-                        Próximo <i class="fas fa-arrow-right"></i>
-                    </button>
-                </div>
-            </div>
-        `;
-    },
-
-    renderStep5() {
-        const isFlutter = this.appType === 'flutter';
-        // Em modo simples, forçar textarea (mesmo para Flutter)
-        const shouldUseFilesystemEditor = !this.useSimpleEditor && (isFlutter || (this.editMode && this.currentAppData && this.currentAppData.storage_type === 'filesystem'));
-
-        return `
-            <div class="form-section" id="step-5">
-                <h3><i class="fas fa-code"></i> Código do Aplicativo</h3>
-                <p class="text-muted">
-                    ${isFlutter ? "Escreva o código Dart que será compilado para múltiplas plataformas" : "Escreva o código JavaScript que será executado no seu aplicativo"}
-                </p>
-
-                ${shouldUseFilesystemEditor ? this.renderFilesystemEditor() : this.renderDatabaseEditor()}
-                
-                <div class="d-flex justify-content-between">
-                    <button type="button" class="btn btn-secondary" onclick="StoreApp.prevStep()">
-                        <i class="fas fa-arrow-left"></i> Anterior
-                    </button>
-                    <button type="button" class="btn btn-primary" onclick="StoreApp.nextStep()" id="step-5-next">
-                        Próximo <i class="fas fa-arrow-right"></i>
-                    </button>
-                </div>
-            </div>
-        `;
-    },
-
-    renderStep6() {
-        return `
-            <div class="form-section" id="step-6">
-                <h3><i class="fas fa-check-circle"></i> Revisão e Publicação</h3>
-                <p class="text-muted">Revise as informações do seu aplicativo antes de publicar</p>
-
-                <div class="row">
-                    <div class="col-md-8">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="mb-0">Resumo do Aplicativo</h5>
-                            </div>
-                            <div class="card-body" id="app-summary">
-                                <div class="d-flex align-items-center mb-3">
-                                    <img id="final-icon-preview" class="app-icon-preview" src="/images/no-image.jpg" style="width: 64px; height: 64px; border-radius: 12px; object-fit: cover; margin-right: 15px;">
-                                    <div>
-                                        <h4 id="final-title" class="mb-1">Nome do App</h4>
-                                        <p id="final-description" class="text-muted mb-1">Descrição do aplicativo</p>
-                                        <small class="text-muted">
-                                            Por: <span id="final-publisher">Negócio</span> | 
-                                            Versão: <span id="final-version">1.0.0</span> | 
-                                            Preço: R$ <span id="final-price">0,00</span>
-                                        </small>
-                                    </div>
-                                </div>
-
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="d-flex justify-content-between align-items-center">
-                                            <strong>Informações:</strong>
-                                            <button class="btn btn-sm btn-outline-secondary" onclick="StoreApp.goToStep(3)"><i class="fas fa-edit"></i> Editar</button>
-                                        </div>
-                                        <ul class="list-unstyled mt-2">
-                                            <li><i class="fas fa-link"></i> URL: workz.app/<span id="final-slug">app-slug</span></li>
-                                        </ul>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <div class="d-flex justify-content-between align-items-center">
-                                            <strong>Configurações:</strong>
-                                            <button class="btn btn-sm btn-outline-secondary" onclick="StoreApp.goToStep(4)"><i class="fas fa-edit"></i> Editar</button>
-                                        </div>
-                                        <ul class="list-unstyled mt-2">
-                                            <li><i class="fas fa-lock"></i> Acesso: <span id="final-access">Público</span></li>
-                                            <li><i class="fas fa-users"></i> Entidade: <span id="final-entity">Geral</span></li>
-                                            <li><i class="fas fa-project-diagram"></i> Contexto: <span id="final-context">Usuários</span></li>
-                                            <li><i class="fas fa-layer-group"></i> Shell: <span id="final-shell">Padrão</span></li>
-                                        </ul>
-                                    </div>
-                                    <div class="col-12 mt-2">
-                                        <div class="d-flex justify-content-between align-items-center">
-                                            <strong>Permissões:</strong>
-                                            <button class="btn btn-sm btn-outline-secondary" onclick="StoreApp.goToStep(4)"><i class="fas fa-edit"></i> Editar</button>
-                                        </div>
-                                        <ul id="final-scopes" class="list-unstyled mt-2">
-                                            <li><i class="fas fa-info-circle"></i> Nenhuma permissão especial</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="mb-0">Ações</h5>
-                            </div>
-                            <div class="card-body">
-                                <button type="button" class="btn btn-success w-100 mb-2" onclick="StoreApp.saveApp()">
-                                    <i class="fas fa-save"></i> Salvar Aplicativo
-                                </button>
-                                <button type="button" class="btn w-100" id="publish-unpublish-btn">
-                                    <!-- Texto e ação definidos dinamicamente por updatePreview() -->
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="d-flex justify-content-between mt-4">
-                    <button type="button" class="btn btn-secondary" onclick="StoreApp.prevStep()">
-                        <i class="fas fa-arrow-left"></i> Anterior
-                    </button>
-                    <button type="button" class="btn btn-success" onclick="StoreApp.saveApp()">
-                        <i class="fas fa-save"></i> Finalizar
-                    </button>
-                </div>
-            </div>
-        `;
-    },
-
-    async loadAndShowMyApps() {
-        try {
-            const response = await WorkzSDK.api.get("/apps/my-apps");
-            const container = document.getElementById('my-apps-container');
-            if (!container) return;
-
-            let apps = (response && response.data) ? response.data : [];
-
-            // Apply company filter
-            if (this.companyFilterId && this.companyFilterId !== 'all') {
-                const filterId = parseInt(this.companyFilterId, 10);
-                apps = apps.filter(app => {
-                    // publisher é o negócio responsável pelo app.
-                    // company_id é mantido apenas como compatibilidade antiga.
-                    const publisherId = Number(
-                        app.publisher != null ? app.publisher : app.company_id
-                    );
-                    return publisherId === filterId;
-                });
-            }
-
-            if (apps.length > 0) {
-                container.innerHTML = this.renderMyAppsGrid(apps);
-            } else {
-                container.innerHTML = `
-                    <div class="text-center py-4">
-                        <i class="fas fa-mobile-alt fa-3x text-muted mb-3"></i>
-                        <h5 class="text-muted">Nenhum app encontrado</h5>
-                        <p class="text-muted">Crie seu primeiro aplicativo usando o formulário acima.</p>
-                    </div>
-                `;
-            }
-        } catch (e) {
-            console.error("Erro ao carregar apps:", e);
-            document.getElementById('my-apps-container').innerHTML = `
-                <div class="alert alert-danger">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    Erro ao carregar aplicativos: ${e.message}
-                </div>
-            `;
-        }
-    },
-
-    filterByCompany(companyId) {
-        this.companyFilterId = companyId;
-        // Re-render the list page to reflect the filter and trigger app loading
-        this.render();
-    },
-
-    renderMyAppsGrid(apps) {
-        return `
-            <div class="row">
-                ${apps.map(app => this.renderAppCard(app)).join('')}
-            </div>
-        `;
-    },
-
-    renderAppCard(app) {
-        const storageType = app.storage_type || 'database';
-        const storageIcon = storageType === 'filesystem' ? 'fas fa-folder' : 'fas fa-database';
-        const storageClass = storageType === 'filesystem' ? 'storage-filesystem' : 'storage-database';
-        // Calculate code size if not provided by backend
-        let codeSizeBytes = app.code_size_bytes || 0;
-        if (codeSizeBytes === 0) {
-            const jsCode = app.js_code || '';
-            const dartCode = app.dart_code || '';
-            const totalCode = jsCode + dartCode;
-            codeSizeBytes = new Blob([totalCode]).size;
-        }
-        const codeSize = this.formatBytes(codeSizeBytes);
-        const buildStatus = app.build_status || 'success';
-
-        return `
-            <div class="col-md-6 col-lg-4 mb-4">
-                <div class="card h-100">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h5 class="card-title">${app.tt || app.title}</h5>
-                            <span class="storage-indicator ${storageClass}">
-                                <i class="${storageIcon}"></i> ${storageType}
-                            </span>
-                        </div>
-                        <p class="card-text text-muted small">${app.ds || 'Sem descrição'}</p>
-                        
-                        ${this.renderBuildStatusBadge(app)}
-                        
-                        <div class="mb-2">
-                            <small class="text-muted">
-                                <i class="fas fa-weight-hanging"></i> ${codeSize}
-                                <span class="ms-2">
-                                    <i class="fas fa-calendar"></i> ${this.formatDate(app.created_at)}
-                                </span>
-                            </small>
-                        </div>
-                        
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary" onclick="StoreApp.editApp(${app.id})">
-                                    <i class="fas fa-edit"></i> Editar
-                                </button>
-                                <button class="btn btn-outline-danger" onclick="StoreApp.deleteApp(${app.id}, '${app.slug || ''}')">
-                                    <i class="fas fa-trash"></i> Excluir
-                                </button>
-                                <button class="btn ${app.st == 1 ? 'btn-outline-warning' : 'btn-outline-success'}" onclick="StoreApp.${app.st == 1 ? 'unpublishAppFromCard' : 'publishAppFromCard'}(${app.id}, '${app.tt || app.title}')">
-                                    <i class="fas ${app.st == 1 ? 'fa-ban' : 'fa-rocket'}"></i> ${app.st == 1 ? 'Despublicar' : 'Publicar'}
-                                </button>
-                            </div>
-                            <span class="badge ${app.st == 1 ? 'bg-success' : 'bg-secondary'}">
-                                ${app.st == 1 ? 'Publicado' : 'Rascunho'}
-                            </span>
-                        </div>
-                        
-                        ${app.app_type === 'flutter' ? this.renderBuildActions(app) : ''}
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    renderBuildStatusBadge(app) {
-        if (app.app_type !== 'flutter') {
-            return '';
-        }
-
-        const buildStatus = app.build_status || 'success';
-        const statusConfig = {
-            'pending': { class: 'bg-warning', icon: 'fa-clock', text: 'Build Pendente' },
-            'building': { class: 'bg-info', icon: 'fa-spinner fa-spin', text: 'Compilando...' },
-            'success': { class: 'bg-success', icon: 'fa-check', text: 'Build OK' },
-            'failed': { class: 'bg-danger', icon: 'fa-times', text: 'Build Falhou' }
-        };
-
-        const config = statusConfig[buildStatus] || statusConfig['success'];
-
-        return `
-            <div class="build-status-badge mb-2">
-                <span class="badge ${config.class}">
-                    <i class="fas ${config.icon}"></i> ${config.text}
-                </span>
-            </div>
-        `;
-    },
-
-    renderBuildActions(app) {
-        return `
-            <div class="build-actions mt-2">
-                <div class="btn-group w-100" role="group">
-                    <button class="btn btn-outline-secondary btn-sm" onclick="StoreApp.showBuildStatus(${app.id})" title="Ver Status do Build">
-                        <i class="fas fa-hammer"></i> Build
-                    </button>
-                    <button class="btn btn-outline-success btn-sm" onclick="StoreApp.showArtifacts(${app.id})" title="Downloads">
-                        <i class="fas fa-download"></i> Apps
-                    </button>
-                    <button class="btn btn-outline-info btn-sm" onclick="StoreApp.showBuildHistory(${app.id})" title="Histórico">
-                        <i class="fas fa-history"></i>
-                    </button>
-                </div>
-            </div>
-        `;
-    },
-
-    async showStorageInfo(appId) {
-        try {
-            const response = await WorkzSDK.api.get(`/apps/${appId}/storage`);
-            if (response && response.success) {
-                this.displayStorageModal(response.data);
-            }
-        } catch (e) {
-            console.error("Erro ao carregar informações de storage:", e);
-            alert("Erro ao carregar informações de storage: " + e.message);
-        }
-    },
-
-    displayStorageModal(storageInfo) {
-        const modalHtml = `
-            <div class="modal fade" id="storageModal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">
-                                <i class="fas fa-database"></i> Informações de Storage
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            ${this.renderStorageInfoContent(storageInfo)}
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                            ${this.renderMigrationButton(storageInfo)}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Remove existing modal
-        const existingModal = document.getElementById('storageModal');
-        if (existingModal) {
-            existingModal.remove();
-        }
-
-        // Add new modal
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-        // Show modal
-        const modal = new bootstrap.Modal(document.getElementById('storageModal'));
-        modal.show();
-    },
-
-    async updateAppStatus(appId, status) {
-        try {
-            console.log(`Attempting to update app status for appId: ${appId}, new status: ${status ? 'published (1)' : 'unpublished (0)'}`);
-            const response = await WorkzSDK.api.post(`/apps/update/${appId}`, {
-                st: status ? 1 : 0 // 1 para publicado, 0 para rascunho
-            });
-            console.log(`API response for status update (appId: ${appId}):`, response);
-            if (response && response.success) {
-                this.showToast(`Aplicativo ${status ? 'publicado' : 'despublicado'} com sucesso!`, 'success');
-                this.loadAndShowMyApps(); // Recarrega a lista de apps
-            } else {
-                throw new Error(response.message || `Erro ao ${status ? 'publicar' : 'despublicar'} o app`);
-            }
-        } catch (e) {
-            console.error(`Erro ao ${status ? 'publicar' : 'despublicar'} app:`, e);
-            this.showToast(`Erro ao ${status ? 'publicar' : 'despublicar'} aplicativo: ` + e.message, 'error');
-        }
-    },
-
-    async publishAppFromCard(appId) {
-        const appName = document.querySelector(`[onclick="StoreApp.publishAppFromCard(${appId})"]`)?.closest('.card-body')?.querySelector('.card-title')?.textContent || `ID ${appId}`;
-        if (!confirm(`Tem certeza que deseja publicar o app "${appName}" na loja?`)) return;
-        await this.updateAppStatus(appId, true);
-    },
-
-    async unpublishAppFromCard(appId) {
-        const appName = document.querySelector(`[onclick="StoreApp.unpublishAppFromCard(${appId})"]`)?.closest('.card-body')?.querySelector('.card-title')?.textContent || `ID ${appId}`;
-        if (!confirm(`Tem certeza que deseja despublicar o app "${appName}" da loja? Ele não estará mais visível para outros usuários.`)) return;
-        await this.updateAppStatus(appId, false);
-    },
-
-    // ... (other functions remain largely unchanged)
-    async triggerBuildAndMonitor(appId) {
-        this.showToast('Iniciando build do app…', 'info');
-        const res = { success: true }; // queue-based flow: skip explicit rebuild
-    },
-
-    async deleteApp(appId, slug = '') {
-        const appName = document.querySelector(`[onclick="StoreApp.deleteApp(${appId}, '${slug}')"]`)?.closest('.card-body')?.querySelector('.card-title')?.textContent || slug || `ID ${appId}`;
-        try {
-            if (!confirm(`Tem certeza que deseja excluir o app "${appName}"? Esta ação é irreversível.`)) return;
-            let resp = null;
-            resp = await this.apiDelete(`/apps/${appId}`); // Standardized DELETE endpoint
-            const ok = resp && (resp.success || (typeof resp.status === 'number' && resp.status >= 200 && resp.status < 300));
-            if (ok) {
-                this.showToast('Aplicativo excluído com sucesso!', 'success');
-                this.loadAndShowMyApps();
-            } else {
-                throw new Error((resp && resp.message) ? resp.message : 'Falha ao excluir o app.');
-            }
-        } catch (e) {
-            console.error('Erro ao excluir app:', e);
-            this.showToast('Erro ao excluir app: ' + e.message, 'error');
-        }
-    },
-
-    renderStorageInfoContent(info) {
-        const currentStorage = info.current_storage;
-        const recommendation = info.migration_recommendation;
-        const validation = info.validation;
-
-        return `
-            <div class="row">
-                <div class="col-md-6">
-                    <div class="card">
-                        <div class="card-header">
-                            <h6 class="mb-0">Storage Atual</h6>
-                        </div>
-                        <div class="card-body">
-                            <div class="d-flex align-items-center mb-2">
-                                <i class="fas ${currentStorage === 'filesystem' ? 'fa-folder' : 'fa-database'} me-2"></i>
-                                <strong>${currentStorage === 'filesystem' ? 'Filesystem' : 'Database'}</strong>
-                            </div>
-                            <div class="small text-muted">
-                                <div>Tamanho: ${info.code_size_formatted}</div>
-                                <div>Tipo: ${info.app_type}</div>
-                                ${info.repository_path ? `<div>Path: ${info.repository_path}</div>` : ''}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="card">
-                        <div class="card-header">
-                            <h6 class="mb-0">Recomendação</h6>
-                        </div>
-                        <div class="card-body">
-                            ${recommendation.needed ? `
-                                <div class="alert alert-warning mb-2">
-                                    <i class="fas fa-exclamation-triangle"></i>
-                                    <strong>Migração Recomendada</strong>
-                                </div>
-                                <div class="small">
-                                    <div>De: ${recommendation.from}</div>
-                                    <div>Para: ${recommendation.to}</div>
-                                    <div>Motivo: ${recommendation.reason}</div>
-                                </div>
-                            ` : `
-                                <div class="alert alert-success mb-0">
-                                    <i class="fas fa-check"></i>
-                                    Storage otimizado
-                                </div>
-                            `}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="mt-3">
-                <h6>Validação de Storage</h6>
-                <div class="alert ${validation.valid ? 'alert-success' : 'alert-danger'}">
-                    <i class="fas ${validation.valid ? 'fa-check' : 'fa-times'}"></i>
-                    ${validation.valid ? 'Storage válido e funcionando' : 'Problemas encontrados no storage'}
-                </div>
-                ${validation.errors && validation.errors.length > 0 ? `
-                    <div class="mt-2">
-                        <strong>Erros:</strong>
-                        <ul class="mb-0">
-                            ${validation.errors.map(error => `<li>${error}</li>`).join('')}
-                        </ul>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-    },
-
-    renderMigrationButton(info) {
-        if (!info.migration_recommendation.needed) {
-            return '';
-        }
-
-        const targetType = info.migration_recommendation.to;
-        const buttonClass = targetType === 'filesystem' ? 'btn-warning' : 'btn-info';
-        const icon = targetType === 'filesystem' ? 'fa-folder' : 'fa-database';
-
-        return `
-            <button type="button" class="btn ${buttonClass}" onclick="StoreApp.migrateStorage(${info.app_id}, '${targetType}')">
-                <i class="fas ${icon}"></i> Migrar para ${targetType}
-            </button>
-        `;
-    },
-
-    async migrateStorage(appId, targetType) {
-        if (!confirm(`Tem certeza que deseja migrar este app para ${targetType}? Esta operação pode levar alguns minutos.`)) {
-            return;
-        }
-
-        try {
-            const response = await WorkzSDK.api.post(`/apps/${appId}/storage/migrate`, {
-                target_type: targetType
-            });
-
-            if (response && response.success) {
-                alert('Migração concluída com sucesso!');
-                // Close modal and refresh apps
-                bootstrap.Modal.getInstance(document.getElementById('storageModal')).hide();
-                this.loadAndShowMyApps();
-                this.loadStorageStats();
-            } else {
-                alert('Erro na migração: ' + (response.message || 'Erro desconhecido'));
-            }
-        } catch (e) {
-            console.error("Erro na migração:", e);
-            alert('Erro na migração: ' + e.message);
-        }
-    },
-
-    renderFilesystemEditor() {
-        return `
-            <div class="row">
-                <!-- Mensagem de alerta sobre o novo editor -->
-                <div class="col-12 mb-3">
-                    <div class="alert alert-info d-flex align-items-center"><i class="fas fa-info-circle me-2"></i>Este app usa o novo editor de arquivos. As alterações são salvas por arquivo.</div>
-                </div>
-                <div class="col-md-3">
-                    ${this.renderFileBrowser()}
-                </div>
-                <div class="col-md-9">
-                    ${this.renderCodeEditorWithGit()}
-                </div>
-            </div>
-        `;
-    },
-
-    renderDatabaseEditor() {
-        const isFlutter = this.appType === 'flutter';
-        return `
-            <div class="mb-3">
-                <label for="app-code" class="form-label">${isFlutter ? "Código Dart *" : "Código JavaScript *"}</label>
-                <div class="code-editor-toolbar mb-2" title="Funcionalidade desativada. O editor CodeMirror não pôde ser carregado.">
-                    <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-outline-secondary" onclick="StoreApp.toggleCodeMirrorFullscreen()" title="Tela Cheia (F11)">
-                            <i class="fas fa-expand"></i> Tela Cheia
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" onclick="StoreApp.toggleWordWrap()" title="Alternar Quebra de Linha">
-                            <i class="fas fa-align-left"></i> Quebra de Linha
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" onclick="StoreApp.insertTemplate()" title="Inserir Template">
-                            <i class="fas fa-file-code"></i> Template
-                        </button>
-                        <button type="button" class="btn btn-outline-primary" onclick="StoreApp.showCodePreview()" title="Preview ao vivo">
-                            <i class="fas fa-eye"></i> Preview
-                        </button>
-                    </div>
-                </div>
-                <div id="code-editor-container">
-                    <textarea id="app-code" rows="15" required></textarea>
-                </div>
-            </div>
-        `;
-    },
-
-    renderFileBrowser() {
-        return `
-            <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0"><i class="fas fa-folder"></i> Arquivos</h6>
-                    <div class="btn-group btn-group-sm">
-                        <button class="btn btn-outline-primary" onclick="StoreApp.createNewFile()" title="Novo Arquivo">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                        <button class="btn btn-outline-secondary" onclick="StoreApp.refreshFileTree()" title="Atualizar">
-                            <i class="fas fa-sync"></i>
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body p-0">
-                    <div id="file-tree" class="file-tree">
-                        <!-- A árvore de arquivos será renderizada dinamicamente aqui -->
-                        <div class="p-3 text-center text-muted small">Carregando arquivos...</div>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    renderCodeEditorWithGit() { // Agora renderiza a área do editor e a barra de ferramentas
-        return `
-            <div class="card h-100">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <div>
-                        <h6 class="mb-0" id="current-file-name"><i class="fas fa-file-code"></i> <span>Nenhum arquivo selecionado</span></h6>
-                        <small class="text-muted" id="current-file-path">Selecione um arquivo à esquerda</small>
-                    </div>
-                    <div class="btn-group btn-group-sm">
-                        <button class="btn btn-success" onclick="StoreApp.saveActiveFile()" title="Salvar arquivo (Ctrl+S)" id="save-file-btn" disabled>
-                            <i class="fas fa-save"></i> Salvar
-                        </button>
-                        <div class="btn-group btn-group-sm">
-                            ${this.renderGitControls()}
-                        </div>
-                    </div>
-                </div>
-                <div class="card-body p-0" id="code-editor-wrapper">
-                    <!-- O CodeMirror será instanciado aqui -->
-                    <textarea id="filesystem-code-editor-textarea" class="form-control" style="height: 400px; border:0; font-family: monospace; resize: none;"></textarea>
-                </div>
-            </div>
-        `;
-    },
-
-    renderGitControls() {
-        return `
-            <button class="btn btn-outline-success" onclick="StoreApp.showCommitDialog()" title="Commit Changes">
-                <i class="fas fa-save"></i> Commit
-            </button>
-            <button class="btn btn-outline-info" onclick="StoreApp.showBranchDialog()" title="Manage Branches">
-                <i class="fas fa-code-branch"></i> main
-            </button>
-            <button class="btn btn-outline-warning" onclick="StoreApp.showGitHistory()" title="Git History">
-                <i class="fas fa-history"></i>
-            </button>
-        `;
-    },
-
-    renderCollaborativeIndicators() {
-        return `
-            <div class="collaborative-indicators">
-                <div class="d-flex align-items-center p-2 bg-light border-bottom">
-                    <div class="me-3">
-                        <small class="text-muted">
-                            <i class="fas fa-users"></i> Colaboradores ativos:
-                        </small>
-                    </div>
-                    <div class="collaborator-avatars">
-                        <div class="collaborator-avatar" title="João Silva (você)">
-                            <div class="avatar-circle bg-primary">JS</div>
-                        </div>
-                        <div class="collaborator-avatar" title="Maria Santos - editando lib/widgets.dart">
-                            <div class="avatar-circle bg-success">MS</div>
-                            <div class="editing-indicator"></div>
-                        </div>
-                    </div>
-                    <div class="ms-auto">
-                        <small class="text-muted">
-                            <i class="fas fa-wifi"></i> Sincronizado
-                        </small>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    // Git integration methods
-    async showCommitDialog() {
-        const modalHtml = `
-            <div class="modal fade" id="commitModal" tabindex="-1">
-                <div class="modal-dialog">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">
-                                <i class="fas fa-save"></i> Commit Changes
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="mb-3">
-                                <label for="commit-message" class="form-label">Mensagem do Commit *</label>
-                                <input type="text" class="form-control" id="commit-message" placeholder="Descreva as mudanças realizadas">
-                            </div>
-                            <div class="mb-3">
-                                <label for="commit-description" class="form-label">Descrição (opcional)</label>
-                                <textarea class="form-control" id="commit-description" rows="3" placeholder="Descrição detalhada das mudanças"></textarea>
-                            </div>
-                            <div class="mb-3">
-                                <h6>Arquivos modificados:</h6>
-                                <div class="changed-files">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="file-main" checked>
-                                        <label class="form-check-label" for="file-main">
-                                            <i class="fas fa-file-code text-primary"></i> main.dart
-                                            <span class="badge bg-warning ms-2">M</span>
-                                        </label>
-                                    </div>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="file-widgets" checked>
-                                        <label class="form-check-label" for="file-widgets">
-                                            <i class="fas fa-file-code text-primary"></i> lib/widgets.dart
-                                            <span class="badge bg-success ms-2">A</span>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                            <button type="button" class="btn btn-success" onclick="StoreApp.performCommit()">
-                                <i class="fas fa-save"></i> Commit
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        this.showModal(modalHtml, 'commitModal');
-    },
-
-    async showBranchDialog() {
-        const modalHtml = `
-            <div class="modal fade" id="branchModal" tabindex="-1">
-                <div class="modal-dialog">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">
-                                <i class="fas fa-code-branch"></i> Gerenciar Branches
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="mb-3">
-                                <h6>Branch Atual: <span class="badge bg-primary">main</span></h6>
-                            </div>
-                            <div class="mb-3">
-                                <h6>Branches Disponíveis:</h6>
-                                <div class="list-group">
-                                    <div class="list-group-item d-flex justify-content-between align-items-center">
-                                        <div>
-                                            <i class="fas fa-code-branch text-primary"></i>
-                                            <strong>main</strong>
-                                            <span class="badge bg-success ms-2">atual</span>
-                                        </div>
-                                        <small class="text-muted">2 commits ahead</small>
-                                    </div>
-                                    <div class="list-group-item d-flex justify-content-between align-items-center">
-                                        <div>
-                                            <i class="fas fa-code-branch text-info"></i>
-                                            feature/new-ui
-                                        </div>
-                                        <div>
-                                            <button class="btn btn-sm btn-outline-primary" onclick="StoreApp.switchBranch('feature/new-ui')">
-                                                Trocar
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="list-group-item d-flex justify-content-between align-items-center">
-                                        <div>
-                                            <i class="fas fa-code-branch text-warning"></i>
-                                            hotfix/bug-fix
-                                        </div>
-                                        <div>
-                                            <button class="btn btn-sm btn-outline-primary" onclick="StoreApp.switchBranch('hotfix/bug-fix')">
-                                                Trocar
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <label for="new-branch-name" class="form-label">Criar Nova Branch</label>
-                                <div class="input-group">
-                                    <input type="text" class="form-control" id="new-branch-name" placeholder="nome-da-branch">
-                                    <button class="btn btn-outline-success" onclick="StoreApp.createBranch()">
-                                        <i class="fas fa-plus"></i> Criar
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        this.showModal(modalHtml, 'branchModal');
-    },
-
-    async showGitHistory() {
-        const modalHtml = `
-            <div class="modal fade" id="historyModal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">
-                                <i class="fas fa-history"></i> Histórico Git
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="git-history">
-                                <div class="commit-item">
-                                    <div class="d-flex align-items-start">
-                                        <div class="commit-avatar me-3">
-                                            <div class="avatar-circle bg-primary">JS</div>
-                                        </div>
-                                        <div class="flex-grow-1">
-                                            <div class="commit-message">
-                                                <strong>Adicionar validação de formulário</strong>
-                                            </div>
-                                            <div class="commit-meta">
-                                                <small class="text-muted">
-                                                    João Silva • há 2 horas • 
-                                                    <span class="commit-hash">a1b2c3d</span>
-                                                </small>
-                                            </div>
-                                            <div class="commit-files mt-2">
-                                                <small>
-                                                    <i class="fas fa-file text-success"></i> main.dart (+15 -3)
-                                                    <i class="fas fa-file text-warning ms-2"></i> lib/validation.dart (+42 -0)
-                                                </small>
-                                            </div>
-                                        </div>
-                                        <div class="commit-actions">
-                                            <button class="btn btn-sm btn-outline-info" onclick="StoreApp.viewCommit('a1b2c3d')">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="commit-item">
-                                    <div class="d-flex align-items-start">
-                                        <div class="commit-avatar me-3">
-                                            <div class="avatar-circle bg-success">MS</div>
-                                        </div>
-                                        <div class="flex-grow-1">
-                                            <div class="commit-message">
-                                                <strong>Implementar componente de botão customizado</strong>
-                                            </div>
-                                            <div class="commit-meta">
-                                                <small class="text-muted">
-                                                    Maria Santos • há 1 dia • 
-                                                    <span class="commit-hash">x9y8z7w</span>
-                                                </small>
-                                            </div>
-                                            <div class="commit-files mt-2">
-                                                <small>
-                                                    <i class="fas fa-file text-success"></i> lib/widgets.dart (+28 -0)
-                                                </small>
-                                            </div>
-                                        </div>
-                                        <div class="commit-actions">
-                                            <button class="btn btn-sm btn-outline-info" onclick="StoreApp.viewCommit('x9y8z7w')">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        this.showModal(modalHtml, 'historyModal');
-    },
-
-    async showDiff() {
-        const modalHtml = `
-            <div class="modal fade" id="diffModal" tabindex="-1">
-                <div class="modal-dialog modal-xl">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">
-                                <i class="fas fa-code-branch"></i> Diff - main.dart
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="diff-viewer">
-                                <div class="diff-line removed">
-                                    <span class="line-number">-12</span>
-                                    <span class="line-content">  String oldFunction() {</span>
-                                </div>
-                                <div class="diff-line removed">
-                                    <span class="line-number">-13</span>
-                                    <span class="line-content">    return 'old implementation';</span>
-                                </div>
-                                <div class="diff-line added">
-                                    <span class="line-number">+12</span>
-                                    <span class="line-content">  String newFunction() {</span>
-                                </div>
-                                <div class="diff-line added">
-                                    <span class="line-number">+13</span>
-                                    <span class="line-content">    return 'new improved implementation';</span>
-                                </div>
-                                <div class="diff-line unchanged">
-                                    <span class="line-number">14</span>
-                                    <span class="line-content">  }</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        this.showModal(modalHtml, 'diffModal');
-    },
-
-    // --- Métodos de Gerenciamento de Arquivos (Mini-IDE) ---
-
-    renderFileTree() {
-        const container = document.getElementById('file-tree');
-        if (!container) return;
-
-        const files = Object.keys(this.appData.appFiles || {});
-        if (files.length === 0) {
-            container.innerHTML = '<div class="p-3 text-center text-muted small">Nenhum arquivo no projeto.</div>';
-            return;
-        }
-
-        // Simples lista de arquivos por enquanto. Pastas podem ser adicionadas depois.
-        container.innerHTML = files.sort().map(path => {
-            const isModified = this.appData.unsavedChanges.has(path);
-            const isSelected = this.appData.activeFile === path;
-            const icon = path.endsWith('.dart') ? 'fa-file-code text-primary' : (path.endsWith('.yaml') ? 'fa-file-alt text-info' : 'fa-file text-secondary');
-
-            return `
-                <div class="file-item ${isSelected ? 'selected' : ''}" onclick="StoreApp.selectFile('${path}')">
-                    <i class="fas ${icon}"></i>
-                    <span>${path}</span>
-                    ${isModified ? '<span class="file-status modified" title="Modificado">●</span>' : ''}
-                </div>
-            `;
-        }).join('');
-    },
-
-    selectFile(filePath) {
-        if (this.appData.activeFile === filePath) return;
-
-        this.appData.activeFile = filePath;
-        this.renderFileTree(); // Re-render para mostrar a seleção
-
-        // Atualiza o header do editor
-        const fileNameEl = document.querySelector('#current-file-name span');
-        const filePathEl = document.getElementById('current-file-path');
-        if (fileNameEl) fileNameEl.textContent = filePath;
-        if (filePathEl) filePathEl.textContent = filePath;
-
-        // Carrega o conteúdo no CodeMirror
-        const editorTextarea = document.getElementById('filesystem-code-editor-textarea');
-        if (editorTextarea) {
-            // Antes de trocar, salva o conteúdo do arquivo anterior
-            if (this.appData.activeFile && this.appData.unsavedChanges.has(this.appData.activeFile)) {
-                this.appData.appFiles[this.appData.activeFile] = editorTextarea.value;
-            }
-
-            const content = this.appData.appFiles[filePath] || '';
-            editorTextarea.value = content;
-            editorTextarea.disabled = false;
-            editorTextarea.focus();
-        }
-
-        // Habilita/desabilita o botão de salvar
-        this.updateSaveButtonState();
-    },
-
-    getActiveCodeMirrorInstance() {
-        // Função desativada, pois não estamos mais usando CodeMirror.
-        return null;
-    },
-
-    // Garante que o CodeMirror seja instanciado na textarea correta
-    // e que o conteúdo do arquivo ativo seja carregado.
-    // Esta função é a chave para a correção.
-    setupFilesystemEditor() {
-        // Função desativada. A lógica agora é com textarea simples.
-        const editorTextarea = document.getElementById('filesystem-code-editor-textarea');
-        if (editorTextarea && !editorTextarea._listenerAttached) {
-            editorTextarea.addEventListener('input', () => {
-            if (this.appData.activeFile) {
-                this.appData.unsavedChanges.add(this.appData.activeFile);
-                this.renderFileTree();
-                this.updateSaveButtonState();
-            }
-            });
-            editorTextarea._listenerAttached = true;
-        }
-    },
-
-    updateSaveButtonState() {
-        const saveBtn = document.getElementById('save-file-btn');
-        if (!saveBtn) return;
-
-        const hasChanges = this.appData.activeFile && this.appData.unsavedChanges.has(this.appData.activeFile);
-        saveBtn.disabled = !hasChanges;
-    },
-
-    async saveActiveFile() {
-        const filePath = this.appData.activeFile;
-        const editorTextarea = document.getElementById('filesystem-code-editor-textarea');
-        if (!filePath || !editorTextarea) return;
-
-        const content = editorTextarea.value;
-        this.appData.appFiles[filePath] = content; // Atualiza o estado
-
-        // Aqui, faríamos uma chamada de API para salvar o arquivo no backend
-        // Ex: await WorkzSDK.api.post(`/apps/${this.editingAppId}/files`, { path: filePath, content: content });
-        this.showToast(`Arquivo '${filePath}' salvo!`, 'success');
-
-        this.appData.unsavedChanges.delete(filePath);
-        this.renderFileTree();
-        this.updateSaveButtonState();
-    },
-
-    async createNewFile() {
-        const newFilePath = prompt('Digite o nome do novo arquivo (ex: lib/utils.dart):');
-        if (!newFilePath || !newFilePath.trim()) return;
-
-        if (this.appData.appFiles.hasOwnProperty(newFilePath)) {
-            alert('Um arquivo com este nome já existe.');
-            return;
-        }
-
-        // Update file tree selection
-        document.querySelectorAll('.file-item').forEach(item => {
-            item.classList.remove('selected');
-        });
-        event.target.closest('.file-item').classList.add('selected');
-    },
-
-    toggleFolder(folderName) {
-        // Toggle folder expansion
-        const folderItem = event.target.closest('.file-item');
-        const nestedItems = folderItem.parentNode.querySelectorAll('.nested');
-
-        nestedItems.forEach(item => {
-            item.style.display = item.style.display === 'none' ? 'block' : 'none';
-        });
-
-        const icon = folderItem.querySelector('i');
-        icon.className = icon.className.includes('fa-folder') ? 'fas fa-folder-open text-warning' : 'fas fa-folder text-warning';
-    },
-
-    // Git action methods
-    async performCommit() {
-        const message = document.getElementById('commit-message').value;
-        if (!message) {
-            alert('Mensagem do commit é obrigatória');
-            return;
-        }
-
-        // Simulate commit
-        console.log('Performing commit:', message);
-        bootstrap.Modal.getInstance(document.getElementById('commitModal')).hide();
-
-        // Show success message
-        this.showToast('Commit realizado com sucesso!', 'success');
-    },
-
-    async switchBranch(branchName) {
-        console.log('Switching to branch:', branchName);
-        bootstrap.Modal.getInstance(document.getElementById('branchModal')).hide();
-        this.showToast(`Trocado para branch: ${branchName}`, 'info');
-    },
-
-    async createBranch() {
-        const branchName = document.getElementById('new-branch-name').value;
-        if (!branchName) {
-            alert('Nome da branch é obrigatório');
-            return;
-        }
-
-        console.log('Creating branch:', branchName);
-        this.showToast(`Branch ${branchName} criada com sucesso!`, 'success');
-    },
-
-    viewCommit(commitHash) {
-        console.log('Viewing commit:', commitHash);
-        // Would open detailed commit view
-    },
-
-    // Utility methods
-    showModal(modalHtml, modalId) {
-        // Remove existing modal
-        const existingModal = document.getElementById(modalId);
-        if (existingModal) {
-            existingModal.remove();
-        }
-
-        // Add new modal
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-        // Show modal
-        const modalEl = document.getElementById(modalId);
-        const modal = new bootstrap.Modal(modalEl);
-        // Ao fechar o modal de build, interrompe o polling
-        modalEl.addEventListener('hidden.bs.modal', () => {
-            if (modalId === 'buildStatusModal' && this._buildWatchTimer) {
-                try { clearTimeout(this._buildWatchTimer); } catch(_) {}
-                this._buildWatchTimer = null;
-                this._buildWatchAppId = null;
-            }
-            if (modalId === 'livePreviewModal') {
-                // Cleanup preview token on worker if needed
-                try {
-                    const token = this._activePreviewToken;
-                    this._activePreviewToken = null;
-                    this._livePreviewMode = null;
-                    const base = this._activePreviewBase || '';
-                    this._activePreviewBase = null;
-                    if (token) {
-                        const delUrl = (base ? base : '') + '/preview/' + token;
-                        fetch(delUrl, { method: 'DELETE' }).catch(() => {});
-                    }
-                } catch (_) {}
-            }
-        }, { once: true });
-        modal.show();
-    },
-
-    showToast(message, type = 'info') {
-        // Simple toast notification
-        const toast = document.createElement('div');
-        toast.className = `alert alert-${type} position-fixed`;
-        toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
-        toast.innerHTML = `
-            <div class="d-flex align-items-center">
-                <i class="fas fa-${type === 'success' ? 'check' : type === 'error' ? 'times' : 'info'}-circle me-2"></i>
-                ${message}
-            </div>
-        `;
-
-        document.body.appendChild(toast);
-
-        setTimeout(() => {
-            toast.remove();
-        }, 3000);
-    },
-
-    formatBytes(bytes) {
-        if (bytes === 0) return '0 B';
-        const k = 1024;
-        const sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-    },
-
-    formatDate(dateString) {
-        if (!dateString) return 'N/A';
-        return new Date(dateString).toLocaleDateString('pt-BR');
-    },
-
-    // Navigation methods
-    nextStep() {
-        if (this.currentStep < this.maxSteps) {
-            this.currentStep++;
-            this.updateStepDisplay();
-        }
-    },
-
-    prevStep() {
-        if (this.currentStep > 1) {
-            this.currentStep--;
-            this.updateStepDisplay();
-        }
-    },
-
-    updateStepDisplay() {
-        // Hide all sections
-        document.querySelectorAll('.form-section').forEach(section => {
-            section.classList.remove('active');
-        });
-
-        // Show current section
-        const currentSection = document.getElementById(`step-${this.currentStep}`);
-        if (currentSection) {
-            currentSection.classList.add('active');
-        }
-
-        // Update step indicators
-        document.querySelectorAll('.step').forEach((step, index) => {
-            const stepNumber = index + 1;
-            step.classList.remove('active', 'completed');
-
-            if (stepNumber === this.currentStep) {
-                step.classList.add('active');
-            } else if (stepNumber < this.currentStep) {
-                step.classList.add('completed');
-            }
-        });
-    },
-
-    selectAppType(type) {
-        if (type === 'flutter') {
-            this.showToast('Flutter desabilitado no MVP (Free Tier). Use JavaScript.', 'warning');
-            return;
-        }
-        this.appType = type;
-
-        // Update UI to show selection
-        document.querySelectorAll('.app-type-card').forEach(card => {
-            card.classList.remove('selected');
-        });
-
-        const selectedCard = document.getElementById(`${type === 'javascript' ? 'js' : 'flutter'}-type-card`);
-        if (selectedCard) {
-            selectedCard.classList.add('selected');
-        }
-
-        // Update radio buttons if they exist
-        const radioButton = document.querySelector(`input[name="app-type"][value="${type}"]`);
-        if (radioButton) {
-            radioButton.checked = true;
-        }
-
-        console.log('Selected app type:', type);
-
-        // Initialize code templates based on type
-        if (!this.editMode) { // Apenas para novos apps
-            if (type === 'flutter') {
-                // Modo simples: não usar Mini‑IDE; manter apenas textarea Dart
-                // Não sobrescrever automaticamente com template; manter vazio até o usuário colar ou usar "Template"
-                this.appData.code = '';
-                if (!this.appData.dartCode) {
-                    this.appData.dartCode = '';
-                }
-                this.appData.appFiles = {};
-                this.appData.activeFile = null;
-            } else if (type === 'javascript') {
-                // Limpa a estrutura de arquivos
-                this.appData.appFiles = {};
-                this.appData.activeFile = null;
-                // Define o código JS
-                if (!this.appData.code) {
-                    this.appData.code = this.getJavaScriptTemplate();
-                }
-            }
-        }
-
-        if (type === 'flutter') {
-            this.appData.usesSdk = true;
-        }
-        this.enforceAccessLevelConsistency();
-        if (this.currentStep === 4) {
-            setTimeout(() => this.applyStep4State(), 50);
-        }
-
-        // Show/hide token field based on app type
-        this.toggleTokenField();
-
-        // Update build platforms UI (step 4) when switching between JS/Flutter
-        try {
-            const buildPlatformsContainer = document.getElementById('build-platforms-container');
-            const buildWeb = document.getElementById('config-build-web');
-            const buildAndroid = document.getElementById('config-build-android');
-            if (buildPlatformsContainer && buildWeb && buildAndroid) {
-                buildPlatformsContainer.style.display = (this.appType === 'flutter') ? '' : 'none';
-                if (this.appType === 'flutter') {
-                    const currentPlatforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
-                        ? this.appData.buildPlatforms
-                        : ['web'];
-                    buildWeb.checked = currentPlatforms.includes('web');
-                    buildAndroid.checked = currentPlatforms.includes('android');
-                }
-            }
-        } catch (_) {}
-
-        this.validateCurrentStep();
-    },
-
-    getPubspecTemplate() {
-        return `
-name: new_workz_app
-description: Um novo aplicativo Flutter criado na Workz Platform.
-version: 1.0.0+1
-
-environment:
-  sdk: '>=3.0.0 <4.0.0'
-
-dependencies:
-  flutter:
-    sdk: flutter
-`;
-    },
-
-    getFlutterTemplate() {
-        return `import 'package:flutter/material.dart';
-import 'package:workz_sdk/workz_sdk.dart';
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  
-  try {
-    // Initialize Workz SDK
-    await WorkzSDK.init(
-      apiUrl: 'http://localhost:9090/api',
-      debug: true,
-    );
-    
-    runApp(MyWorkzApp());
-  } catch (error) {
-    print('Failed to initialize app: \$error');
-    runApp(ErrorApp(error: error.toString()));
-  }
-}
-
-class MyWorkzApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Meu App Workz',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-        appBarTheme: AppBarTheme(
-          backgroundColor: Colors.blue[600],
-          foregroundColor: Colors.white,
-          elevation: 2,
-        ),
-      ),
-      home: HomeScreen(),
-      debugShowCheckedModeBanner: false,
-    );
-  }
-}
-
-class HomeScreen extends StatefulWidget {
-  @override
-  _HomeScreenState createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-  String _message = 'Carregando...';
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeApp();
-  }
-
-  Future<void> _initializeApp() async {
-    try {
-      // Simular carregamento de dados
-      await Future.delayed(Duration(seconds: 1));
-      
-      setState(() {
-        _message = 'App funcionando perfeitamente!';
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _message = 'Erro ao inicializar: \$e';
-        _isLoading = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Meu App Workz'),
-        centerTitle: true,
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.blue[50]!, Colors.white],
-          ),
-        ),
-        child: Center(
-          child: Padding(
-            padding: EdgeInsets.all(32.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Logo/Icon
-                Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    color: Colors.blue[600],
-                    borderRadius: BorderRadius.circular(60),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.blue.withOpacity(0.3),
-                        blurRadius: 20,
-                        offset: Offset(0, 10),
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    Icons.rocket_launch,
-                    size: 60,
-                    color: Colors.white,
-                  ),
-                ),
-                
-                SizedBox(height: 32),
-                
-                // Title
-                Text(
-                  '🚀 Flutter App',
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue[800],
-                  ),
-                ),
-                
-                SizedBox(height: 16),
-                
-                // Status message
-                if (_isLoading)
-                  Column(
-                    children: [
-                      CircularProgressIndicator(
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[600]!),
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        _message,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  Column(
-                    children: [
-                      Container(
-                        padding: EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.green[50],
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.green[200]!),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.check_circle, color: Colors.green[600]),
-                            SizedBox(width: 8),
-                            Text(
-                              _message,
-                              style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.green[800],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      
-                      SizedBox(height: 32),
-                      
-                      // Features
-                      Card(
-                        elevation: 4,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Column(
-                            children: [
-                              Text(
-                                'Recursos Disponíveis',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.grey[800],
-                                ),
-                              ),
-                              SizedBox(height: 16),
-                              _buildFeatureItem(Icons.integration_instructions, 'WorkzSDK Integrado'),
-                              _buildFeatureItem(Icons.devices, 'Multiplataforma'),
-                              _buildFeatureItem(Icons.speed, 'Performance Otimizada'),
-                              _buildFeatureItem(Icons.security, 'Seguro e Confiável'),
-                            ],
-                          ),
-                        ),
-                      ),
-                      
-                      SizedBox(height: 24),
-                      
-                      // Action buttons
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          ElevatedButton.icon(
-                            onPressed: _testWorkzSDK,
-                            icon: Icon(Icons.play_arrow),
-                            label: Text('Testar SDK'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue[600],
-                              foregroundColor: Colors.white,
-                              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _showAppInfo,
-                            icon: Icon(Icons.info),
-                            label: Text('Info'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.blue[600],
-                              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFeatureItem(IconData icon, String text) {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.blue[600], size: 20),
-          SizedBox(width: 12),
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[700],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _testWorkzSDK() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.green),
-            SizedBox(width: 8),
-            Text('WorkzSDK Teste'),
-          ],
-        ),
-        content: Text(
-          'WorkzSDK está funcionando perfeitamente!\\n\\n'
-          'Recursos disponíveis:\\n'
-          '• Autenticação\\n'
-          '• Storage (KV, Docs, Blobs)\\n'
-          '• API Integration\\n'
-          '• Push Notifications'
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showAppInfo() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.info, color: Colors.blue),
-            SizedBox(width: 8),
-            Text('Informações do App'),
-          ],
-        ),
-        content: Text(
-          '🚀 Flutter App Workz\\n\\n'
-          '📱 Plataforma: Flutter\\n'
-          '⚡ Engine: Flutter Web\\n'
-          '🔧 SDK: WorkzSDK v2.0\\n'
-          '📅 Build: \${DateTime.now().toString()}\\n'
-          '🎯 Status: Funcionando\\n\\n'
-          '✨ Recursos Ativos:\\n'
-          '• Interface responsiva\\n'
-          '• Integração WorkzSDK\\n'
-          '• Suporte multiplataforma\\n'
-          '• Performance otimizada'
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class ErrorApp extends StatelessWidget {
-  final String error;
-  
-  const ErrorApp({Key? key, required this.error}) : super(key: key);
-  
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        backgroundColor: Colors.red[50],
-        body: Center(
-          child: Padding(
-            padding: EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.error_outline,
-                  size: 80,
-                  color: Colors.red[400],
-                ),
-                SizedBox(height: 24),
-                Text(
-                  'Falha ao Inicializar App',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red[700],
-                  ),
-                ),
-                SizedBox(height: 16),
-                Text(
-                  error,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.red[600],
-                  ),
-                ),
-                SizedBox(height: 32),
-                ElevatedButton(
-                  onPressed: () {
-                    // Restart the app
-                    main();
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red[400],
-                    foregroundColor: Colors.white,
-                  ),
-                  child: Text('Tentar Novamente'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}`;
-    },
-
-    getJavaScriptTemplate() {
-        return `// Meu App JavaScript com WorkzSDK
-class MyWorkzApp {
-    constructor() {
-        this.isInitialized = false;
-        this.init();
-    }
-
-    async init() {
-        try {
-            console.log('🚀 Inicializando app...');
-            
-            // Aguardar WorkzSDK estar disponível
-            if (typeof WorkzSDK !== 'undefined') {
-                console.log('✅ WorkzSDK disponível');
-                this.isInitialized = true;
-            } else {
-                console.log('⚠️ WorkzSDK não encontrado');
-            }
-            
-            this.render();
-            this.setupEventListeners();
-            
-        } catch (error) {
-            console.error('❌ Erro ao inicializar:', error);
-            this.renderError(error.message);
-        }
-    }
-
-    render() {
-        const appContainer = document.getElementById('app') || document.body;
-        
-        appContainer.innerHTML = \`
-            <div style="
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                max-width: 800px;
-                margin: 0 auto;
-                padding: 40px 20px;
-                text-align: center;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                color: white;
-            ">
-                <div style="
-                    background: rgba(255, 255, 255, 0.1);
-                    padding: 40px;
-                    border-radius: 20px;
-                    backdrop-filter: blur(10px);
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-                ">
-                    <h1 style="font-size: 3rem; margin-bottom: 20px;">
-                        🚀 JavaScript App
-                    </h1>
-                    
-                    <p style="font-size: 1.2rem; margin-bottom: 30px; opacity: 0.9;">
-                        Aplicativo criado com WorkzSDK
-                    </p>
-                    
-                    <div style="
-                        display: inline-flex;
-                        align-items: center;
-                        background: rgba(40, 167, 69, 0.2);
-                        padding: 12px 20px;
-                        border-radius: 25px;
-                        margin-bottom: 40px;
-                        border: 1px solid rgba(40, 167, 69, 0.3);
-                    ">
-                        <span style="margin-right: 8px;">✅</span>
-                        <span>App funcionando perfeitamente!</span>
-                    </div>
-                    
-                    <div style="
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                        gap: 20px;
-                        margin-bottom: 40px;
-                    ">
-                        <div style="
-                            background: rgba(255, 255, 255, 0.1);
-                            padding: 20px;
-                            border-radius: 15px;
-                            border: 1px solid rgba(255, 255, 255, 0.2);
-                        ">
-                            <div style="font-size: 2rem; margin-bottom: 10px;">⚡</div>
-                            <div style="font-weight: 600;">Performance</div>
-                            <div style="font-size: 0.9rem; opacity: 0.8;">Otimizado e rápido</div>
-                        </div>
-                        
-                        <div style="
-                            background: rgba(255, 255, 255, 0.1);
-                            padding: 20px;
-                            border-radius: 15px;
-                            border: 1px solid rgba(255, 255, 255, 0.2);
-                        ">
-                            <div style="font-size: 2rem; margin-bottom: 10px;">🔧</div>
-                            <div style="font-weight: 600;">WorkzSDK</div>
-                            <div style="font-size: 0.9rem; opacity: 0.8;">Integração completa</div>
-                        </div>
-                        
-                        <div style="
-                            background: rgba(255, 255, 255, 0.1);
-                            padding: 20px;
-                            border-radius: 15px;
-                            border: 1px solid rgba(255, 255, 255, 0.2);
-                        ">
-                            <div style="font-size: 2rem; margin-bottom: 10px;">🌐</div>
-                            <div style="font-weight: 600;">Web Ready</div>
-                            <div style="font-size: 0.9rem; opacity: 0.8;">Funciona em qualquer navegador</div>
-                        </div>
-                    </div>
-                    
-                    <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap;">
-                        <button id="test-sdk-btn" style="
-                            background: #007bff;
-                            color: white;
-                            border: none;
-                            padding: 12px 24px;
-                            border-radius: 8px;
-                            font-size: 1rem;
-                            cursor: pointer;
-                            transition: all 0.3s ease;
-                        ">
-                            Testar WorkzSDK
-                        </button>
-                        
-                        <button id="app-info-btn" style="
-                            background: transparent;
-                            color: white;
-                            border: 2px solid white;
-                            padding: 12px 24px;
-                            border-radius: 8px;
-                            font-size: 1rem;
-                            cursor: pointer;
-                            transition: all 0.3s ease;
-                        ">
-                            Informações do App
-                        </button>
-                    </div>
-                </div>
-            </div>
-        \`;
-    }
-
-    setupEventListeners() {
-        const testBtn = document.getElementById('test-sdk-btn');
-        const infoBtn = document.getElementById('app-info-btn');
-        
-        if (testBtn) {
-            testBtn.addEventListener('click', () => this.testWorkzSDK());
-        }
-        
-        if (infoBtn) {
-            infoBtn.addEventListener('click', () => this.showAppInfo());
-        }
-    }
-
-    testWorkzSDK() {
-        if (this.isInitialized && typeof WorkzSDK !== 'undefined') {
-            alert(\`✅ WorkzSDK está funcionando perfeitamente!
-
-Recursos disponíveis:
-• Autenticação
-• Storage (KV, Docs, Blobs)  
-• API Integration
-• Push Notifications
-• Performance Monitoring\`);
-        } else {
-            alert('⚠️ WorkzSDK não foi carregado. Verifique a configuração.');
-        }
-    }
-
-    showAppInfo() {
-        const info = \`🚀 Informações do Aplicativo
-
-📱 Tipo: JavaScript App
-🌐 Plataforma: Web
-⚡ Engine: JavaScript ES6+
-🔧 SDK: WorkzSDK v2.0
-📅 Build: \${new Date().toLocaleString('pt-BR')}
-🎯 Status: Funcionando
-
-✨ Recursos Ativos:
-• Interface responsiva
-• Integração WorkzSDK
-• Performance otimizada
-• Compatibilidade universal\`;
-        
-        alert(info);
-    }
-
-    renderError(message) {
-        const appContainer = document.getElementById('app') || document.body;
-        
-        appContainer.innerHTML = \`
-            <div style="
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                max-width: 600px;
-                margin: 0 auto;
-                padding: 40px 20px;
-                text-align: center;
-                background: #f8d7da;
-                min-height: 100vh;
-                color: #721c24;
-            ">
-                <div style="
-                    background: white;
-                    padding: 40px;
-                    border-radius: 15px;
-                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-                    border: 1px solid #f5c6cb;
-                ">
-                    <div style="font-size: 4rem; margin-bottom: 20px;">❌</div>
-                    <h1 style="margin-bottom: 20px;">Erro ao Inicializar</h1>
-                    <p style="margin-bottom: 30px; font-size: 1.1rem;">\${message}</p>
-                    <button onclick="location.reload()" style="
-                        background: #dc3545;
-                        color: white;
-                        border: none;
-                        padding: 12px 24px;
-                        border-radius: 8px;
-                        font-size: 1rem;
-                        cursor: pointer;
-                    ">
-                        Tentar Novamente
-                    </button>
-                </div>
-            </div>
-        \`;
-    }
-}
-
-// Inicializar app quando a página carregar
-document.addEventListener('DOMContentLoaded', () => {
-    new MyWorkzApp();
-});
-
-// Fallback se DOMContentLoaded já passou
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => new MyWorkzApp());
-} else {
-    new MyWorkzApp();
-}`;
-    },
-
-    toggleTokenField() {
-        const tokenContainer = document.getElementById('token-field-container');
-        if (tokenContainer) {
-            if (this.appType === 'flutter') {
-                tokenContainer.style.display = 'block';
-            } else {
-                tokenContainer.style.display = 'none';
-            }
-        }
-    },
-
-    async editApp(appId) {
-        try {
-            const response = await WorkzSDK.api.get(`/apps/${appId}`);
-            if (response && response.success) {
-                // 1. Configurar o estado de edição
-                this.editMode = true;
-                this.editingAppId = appId;
-                this.currentAppData = response.data;
-                this.viewMode = 'form'; // Switch to form view
-                this.currentStep = 5; // Ir direto para a etapa de código
-
-                // 2. Renderizar a página do formulário
-                this.render();
-
-                // 2.5 Preencher o estado appData com os dados do app.
-                // Isso é crucial para que initializeCodeMirror tenha o código correto.
-                this.populateFormFields(response.data);
-                setTimeout(() => {
-                    // Se for app filesystem, inicializa o editor de arquivos (somente fora do modo simples)
-                    if (!this.useSimpleEditor && this.currentAppData.storage_type === 'filesystem') {
-                        this.setupFilesystemEditor();
-                        this.renderFileTree();
-                    }
-
-                    window.scrollTo(0, 0);
-                }, 100);
-
-            }
-        } catch (e) {
-            console.error('Error loading app for edit:', e);
-            alert('Erro ao carregar aplicativo para edição: ' + e.message);
-        }
-    },
-
-    populateFormFields(appData) {
-        // Se for filesystem, os arquivos vêm em um campo separado
-        if (appData.storage_type === 'filesystem') {
-            // O backend deve retornar os arquivos em um campo como `files`
-            this.appData.appFiles = appData.files || { 'main.dart': appData.dart_code || '' };
-            this.appData.activeFile = null;
-            this.appData.unsavedChanges.clear();
-        } else {
-            // Limpa o estado de arquivos para apps de database
-            this.appData.appFiles = {};
-            this.appData.activeFile = null;
-            this.appData.unsavedChanges.clear();
-        }
-
-        console.log('Populating form fields with:', appData);
-
-        // Update internal data
-        this.appData.storage_type = appData.storage_type || 'database';
-        this.appData.appFiles = appData.files || {};
-        this.appData.activeFile = null;
-        this.appData.unsavedChanges.clear();
-        this.appData.title = appData.tt || appData.title || '';
-        this.appData.slug = appData.slug || '';
-        this.appData.description = appData.ds || appData.description || '';
-        this.appData.version = appData.version || '1.0.0';
-        // Preço pode vir como price ou vl no backend; cair para 0 se ausente
-        const rawPrice = (appData.price !== undefined ? appData.price : appData.vl);
-        const normalizedPrice = (rawPrice !== undefined && rawPrice !== null)
-            ? String(rawPrice).replace(',', '.')
-            : '0';
-        const parsedPrice = parseFloat(normalizedPrice);
-        this.appData.price = Number.isFinite(parsedPrice) ? parsedPrice : 0;
-        this.appData.accessLevel = parseInt(appData.access_level || 1);
-        this.appData.entityType = parseInt(appData.entity_type || 1);
-        this.appData.color = appData.color || '#3b82f6';
-        this.appData.scopes = appData.scopes ? (Array.isArray(appData.scopes) ? appData.scopes : JSON.parse(appData.scopes)) : [];
-
-        this.appData.contextMode = 'user';
-        this.appData.allowContextSwitch = true;
-        this.appData.shellHeader = true;
-        this.appData.shellSidebar = true;
-        this.appData.shellFooterMenu = false;
-        this.appData.shellHeaderActions = '';
-        this.appData.shellSidebarItems = '';
-        this.appData.shellSidebarForms = '';
-        this.appData.shellFooterItems = '';
-
-        const manifestRaw = appData.manifest || appData.manifest_json;
-        let manifest = null;
-        if (manifestRaw && typeof manifestRaw === 'object') {
-            manifest = manifestRaw;
-        } else if (typeof manifestRaw === 'string' && manifestRaw.trim()) {
-            try { manifest = JSON.parse(manifestRaw); } catch (_) { manifest = null; }
-        }
-        if (manifest && typeof manifest === 'object') {
-            const ctxMode = manifest.contextRequirements?.mode;
-            if (ctxMode) this.appData.contextMode = String(ctxMode).toLowerCase();
-            if (typeof manifest.contextRequirements?.allowContextSwitch === 'boolean') {
-                this.appData.allowContextSwitch = manifest.contextRequirements.allowContextSwitch;
-            }
-            const shell = manifest.uiShell || {};
-            if (typeof shell.header?.enabled === 'boolean') {
-                this.appData.shellHeader = shell.header.enabled;
-            }
-            if (typeof shell.sidebar?.enabled === 'boolean') {
-                this.appData.shellSidebar = shell.sidebar.enabled;
-            }
-            const footerShell = shell.footerMenu || shell.footer || {};
-            if (typeof footerShell.enabled === 'boolean') {
-                this.appData.shellFooterMenu = footerShell.enabled;
-            }
-            this.appData.shellHeaderActions = this.serializeShellItems(shell.header?.buttons || shell.header?.actions || []);
-            this.appData.shellSidebarItems = this.serializeShellItems(shell.sidebar?.items || shell.sidebar?.menu || []);
-            this.appData.shellSidebarForms = this.serializeShellItems(shell.sidebar?.forms || []);
-            this.appData.shellFooterItems = this.serializeShellItems(footerShell.items || []);
-        }
-
-        if (appData.context_mode || appData.contextMode) {
-            this.appData.contextMode = String(appData.context_mode || appData.contextMode).toLowerCase();
-        }
-
-        this.appData.usesSdk = (this.appType === 'flutter') || this.appData.scopes.length > 0 || this.appData.accessLevel > 0;
-
-        // Set company data
-        if (appData.company_id || appData.exclusive_to_entity_id) {
-            const companyId = appData.company_id || appData.exclusive_to_entity_id;
-            console.log('🏢 Procurando negócio com ID:', companyId);
-            console.log('🏢 Negócios disponíveis:', this.userCompanies);
-
-            const company = this.userCompanies.find(c => c.id === parseInt(companyId));
-            if (company) {
-                console.log('✅ Negócio encontrado:', company);
-                this.appData.company = {
-                    id: company.id,
-                    name: company.name,
-                    cnpj: company.cnpj
-                };
-
-                // Wait for DOM to be ready, then select company
-                setTimeout(() => {
-                    const companySelect = document.getElementById('company-select');
-                    if (companySelect) {
-                        companySelect.value = company.id;
-                        console.log('🔄 Negócio selecionada no dropdown:', company.id);
-
-                        const cnpjDisplay = document.getElementById('cnpj-display');
-                        if (cnpjDisplay) {
-                            cnpjDisplay.value = this.formatCNPJ(company.cnpj);
-                            this.validateCNPJ(company.cnpj);
-                        }
-                    } else {
-                        console.warn('⚠️ Dropdown de negócio não encontrado');
-                    }
-                }, 100);
-            } else {
-                console.warn('⚠️ Negócio não encontrado entre os negócios do usuário');
-            }
-        }
-
-        // Populate form fields
-        const titleField = document.getElementById('app-title');
-        if (titleField) titleField.value = this.appData.title;
-
-        const slugField = document.getElementById('app-slug');
-        if (slugField) slugField.value = this.appData.slug;
-
-        const descField = document.getElementById('app-description');
-        if (descField) descField.value = this.appData.description;
-
-        const versionField = document.getElementById('app-version');
-        if (versionField) versionField.value = this.appData.version;
-
-        const priceField = document.getElementById('app-price');
-        if (priceField) {
-            const p = Number.isFinite(this.appData.price) ? this.appData.price : 0;
-            priceField.value = p.toFixed(2);
-        }
-        // Atualiza visibilidade do checkbox de termos
-        this.togglePriceTermsVisibility();
-        // Atualiza resumo após carregar dados (inclui preço)
-        this.updateSummaryPanel();
-
-        const accessField = document.getElementById('access-level');
-        if (accessField) accessField.value = this.appData.accessLevel;
-
-        const entityField = document.getElementById('entity-type');
-        if (entityField) entityField.value = this.appData.entityType;
-
-        const colorField = document.getElementById('app-color');
-        if (colorField) colorField.value = this.appData.color;
-
-        const colorHexField = document.getElementById('app-color-hex');
-        if (colorHexField) colorHexField.value = this.appData.color;
-
-        // Set app type
-        this.appType = appData.app_type || 'javascript';
-        this.selectAppType(this.appType);
-
-        // Layout / orientação (defaults quando não vierem do backend)
-        this.appData.aspectRatio = appData.aspect_ratio || this.appData.aspectRatio || '4:3';
-        this.appData.supportsPortrait = (typeof appData.supports_portrait === 'boolean') ? appData.supports_portrait : true;
-        this.appData.supportsLandscape = (typeof appData.supports_landscape === 'boolean') ? appData.supports_landscape : true;
-
-        setTimeout(() => {
-            const aspectSelect = document.getElementById('aspect-ratio');
-            const aspectCustom = document.getElementById('aspect-ratio-custom');
-            if (aspectSelect) {
-                const known = ['4:3','16:9','3:2','1:1'];
-                if (known.includes(this.appData.aspectRatio)) {
-                    aspectSelect.value = this.appData.aspectRatio;
-                    if (aspectCustom) {
-                        aspectCustom.classList.add('d-none');
-                        aspectCustom.value = '';
-                    }
-                } else {
-                    aspectSelect.value = 'custom';
-                    if (aspectCustom) {
-                        aspectCustom.classList.remove('d-none');
-                        aspectCustom.value = this.appData.aspectRatio;
-                    }
-                }
-            }
-            const sp = document.getElementById('supports-portrait');
-            const sl = document.getElementById('supports-landscape');
-            if (sp) sp.checked = !!this.appData.supportsPortrait;
-            if (sl) sl.checked = !!this.appData.supportsLandscape;
-        }, 100);
-
-        // Populate code fields
-        if (this.appType === 'flutter') {
-            this.appData.dartCode = appData.dart_code || appData.source_code || '';
-            // If dart_code is empty but js_code has Dart content, use it
-            if (!this.appData.dartCode && appData.js_code && appData.js_code.includes('/* DART_CODE */')) {
-                this.appData.dartCode = appData.js_code.replace('/* DART_CODE */ ', '');
-            }
-        } else {
-            this.appData.code = appData.js_code || appData.source_code || appData.code || '';
-        }
-
-        const codeField = document.getElementById('app-code');
-        if (codeField) {
-            codeField.value = this.appType === 'flutter' ? this.appData.dartCode : this.appData.code;
-        }
-
-        // Show/hide token field based on app type (and update its value if editing)
-        this.toggleTokenField(appData.token);
-
-        // Populate scopes checkboxes
-        document.querySelectorAll('input[type="checkbox"][value*="."]').forEach(checkbox => {
-            checkbox.checked = this.appData.scopes.includes(checkbox.value);
-        });
-
-        // Garantir consistência inicial entre scopes e nível de acesso
-        this.enforceAccessLevelConsistency();
-
-        // Go to step 5 to start editing code directly
-        // this.currentStep = 5; // Movido para a função editApp
-        // this.updateStepDisplay(); // Será chamado pelo render()
-    },
-
-    resetForm() {
-        // Reset all form fields
-        document.querySelectorAll('input, textarea, select').forEach(field => {
-            if (field.type === 'checkbox') {
-                field.checked = false;
-            } else {
-                field.value = '';
-            }
-        });
-
-        // Reset appData state
-        this.appData = {
-            company: null,
-            appFiles: {},
-            activeFile: null,
-            unsavedChanges: new Set(),
-            title: "",
-            slug: "",
-            description: "",
-            icon: null,
-            color: "#3b82f6",
+/*
+App Studio v0.9.2-mvpplus
+Changelog:
+- Aligned manifest handling with WorkzSDK v2 where needed (runtime + contextRequirements).
+- Normalized storage.scope to user/context; legacy app -> context.
+- Enforced docs.types rules (default when missing, invalid when empty).
+- AllowedOrigins normalized (no "*", prefer referrer origin, fallback to location.origin).
+- Preview now loads real WorkzSDK v2 and surfaces init errors in DOM.
+- Preview now awaits WorkzSDK.init before executing app code and blocks on init failure.
+- contextRequirements.mode normalized to user|business|team|hybrid (company->business).
+- MVP-Plus: list/ID robustness, edit loading flow, CSRF headers, save diagnostics.
+- MVP-Plus: draft autosave + restore, import JSON, duplicate/delete, manifest UI tweaks.
+- MVP-Plus: preview diagnostics with logs + open in new tab.
+
+MIGRATION NOTES
+- Flutter/Dart flows removed entirely; App Studio now supports JavaScript apps only.
+- Mini-IDE (CodeMirror) preserved and improved with safe init/destroy, debounce, and shortcuts.
+- Preview now uses iframe srcdoc with sandbox; postMessage uses targetOrigin "*" and parent filters by origin.
+- Manifest defaults normalized; docs types validation blocks preview/export if invalid.
+- UI reduced to list -> edit -> preview/export; no new backend routes required.
+- InnerHTML with user content removed; user data is set with textContent.
+- If CodeMirror CDN fails, editor/preview are disabled with a clear warning.
+*/
+(function () {
+    'use strict';
+
+    // === CONFIG ===
+    var VERSION = '0.9.2-mvpplus';
+    var DEBUG = false;
+    var CODEMIRROR_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css';
+    var CODEMIRROR_THEME = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/monokai.min.css';
+    var CODEMIRROR_JS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js';
+    var CODEMIRROR_MODE_JS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js';
+    var CODEMIRROR_DIALOG_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/dialog/dialog.min.css';
+    var CODEMIRROR_FULLSCREEN_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/display/fullscreen.min.css';
+    var CODEMIRROR_DIALOG_JS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/dialog/dialog.min.js';
+    var CODEMIRROR_SEARCHCURSOR_JS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/search/searchcursor.min.js';
+    var CODEMIRROR_SEARCH_JS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/search/search.min.js';
+    var CODEMIRROR_MATCHBRACKETS_JS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/edit/matchbrackets.min.js';
+    var CODEMIRROR_CLOSEBRACKETS_JS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/edit/closebrackets.min.js';
+    var CODEMIRROR_ACTIVE_LINE_JS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/selection/active-line.min.js';
+    var CODEMIRROR_COMMENT_JS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/comment/comment.min.js';
+    var CODEMIRROR_FULLSCREEN_JS = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/display/fullscreen.min.js';
+    var TAILWIND_JS = 'https://cdn.tailwindcss.com';
+    var APP_STUDIO_MANIFEST = {
+        runtime: 'js',
+        contextRequirements: { mode: 'user', allowContextSwitch: true },
+        capabilities: {
+            api: {
+                allow: [
+                    'GET /me',
+                    'GET /apps/my-apps',
+                    'GET /apps/*',
+                    'POST /apps/create',
+                    'POST /apps/update/*',
+                    'POST /apps/delete/*',
+                    'DELETE /apps/*'
+                ]
+            },
+            events: { publish: [], subscribe: [] },
+            storage: { kv: false, docs: { enabled: false, types: [] }, blobs: false, scope: 'context' }
+        },
+        sandbox: { postMessage: { allowedOrigins: [] } }
+    };
+    var DEFAULT_STARTER_CODE = [
+        '(function(){',
+        '  var SHOW_RAW = false;',
+        '  var Modules = {};',
+        '  function define(name, factory){ Modules[name] = { factory: factory, instance: null }; }',
+        '  function require(name){',
+        '    var mod = Modules[name];',
+        '    if (!mod) throw new Error(\"Module not found: \" + name);',
+        '    if (!mod.instance) mod.instance = mod.factory();',
+        '    return mod.instance;',
+        '  }',
+        '',
+        '  define(\"core/ui\", function(){',
+        '    function el(tag, text){',
+        '      var n = document.createElement(tag);',
+        '      if (text !== undefined) n.textContent = String(text);',
+        '      return n;',
+        '    }',
+        '    function renderBase(root){',
+        '      root.textContent = \"\";',
+        '      var wrap = el(\"div\");',
+        '      var line1 = el(\"div\", \"WorkzSDK keys: \");',
+        '      var line2 = el(\"div\", \"WorkzApp ready: \");',
+        '      var line3 = el(\"div\", \"User id: n/a\");',
+        '      wrap.appendChild(line1);',
+        '      wrap.appendChild(line2);',
+        '      wrap.appendChild(line3);',
+        '      var actions = el(\"div\");',
+        '      actions.style.marginTop = \"8px\";',
+        '      wrap.appendChild(actions);',
+        '      var pre = el(\"pre\");',
+        '      pre.style.whiteSpace = \"pre-wrap\";',
+        '      pre.style.fontSize = \"12px\";',
+        '      root.appendChild(wrap);',
+        '      root.appendChild(pre);',
+        '      return { line1: line1, line2: line2, line3: line3, pre: pre, actions: actions };',
+        '    }',
+        '    return { el: el, renderBase: renderBase };',
+        '  });',
+        '',
+        '  define(\"core/bus\", function(){',
+        '    function publish(name, payload){',
+        '      if (!window.WorkzApp || !WorkzApp.events || typeof WorkzApp.events.publish !== \"function\") {',
+        '        throw new Error(\"events indisponiveis\");',
+        '      }',
+        '      return WorkzApp.events.publish(name, payload);',
+        '    }',
+        '    function on(name, handler){',
+        '      if (!window.WorkzApp || !WorkzApp.events || typeof WorkzApp.events.on !== \"function\") {',
+        '        throw new Error(\"events indisponiveis\");',
+        '      }',
+        '      if (window.WorkzSDK && typeof WorkzSDK.isEventSubscribeAllowed === \"function\") {',
+        '        if (!WorkzSDK.isEventSubscribeAllowed(name)) throw new Error(\"events bloqueado\");',
+        '      }',
+        '      return WorkzApp.events.on(name, handler);',
+        '    }',
+        '    return { publish: publish, on: on };',
+        '  });',
+        '',
+        '  define(\"core/sdk\", function(){',
+        '    function getSdkKeys(){ return window.WorkzSDK ? Object.keys(window.WorkzSDK) : []; }',
+        '    function isReady(){ return !!(window.WorkzApp && WorkzApp.state && window.WorkzApp.state.inited); }',
+        '    async function getMe(){',
+        '      if (!window.WorkzApp || !WorkzApp.api || typeof WorkzApp.api.getMe !== \"function\") {',
+        '        throw new Error(\"WorkzApp.api.getMe indisponivel\");',
+        '      }',
+        '      return WorkzApp.api.getMe();',
+        '    }',
+        '    return { getSdkKeys: getSdkKeys, isReady: isReady, getMe: getMe };',
+        '  });',
+        '',
+        '  define(\"app/main\", function(){',
+        '    var ui = require(\"core/ui\");',
+        '    var sdk = require(\"core/sdk\");',
+        '    var bus = require(\"core/bus\");',
+        '    function maskMl(value){',
+        '      var v = String(value || \"\");',
+        '      if (!v) return \"\";',
+        '      if (v.length <= 4) return \"***\";',
+        '      return v.slice(0, 2) + \"***\" + v.slice(-2);',
+        '    }',
+        '    function appendLine(pre, text){',
+        '      var line = String(text || \"\");',
+        '      pre.textContent = (pre.textContent || \"\") + line + \"\\n\";',
+        '    }',
+        '    function setPre(pre, text, replace){',
+        '      if (replace) { pre.textContent = String(text || \"\"); return; }',
+        '      if (pre.textContent) pre.textContent += \"\\n\" + String(text || \"\");',
+        '      else pre.textContent = String(text || \"\");',
+        '    }',
+        '    async function boot(opts){',
+        '      var root = (opts && opts.root) || document.getElementById(\"app\") || document.getElementById(\"app-root\");',
+        '      if (!root) return;',
+        '      var view = ui.renderBase(root);',
+        '      view.line1.textContent = \"WorkzSDK keys: \" + sdk.getSdkKeys().join(\", \");',
+        '      view.line2.textContent = \"WorkzApp ready: \" + (sdk.isReady() ? \"true\" : \"false\");',
+        '      var btn = ui.el(\"button\", \"Emit test event\");',
+        '      btn.type = \"button\";',
+        '      btn.className = \"btn btn-sm btn-outline-secondary\";',
+        '      view.actions.appendChild(btn);',
+        '      btn.addEventListener(\"click\", function(){',
+        '        try {',
+        '          var ok = bus.publish(\"app:test\", { ts: Date.now() });',
+        '          if (ok === false) appendLine(view.pre, \"events: publish bloqueado\");',
+        '        } catch (e) {',
+        '          appendLine(view.pre, \"events: indisponivel ou bloqueado\");',
+        '        }',
+        '      });',
+        '      try {',
+        '        bus.on(\"app:test\", function(){',
+        '          appendLine(view.pre, \"event app:test recebido\");',
+        '        });',
+        '      } catch (e) {',
+        '        appendLine(view.pre, \"events: subscribe indisponivel ou bloqueado\");',
+        '      }',
+        '      try {',
+        '        var me = await sdk.getMe();',
+        '        var user = (me && me.user) ? me.user : {};',
+        '        var userId = (user.id !== undefined && user.id !== null) ? user.id :',
+        '          (user.us !== undefined && user.us !== null) ? user.us :',
+        '          (user.user_id !== undefined && user.user_id !== null) ? user.user_id :',
+        '          (user.uid !== undefined && user.uid !== null) ? user.uid : \"n/a\";',
+        '        view.line3.textContent = \"User id: \" + userId;',
+        '        var raw = me.raw || {};',
+        '        var companies = raw.companies || (me.data && me.data.companies) || [];',
+        '        var summary = {',
+        '          id: userId,',
+        '          tt: raw.tt || user.tt || user.name || \"\",',
+        '          companies_count: Array.isArray(companies) ? companies.length : 0,',
+        '          ml: maskMl(user.ml || raw.ml || \"\")',
+        '        };',
+        '        var allowRaw = SHOW_RAW || (window.WorkzApp && WorkzApp.state && (WorkzApp.state.preview || WorkzApp.state.debug));',
+        '        if (allowRaw && SHOW_RAW) {',
+        '          setPre(view.pre, JSON.stringify(me.raw || null, null, 2), true);',
+        '        } else {',
+        '          setPre(view.pre, JSON.stringify(summary, null, 2), false);',
+        '        }',
+        '      } catch (e) {',
+        '        view.line3.textContent = \"User id: n/a\";',
+        '        setPre(view.pre, String((e && e.message) ? e.message : e), false);',
+        '      }',
+        '    }',
+        '    return { boot: boot };',
+        '  });',
+        '',
+        '  window.StoreApp = window.StoreApp || {};',
+        '  window.StoreApp.bootstrap = function(opts){',
+        '    if (window.StoreApp.__bootstrapped) return;',
+        '    window.StoreApp.__bootstrapped = true;',
+        '    return require(\"app/main\").boot(opts || {});',
+        '  };',
+        '  if (window.WorkzAppConfig && window.WorkzAppConfig.preview) {',
+        '    window.StoreApp.bootstrap({ sdk: window.WorkzSDK, appConfig: window.WorkzAppConfig, root: document.getElementById(\"app\") });',
+        '  }',
+        '})();'
+    ].join('\n');
+
+    // === STATE ===
+    var state = {
+        view: 'list',
+        apps: [],
+        companies: [],
+        loadingApps: false,
+        loadingCompanies: false,
+        loadingEditor: false,
+        editorReady: false,
+        editorDisabled: false,
+        editorError: '',
+        editorWrap: false,
+        editorFullscreen: false,
+        dirty: false,
+        slugTouched: false,
+        validationErrors: [],
+        validationWarnings: [],
+        app: {
+            id: null,
+            title: '',
+            slug: '',
+            description: '',
+            version: '1.0.0',
+            companyId: '',
             accessLevel: 1,
-            version: "1.0.0",
-            entityType: 1,
-            contextMode: "user",
-            allowContextSwitch: true,
-            usesSdk: true,
-            shellHeader: true,
-            shellSidebar: true,
-            shellFooterMenu: false,
-            shellHeaderActions: "",
-            shellSidebarItems: "",
-            shellSidebarForms: "",
-            shellFooterItems: "",
-            termsAccepted: false,
+            logo: '',
+            color: '',
+            status: 1,
             price: 0,
-            scopes: [],
-            code: "",
-            dartCode: "",
-            token: null,
-            aspectRatio: '4:3',
+            aspectRatio: '',
             supportsPortrait: true,
-            supportsLandscape: true
-        };
-
-        // Reset app type
-        this.appType = 'javascript';
-        this.selectAppType('javascript');
-
-        // Go back to step 1
-        this.currentStep = 1;
-        // No need to call updateStepDisplay here, render() will handle it
-    },
-
-    startNewApp() {
-        this.editMode = false;
-        this.editingAppId = null;
-        this.currentAppData = null;
-        this.viewMode = 'form';
-        this.resetForm();
-        this.currentStep = 1; // Start from step 1 for new app
-        this.render();
-    },
-
-    goBackToList() {
-        // Check for unsaved changes before leaving the form
-        let hasUnsavedChanges = false;
-        if (this.useSimpleEditor) { // Simple editor (textarea)
-            const codeField = document.getElementById('app-code');
-            const currentCode = codeField ? codeField.value : '';
-            const originalCode = this.appType === 'flutter' ? this.appData.dartCode : this.appData.code;
-            if (currentCode !== originalCode) {
-                hasUnsavedChanges = true;
-            }
-        } else { // Filesystem editor
-            hasUnsavedChanges = this.appData.unsavedChanges.size > 0;
-        }
-
-        if (hasUnsavedChanges && !confirm('Você tem alterações não salvas. Deseja descartá-las e voltar para a lista de apps?')) {
-            return; // User cancelled going back
-        }
-
-        this.editMode = false;
-        this.editingAppId = null;
-        this.currentAppData = null;
-        this.viewMode = 'list';
-        this.destroyCodeMirror(); // Garantir que o editor seja destruído ao voltar
-        this.resetForm(); // Clear form data
-        this.render();
-    },
-
-    // Modificado para aceitar um token opcional ao exibir/ocultar
-    toggleTokenField(tokenValue = null) {
-        const tokenContainer = document.getElementById('token-field-container');
-        const tokenInput = document.getElementById('app-token');
-        if (tokenContainer && tokenInput) {
-            if (this.appType === 'flutter') {
-                tokenContainer.style.display = 'block';
-                tokenInput.value = tokenValue || this.appData.token || '';
-                this.appData.token = tokenInput.value; // Garante que o estado interno reflita o que está no campo
-            } else {
-                tokenContainer.style.display = 'none';
-                tokenInput.value = '';
-                this.appData.token = null;
-            }
-        }
-    },
-
-    async saveApp() {
-        try {
-            console.log('🚀 Iniciando salvamento do app...');
-            
-            // Coletar dados de forma mais simples e segura
-            const appData = this.collectFormDataSafe();
-
-            console.log('📝 Dados coletados:', appData);
-            console.log('🔧 Modo de edição:', this.editMode, 'ID:', this.editingAppId);
-
-            let response;
-            if (this.editMode && this.editingAppId) {
-                console.log('📝 Atualizando app existente...');
-                // Tentar POST primeiro (mais estável para alguns backends)
-                response = await this.apiPost(`/apps/update/${this.editingAppId}`, appData);
-                // Se não retornou sucesso, tentar PUT como fallback
-                if (!response || response.success === false) {
-                    console.log('POST update did not succeed; attempting PUT fallback…');
-                    response = await this.apiPut(`/apps/${this.editingAppId}`, appData);
-                }
-            } else {
-                console.log('🆕 Criando novo app...');
-                response = await this.apiPost('/apps/create', appData);
-            }
-
-            console.log('📡 Resposta da API de salvamento:', response);
-
-            // Fallback: alguns ambientes retornam HTML com status 200. Verificar via GET se o update realmente ocorreu.
-            if ((!response || response.success === false) && this.editMode && this.editingAppId) {
-                try {
-                    console.log('🔎 Verificando atualização via GET /apps/:id (fallback)…');
-                    const verify = await this.apiGet(`/apps/${this.editingAppId}`);
-                    if (verify && verify.success && verify.data) {
-                        response = {
-                            success: true,
-                            app_id: this.editingAppId,
-                            app_type: verify.data.app_type || appData.app_type || this.appType,
-                            build_status: verify.data.build_status || null
-                        };
-                        console.log('✅ Fallback de verificação considerou o update como bem-sucedido.');
+            supportsLandscape: true,
+            exclusiveEntityId: '',
+            code: DEFAULT_STARTER_CODE,
+            manifest: {
+                runtime: 'js',
+                contextRequirements: {
+                    mode: 'user',
+                    allowContextSwitch: true
+                },
+                capabilities: {
+                    api: {
+                        allow: ['GET /me']
+                    },
+                    storage: {
+                        kv: true,
+                        docs: {
+                            enabled: true,
+                            types: ['user_data']
+                        },
+                        blobs: true,
+                        scope: 'context'
+                    },
+                    events: {
+                        publish: ['sdk:ready', 'app:test'],
+                        subscribe: ['sdk:ready', 'app:test']
+                    },
+                    proxy: {
+                        sources: []
                     }
-                } catch (_) { /* ignore and handle below */ }
-            }
-
-            if (response && response.success) {
-                this.showToast(
-                    this.editMode ? 'Aplicativo atualizado com sucesso!' : 'Aplicativo criado com sucesso!',
-                    'success'
-                );
-
-                // Disparar build real para apps Flutter (se aplicável)
-                try {
-                    const savedAppId = response.app_id || (response.data && response.data.id) || this.editingAppId;
-                    const savedAppType = ((response.app_type || (response.data && response.data.app_type) || appData.app_type || this.appType || 'javascript') + '').toLowerCase();
-                    const buildStatus = response.build_status || (response.data && response.data.build_status) || null;
-
-                    if (savedAppType === 'flutter' && savedAppId) {
-                        // Plataformas preferidas definidas na Etapa 4 (Web/Android)
-                        const preferredPlatforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
-                            ? this.appData.buildPlatforms
-                            : ['web'];
-
-                        // Fluxo B (fila com platforms):
-                        // Enfileira um job na build_queue via AppManagementController::triggerBuild,
-                        // garantindo que o worker use exatamente essas plataformas.
-                        this.showToast('Iniciando build Flutter (fila) para: ' + preferredPlatforms.join(', '), 'info');
-                        try {
-                            await this.apiPost(`/apps/${savedAppId}/build`, { platforms: preferredPlatforms });
-                        } catch (e) {
-                            console.error('Falha ao enfileirar build na fila:', e);
-                        }
-                        // Abre modal pendente e começa a acompanhar o status real da fila/worker
-                        this.displayPendingBuildModal(savedAppId);
-                        setTimeout(() => this.startBuildWatch(savedAppId), 800);
-                    }
-                } catch (buildErr) {
-                    console.error('Falha ao iniciar/monitorar build:', buildErr);
-                    this.showToast('Não foi possível iniciar o build automaticamente.', 'error');
-                }
-
-                // Refresh apps list
-                this.loadAndShowMyApps();
-
-                if (!this.editMode) {
-                    // Se for um novo app, após salvar, ele deve permanecer em rascunho.
-                    this.resetForm();
-                }
-            } else {
-                const statusInfo = response?.status ? ` (status ${response.status})` : '';                
-                throw new Error((response?.message || response?.error || 'Erro desconhecido na resposta da API') + statusInfo);
-            }
-        } catch (e) {
-            console.error(' Error saving app:', e);
-
-            // Log detalhado do erro
-            console.error('Error details:', {
-                message: e.message,
-                stack: e.stack,
-                editMode: this.editMode,
-                editingAppId: this.editingAppId
-            });
-
-            // Show more detailed error message
-            let errorMessage = 'Erro ao salvar aplicativo: ';
-            if (e.message.includes('500')) {
-                errorMessage += 'Erro interno do servidor. Tente novamente em alguns segundos.';
-            } else if (e.message.includes('400')) {
-                errorMessage += 'Dados inválidos. Verifique se todos os campos obrigatórios estão preenchidos.';
-            } else if (e.message.includes('403')) {
-                errorMessage += 'Você não tem permissão para realizar esta ação.';
-            } else if (e.message.includes('404')) {
-                errorMessage += 'App não encontrado. Tente recarregar a página.';
-            } else {
-                if (e.message.toLowerCase().includes('filesystem storage')) {
-                    errorMessage = 'Erro no backend: Falha ao inicializar o storage para o app Flutter. Verifique se o serviço de criação de repositórios/diretórios está funcionando corretamente no servidor.';
-                }
-                errorMessage += e.message;
-            }
-
-            this.showToast(errorMessage, 'error');
-        }
-    },
-
-    async publishApp() { // Publicar da Etapa 6
-        if (!this.editingAppId) {
-            alert('Salve o aplicativo primeiro antes de publicar');
-            return;
-        }
-        await this.publishAppFromCard(this.editingAppId);
-        this.updatePreview(); // Atualiza o botão na Etapa 6
-    },
-
-    async unpublishApp() { // Despublicar da Etapa 6
-        if (!this.editingAppId) {
-            alert('Não é possível despublicar um aplicativo não salvo.');
-            return;
-        }
-        await this.unpublishAppFromCard(this.editingAppId);
-        this.updatePreview(); // Atualiza o botão na Etapa 6
-    },
-
-    // Removido: publishApp() não é mais chamado automaticamente após saveApp().
-    // A ação de publicar é agora explícita.
-    // O método publishApp() acima é o que será chamado pelo botão da Etapa 6.
-
-    async triggerBuildAndMonitor(appId) {
-        this.showToast('Iniciando build do app…', 'info');
-        const res = { success: true }; // queue-based flow: skip explicit rebuild
-        const httpOk = true;
-        if (!res || (!res.success && !httpOk)) {
-            throw new Error(res?.message || 'Falha ao iniciar build');
-        }
-        // Abrir modal de status (pendente) e iniciar polling para obter dados
-        this.displayPendingBuildModal(appId);
-        setTimeout(() => this.startBuildWatch(appId), 800);
-    },
-
-    // Exibe modal pendente enquanto aguardamos o backend popular os dados do build
-    displayPendingBuildModal(appId) {
-        const pendingData = {
-            app_id: appId,
-            app_type: 'flutter',
-            build_status: 'building',
-            build_log: 'Preparando build…',
-            compiled_at: null,
-            builds: []
-        };
-        this.displayBuildStatusModal(pendingData);
-    },
-
-    // Faz polling do status do build tolerando erros transitórios (500) por um período
-    async watchBuild(appId, attempts = 0, maxAttempts = 12, intervalMs = 1500) {
-        try {
-            const response = await this.getBuildStatusCompat(appId);
-            if (response && response.success && response.data) {
-                this.displayBuildStatusModal(response.data);
-                const status = response.data.build_status;
-                if (status === 'building' || status === 'pending') {
-                    if (attempts < maxAttempts) {
-                        const nextDelay = Math.min(10000, Math.round(intervalMs * Math.pow(1.5, attempts+1))); setTimeout(() => this.watchBuild(appId, attempts + 1, maxAttempts, nextDelay), nextDelay);
-                    }
-                }
-                return;
-            }
-        } catch (_) {}
-        // Em caso de erro (e.g., 500), continuar tentando enquanto dentro do limite
-        if (attempts < maxAttempts) {
-            const nextDelay = Math.min(10000, Math.round(intervalMs * Math.pow(1.5, attempts+1))); setTimeout(() => this.watchBuild(appId, attempts + 1, maxAttempts, nextDelay), nextDelay);
-        } else {
-            this.showToast('Não foi possível obter o status do build no momento.', 'error');
-        }
-    },
-
-    // Safe API wrappers that fall back to raw fetch when SDK throws due to non-JSON responses
-    async apiGet(path) { return this._apiSafe('get', path); },
-    async apiPost(path, body) { return this._apiSafe('post', path, body); },
-    async apiPut(path, body) { return this._apiSafe('put', path, body); },
-    async apiDelete(path) { return this._apiSafe('delete', path); },
-    async _apiSafe(method, path, body) {
-        try {
-            if (WorkzSDK && WorkzSDK.api && typeof WorkzSDK.api[method] === 'function') {
-                return await WorkzSDK.api[method](path, body);
-            }
-        } catch (e) {
-            try {
-                this._apiFallbackLogged = this._apiFallbackLogged || new Set();
-                const key = `${method}:${path}`;
-                if (!this._apiFallbackLogged.has(key)) {
-                    console.warn(`WorkzSDK.api.${method} threw for ${path}, using raw fetch fallback once.`, e);
-                    this._apiFallbackLogged.add(key);
-                }
-            } catch (_) {}
-        }
-        return await this._rawFetch(method, path, body);
-    },
-    async _rawFetch(method, path, body) {
-        const base = '/api';
-        const url = base + (path.startsWith('/') ? path : '/' + path);
-        const headers = { 'Accept': 'application/json' };
-        if (body !== undefined) headers['Content-Type'] = 'application/json';
-        try {
-            const token = (typeof WorkzSDK !== 'undefined' && WorkzSDK.getToken) ? WorkzSDK.getToken() : null;
-            if (token) headers['Authorization'] = 'Bearer ' + token;
-        } catch (_) {}
-
-        const resp = await fetch(url, {
-            method: method.toUpperCase(),
-            headers,
-            body: body !== undefined ? JSON.stringify(body || {}) : undefined
-        });
-        return await this._parseJsonSafe(resp);
-    },
-    async _parseJsonSafe(resp) {
-        try { return await resp.json(); } catch (_) {
-            try {
-                const txt = await resp.text();
-                const preview = (txt || '').toString().slice(0, 1000);
-                return { success: false, status: resp.status, message: preview, raw: preview };
-            } catch (e2) {
-                return { success: false, status: resp.status, message: 'Failed to parse response' };
-            }
-        }
-    },
-
-    // Build API compatibility helpers
-    async getBuildStatusCompat(appId) {
-        // Prefer management route first; some envs only expose this
-        let res = await this.apiGet(`/apps/${appId}/build-status`);
-        if (res && (res.success || (res.data && typeof res.data === 'object'))) {
-            return res.success ? res : { success: true, data: res.data };
-        }
-        try {
-            // Fallback to builder route (/apps/build-status/:id)
-            const r2 = await this.apiGet(`/apps/build-status/${appId}`);
-            return r2;
-        } catch (_) {
-            return res;
-        }
-    },
-    async postRebuildCompat(appId, platforms) {
-        const payload = {};
-        if (Array.isArray(platforms) && platforms.length) {
-            payload.platforms = platforms;
-        }
-
-        // Preferir endpoint de rebuild; fallback para build genérico
-        let res = await this.apiPost(`/apps/${appId}/rebuild`, payload);
-        const httpOk = res && typeof res.status === 'number' && res.status >= 200 && res.status < 300;
-        if (res && (res.success || httpOk)) return res;
-        return await this.apiPost(`/apps/${appId}/build`, payload);
-    },
-
-    // Polling contínuo com cancelamento ao fechar o modal
-    startBuildWatch(appId) {
-        this._buildWatchAppId = appId;
-        const run = async () => {
-            try {
-                const response = await this.getBuildStatusCompat(appId);
-                if (response && response.success && response.data) {
-                    this.displayBuildStatusModal(response.data);
-                    const st = String(response.data.build_status || '').toLowerCase();
-                    if (st === 'building' || st === 'pending') {
-                        this._buildWatchTimer = setTimeout(run, 3000);
-                    } else {
-                        this._buildWatchTimer = null;
-                        this._buildWatchAppId = null;
-                    }
-                    return;
-                }
-            } catch (_) {}
-            this._buildWatchTimer = setTimeout(run, 5000);
-        };
-        if (this._buildWatchTimer) { try { clearTimeout(this._buildWatchTimer); } catch(_){} }
-        this._buildWatchTimer = setTimeout(run, 1000);
-    },
-
-    // Inicialização do editor baseado em textarea (modo simples)
-    setupDatabaseEditor() {
-        try {
-            const codeField = document.getElementById('app-code');
-            if (!codeField) return;
-
-            // Preenche o textarea com o código atual
-            const code = this.appType === 'flutter' ? (this.appData.dartCode || '') : (this.appData.code || '');
-            if (codeField.value !== code) {
-                codeField.value = code;
-            }
-
-            // Evita múltiplos listeners ao alternar etapas
-            if (!codeField.dataset.bound) {
-                codeField.addEventListener('input', (e) => {
-                    const value = e.target.value;
-                    if (this.appType === 'flutter') {
-                        this.appData.dartCode = value;
-                    } else {
-                        this.appData.code = value;
-                    }
-                });
-                codeField.dataset.bound = '1';
-            }
-        } catch (_) { /* noop */ }
-    },
-    
-    collectFormDataSafe() {
-        console.log('Coletando dados do formulário (versão segura)...');
-
-        // Campos básicos obrigatórios
-        const titleField = document.getElementById('app-title');
-        const title = titleField ? titleField.value.trim() : '';
-        
-        const slugField = document.getElementById('app-slug');
-        const slug = slugField ? slugField.value.trim() : (this.appData.slug || '');
-        if (!title) {
-            throw new Error('O campo "Nome do Aplicativo" é obrigatório.');
-        }
-        if (!slug || !/^[a-z0-9-]+$/.test(slug)) {
-            throw new Error('Slug é obrigatório e deve conter apenas letras minúsculas, números e hífens');
-        }
-
-        // Dados básicos
-        const formData = {
-            title: title,
-            slug: slug,
-            description: this.getFieldValue('app-description', ''),
-            version: this.getFieldValue('app-version', '1.0.0'),
-            color: this.getFieldValue('app-color', '#3b82f6'),
-            app_type: this.appType || 'javascript'
-        };
-
-        // Campos numéricos opcionais
-        const companyField = document.getElementById('company-select');
-        if (companyField && companyField.value) {
-            formData.company_id = parseInt(companyField.value);
-        }
-        // Publisher deve sempre refletir a negócio responsável pelo app
-        if (formData.company_id) {
-            formData.publisher = formData.company_id;
-        }
-
-        const priceField = document.getElementById('app-price');
-        // company_id é obrigatório para criação
-        if (!this.editMode && !formData.company_id) {
-            throw new Error('O campo "Negócio" é obrigatório. Selecione um negócio válido.');
-        }
-        if (priceField && priceField.value) {
-            formData.price = parseFloat(priceField.value) || 0;
-        }
-
-        const accessField = document.getElementById('access-level');
-        if (accessField && accessField.value) {
-            formData.access_level = parseInt(accessField.value);
-        }
-
-        const entityField = document.getElementById('entity-type');
-        if (entityField && entityField.value) {
-            formData.entity_type = parseInt(entityField.value);
-        }
-
-        formData.context_mode = String(this.appData.contextMode || (formData.entity_type === 2 ? 'business' : 'user')).toLowerCase();
-        formData.allow_context_switch = !!this.appData.allowContextSwitch;
-
-        // Se nível de acesso for 0 (Toda a Internet), força entity_type = 0 e ignora o select
-        if (formData.access_level === 0) {
-            formData.entity_type = 0;
-        }
-
-        // Se privado, incluir negócio alvo selecionado
-        if (formData.access_level === 2 && this.appData.privateCompanies.length > 0) {
-            formData.private_company_ids = this.appData.privateCompanies.map(c => c.id);
-        }
-
-        // Scopes
-        const selectedScopes = [];
-        document.querySelectorAll('input[type="checkbox"][value*="."]:checked').forEach(checkbox => {
-            selectedScopes.push(checkbox.value);
-        });
-        
-        formData.scopes = selectedScopes; // Sempre incluir scopes, mesmo que vazio, para permitir limpar
-
-        // Regra: se houver scopes selecionados, não permitir "Toda a Internet"
-        const requiresLogin = formData.scopes.length > 0 || !!this.appData.usesSdk || this.appType === 'flutter';
-        if (formData.access_level === 0 && requiresLogin) {
-            formData.access_level = 1;
-        }
-
-        formData.manifest = {
-            uiShell: this.buildUiShellPayload()
-        };
-
-        // Adicionado: Tratamento de upload de ícone
-        if (this.appData.icon) { // this.appData.icon should hold the base64 string or the existing URL
-            formData.icon = this.appData.icon;
-        }
-
-        // Layout / aspect ratio + orientação
-        try {
-            const aspectSelect = document.getElementById('aspect-ratio');
-            const aspectCustom = document.getElementById('aspect-ratio-custom');
-            let ar = (this.appData.aspectRatio || '4:3').trim();
-            if (aspectSelect) {
-                if (aspectSelect.value === 'custom' && aspectCustom && aspectCustom.value.trim()) {
-                    ar = aspectCustom.value.trim();
-                } else if (aspectSelect.value && aspectSelect.value !== 'custom') {
-                    ar = aspectSelect.value.trim();
-                }
-            }
-            if (!ar || !ar.includes(':')) ar = '4:3';
-            formData.aspect_ratio = ar;
-
-            formData.supports_portrait = !!this.appData.supportsPortrait;
-            formData.supports_landscape = !!this.appData.supportsLandscape;
-        } catch (_) {}
-
-
-        // Código (sempre via textarea; Mini‑IDE desativado)
-        const isFilesystem = false; // Mini‑IDE desativado: não enviar arquivos
-
-        // Sempre capturar o conteúdo do textarea quando existir
-        let inlineCode;
-        if (this._codeMirrorInstance) {
-            // Se o CodeMirror está ativo, pegue o valor diretamente dele.
-            inlineCode = this._codeMirrorInstance.getValue();
-        } else {
-            // Fallback para o textarea ou estado do app.
-            const inlineCodeField = document.getElementById('app-code');
-            inlineCode = (inlineCodeField ? inlineCodeField.value : (this.appType === 'flutter' ? this.appData.dartCode : this.appData.code)) || '';
-        }
-
-        if (this.appType === 'flutter') {
-            // Para Flutter, envie dart_code quando o usuário preenche o textarea
-            if (inlineCode && inlineCode.trim().length > 0) {
-                formData.dart_code = inlineCode.trim();
-            }
-        } else {
-            // Apps JavaScript
-            const jsInline = inlineCode && inlineCode.trim().length > 0 ? inlineCode.trim() : '';
-            if (jsInline) {
-                formData.js_code = jsInline;
-            }
-        }
-
-        console.log('Dados coletados (seguro):', formData);
-        return formData;
-    },
-
-    // Helper para obter valor de campo de forma segura
-    getFieldValue(fieldId, defaultValue = '') {
-        const field = document.getElementById(fieldId);
-        return field ? field.value.trim() : defaultValue;
-    },
-
-    setupFormEventListeners() {
-        // Company select change handler
-        const companySelect = document.getElementById("company-select");
-        if (companySelect && !companySelect.dataset.listenerAttached) {
-            companySelect.addEventListener("change", (e) => {
-                const selectedOption = e.target.selectedOptions[0];
-                if (selectedOption && selectedOption.value) {
-                    const cnpj = selectedOption.dataset.cnpj;
-                    const cnpjDisplay = document.getElementById("cnpj-display");
-                    if (cnpjDisplay) {
-                        cnpjDisplay.value = this.formatCNPJ(cnpj);
-                        this.validateCNPJ(cnpj);
-                    }
-
-                    this.appData.company = {
-                        id: parseInt(selectedOption.value),
-                        name: selectedOption.textContent,
-                        cnpj: cnpj
-                    };
-                } else {
-                    const cnpjDisplay = document.getElementById("cnpj-display");
-                    if (cnpjDisplay) {
-                        cnpjDisplay.value = "";
-                    }
-                    const cnpjValidation = document.getElementById("cnpj-validation");
-                    if (cnpjValidation) {
-                        cnpjValidation.innerHTML = "";
-                    }
-                    this.appData.company = null;
-                }
-                this.validateCurrentStep();
-                this.updateSummaryPanel();
-            });
-            companySelect.dataset.listenerAttached = 'true';
-        }
-
-        // App title change handler
-        const appTitle = document.getElementById("app-title");
-        if (appTitle) {
-            appTitle.addEventListener("input", (e) => {
-                this.appData.title = e.target.value;
-                if (e.target.value) {
-                    const slug = this.generateSlug(e.target.value);
-                    const slugField = document.getElementById("app-slug");
-                    if (slugField) {
-                        slugField.value = slug;
-                        this.appData.slug = slug;
-                    }
-                }
-                this.validateCurrentStep();
-                this.updateSummaryPanel();
-            });
-        }
-
-        // App slug change handler
-        const appSlug = document.getElementById("app-slug");
-        if (appSlug) {
-            appSlug.addEventListener("input", (e) => {
-                this.appData.slug = e.target.value;
-                this.validateCurrentStep();
-                this.updateSummaryPanel();
-            });
-        }
-
-        // App description change handler
-        const appDescription = document.getElementById("app-description");
-        if (appDescription) {
-            appDescription.addEventListener("input", (e) => {
-                this.appData.description = e.target.value;
-            });
-        }
-
-        // App type radio buttons
-        document.querySelectorAll('input[name="app-type"]').forEach(radio => {
-            radio.addEventListener("change", (e) => {
-                if (e.target.checked) {
-                    this.appType = e.target.value;
-                    this.validateCurrentStep();
-                }
-            });
-        });
-
-        // App icon change handler
-        const appIconInput = document.getElementById("app-icon");
-        if (appIconInput && !appIconInput.dataset.listenerAttached) {
-            appIconInput.addEventListener("change", (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        this.appData.icon = reader.result; // Store base64 string
-                        const iconPreview = document.getElementById("icon-preview");
-                        if (iconPreview) {
-                            iconPreview.src = reader.result;
-                            iconPreview.style.display = "block";
-                        }
-                    };
-                    reader.readAsDataURL(file);
-                } else {
-                    this.appData.icon = null; // Clear icon if no file selected
-                    const iconPreview = document.getElementById("icon-preview");
-                    if (iconPreview) {
-                        iconPreview.src = "";
-                        iconPreview.style.display = "none";
-                    }
-                }
-            });
-            appIconInput.dataset.listenerAttached = 'true';
-        }
-        // Other form fields
-        const appVersion = document.getElementById("app-version");
-        if (appVersion) {
-            appVersion.addEventListener("input", (e) => {
-                this.appData.version = e.target.value;
-            });
-        }
-
-        const appPrice = document.getElementById("app-price");
-        if (appPrice) {
-            appPrice.addEventListener("input", (e) => {
-                this.appData.price = parseFloat(e.target.value) || 0;
-                this.togglePriceTermsVisibility();
-                this.validateCurrentStep();
-                this.updateSummaryPanel();
-            });
-            // inicializar visibilidade ao montar listeners
-            this.togglePriceTermsVisibility();
-        }
-
-        const accessLevel = document.getElementById("access-level");
-        if (accessLevel) {
-            accessLevel.addEventListener("change", (e) => {
-                this.appData.accessLevel = parseInt(e.target.value);
-                // Impede selecionar "Toda a Internet" quando houver scopes marcados
-                this.enforceAccessLevelConsistency();
-                // Alterna seletor de empresa privada
-                this.togglePrivateCompanySelector();
-            });
-            // estado inicial
-            this.togglePrivateCompanySelector();
-            this.enforceAccessLevelConsistency();
-        }
-
-        const entityType = document.getElementById("entity-type");
-        if (entityType) {
-            entityType.addEventListener("change", (e) => {
-                this.appData.entityType = parseInt(e.target.value);
-                // Se usuário selecionar "Usuários" enquanto nível Privado (2), rebaixa para Usuários Logados (1)
-                if (this.appData.entityType === 1 && this.appData.accessLevel === 2) {
-                    const accessSelect = document.getElementById('access-level');
-                    if (accessSelect) accessSelect.value = '1';
-                    this.appData.accessLevel = 1;
-                    if (typeof this.showToast === 'function') {
-                        this.showToast('Modo Privado é exclusivo para Negócios. Nível ajustado para "Usuários Logados".', 'warning');
-                    }
-                }
-                this.validateCurrentStep();
-            });
-        }
-
-        const contextMode = document.getElementById('context-mode');
-        if (contextMode && !contextMode.dataset.listenerAttached) {
-            contextMode.addEventListener('change', (e) => {
-                this.appData.contextMode = String(e.target.value || 'user');
-                this.applyStep4State();
-            });
-            contextMode.dataset.listenerAttached = '1';
-        }
-
-        const contextSwitch = document.getElementById('context-switch');
-        if (contextSwitch && !contextSwitch.dataset.listenerAttached) {
-            contextSwitch.addEventListener('change', (e) => {
-                this.appData.allowContextSwitch = !!e.target.checked;
-            });
-            contextSwitch.dataset.listenerAttached = '1';
-        }
-
-        const usesSdkToggle = document.getElementById('uses-sdk');
-        if (usesSdkToggle && !usesSdkToggle.dataset.listenerAttached) {
-            usesSdkToggle.addEventListener('change', (e) => {
-                this.appData.usesSdk = !!e.target.checked;
-                this.enforceAccessLevelConsistency();
-            });
-            usesSdkToggle.dataset.listenerAttached = '1';
-        }
-
-        const shellHeader = document.getElementById('shell-header');
-        if (shellHeader && !shellHeader.dataset.listenerAttached) {
-            shellHeader.addEventListener('change', (e) => {
-                this.appData.shellHeader = !!e.target.checked;
-                this.updateShellInputsState();
-            });
-            shellHeader.dataset.listenerAttached = '1';
-        }
-
-        const shellSidebar = document.getElementById('shell-sidebar');
-        if (shellSidebar && !shellSidebar.dataset.listenerAttached) {
-            shellSidebar.addEventListener('change', (e) => {
-                this.appData.shellSidebar = !!e.target.checked;
-                this.updateShellInputsState();
-            });
-            shellSidebar.dataset.listenerAttached = '1';
-        }
-
-        const shellFooter = document.getElementById('shell-footer');
-        if (shellFooter && !shellFooter.dataset.listenerAttached) {
-            shellFooter.addEventListener('change', (e) => {
-                this.appData.shellFooterMenu = !!e.target.checked;
-                this.updateShellInputsState();
-            });
-            shellFooter.dataset.listenerAttached = '1';
-        }
-
-        const headerActions = document.getElementById('shell-header-actions');
-        if (headerActions && !headerActions.dataset.listenerAttached) {
-            headerActions.addEventListener('input', (e) => {
-                this.appData.shellHeaderActions = e.target.value;
-            });
-            headerActions.dataset.listenerAttached = '1';
-        }
-
-        const sidebarItems = document.getElementById('shell-sidebar-items');
-        if (sidebarItems && !sidebarItems.dataset.listenerAttached) {
-            sidebarItems.addEventListener('input', (e) => {
-                this.appData.shellSidebarItems = e.target.value;
-            });
-            sidebarItems.dataset.listenerAttached = '1';
-        }
-
-        const sidebarForms = document.getElementById('shell-sidebar-forms');
-        if (sidebarForms && !sidebarForms.dataset.listenerAttached) {
-            sidebarForms.addEventListener('input', (e) => {
-                this.appData.shellSidebarForms = e.target.value;
-            });
-            sidebarForms.dataset.listenerAttached = '1';
-        }
-
-        const footerItems = document.getElementById('shell-footer-items');
-        if (footerItems && !footerItems.dataset.listenerAttached) {
-            footerItems.addEventListener('input', (e) => {
-                this.appData.shellFooterItems = e.target.value;
-            });
-            footerItems.dataset.listenerAttached = '1';
-        }
-
-        // Build platforms (step 4 – only relevant for Flutter apps)
-        const buildPlatformsContainer = document.getElementById('build-platforms-container');
-        const buildWeb = document.getElementById('config-build-web');
-        const buildAndroid = document.getElementById('config-build-android');
-        if (buildPlatformsContainer && buildWeb && buildAndroid) {
-            // Show only for Flutter apps
-            buildPlatformsContainer.style.display = (this.appType === 'flutter') ? '' : 'none';
-
-            // Initialize checkboxes from state
-            const currentPlatforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
-                ? this.appData.buildPlatforms
-                : ['web'];
-            buildWeb.checked = currentPlatforms.includes('web');
-            buildAndroid.checked = currentPlatforms.includes('android');
-
-            const updatePlatforms = () => {
-                const platforms = [];
-                if (buildWeb.checked) platforms.push('web');
-                if (buildAndroid.checked) platforms.push('android');
-                this.appData.buildPlatforms = platforms.length ? platforms : ['web'];
-                this.updateSummaryPanel();
-            };
-            if (!buildWeb.dataset.listenerAttached) {
-                buildWeb.addEventListener('change', updatePlatforms);
-                buildWeb.dataset.listenerAttached = '1';
-            }
-            if (!buildAndroid.dataset.listenerAttached) {
-                buildAndroid.addEventListener('change', updatePlatforms);
-                buildAndroid.dataset.listenerAttached = '1';
-            }
-        }
-
-        // Checkbox de termos (quando preço > 0)
-        const priceTerms = document.getElementById('price-terms');
-        if (priceTerms && !priceTerms.dataset.listenerAttached) {
-            priceTerms.addEventListener('change', (e) => {
-                this.appData.termsAccepted = !!e.target.checked;
-                this.validateCurrentStep();
-            });
-            priceTerms.dataset.listenerAttached = '1';
-        }
-
-        // Seletor de empresa privada (auto-complete)
-        this.setupPrivateCompanySelector();
-
-        // Color pickers (keep #app-color and #app-color-hex in sync)
-        const colorPicker = document.getElementById('app-color');
-        const colorHex = document.getElementById('app-color-hex');
-        const normalizeHex = (val) => {
-            if (!val) return '#3b82f6';
-            let v = String(val).trim();
-            if (!v.startsWith('#')) v = '#' + v;
-            // Accept #RGB or #RRGGBB; expand #RGB
-            if (/^#([0-9a-fA-F]{3})$/.test(v)) {
-                const r = v[1], g = v[2], b = v[3];
-                v = `#${r}${r}${g}${g}${b}${b}`;
-            }
-            return /^#([0-9a-fA-F]{6})$/.test(v) ? v.toLowerCase() : '#3b82f6';
-        };
-        if (colorPicker && !colorPicker.dataset.listenerAttached) {
-            colorPicker.addEventListener('input', (e) => {
-                const v = normalizeHex(e.target.value);
-                this.appData.color = v;
-                if (colorHex && colorHex.value !== v) colorHex.value = v;
-            });
-            colorPicker.dataset.listenerAttached = 'true';
-        }
-        if (colorHex && !colorHex.dataset.listenerAttached) {
-            colorHex.addEventListener('input', (e) => {
-                const v = normalizeHex(e.target.value);
-                this.appData.color = v;
-                if (colorPicker && colorPicker.value !== v) colorPicker.value = v;
-            });
-            colorHex.dataset.listenerAttached = 'true';
-        }
-
-        // Layout / aspect ratio + orientação
-        const aspectSelect = document.getElementById('aspect-ratio');
-        const aspectCustom = document.getElementById('aspect-ratio-custom');
-        if (aspectSelect && !aspectSelect.dataset.listenerAttached) {
-            aspectSelect.addEventListener('change', (e) => {
-                const v = e.target.value;
-                if (v === 'custom') {
-                    if (aspectCustom) {
-                        aspectCustom.classList.remove('d-none');
-                        aspectCustom.focus();
-                    }
-                } else {
-                    if (aspectCustom) {
-                        aspectCustom.classList.add('d-none');
-                    }
-                    this.appData.aspectRatio = v || '4:3';
-                }
-            });
-            aspectSelect.dataset.listenerAttached = '1';
-        }
-        if (aspectCustom && !aspectCustom.dataset.listenerAttached) {
-            aspectCustom.addEventListener('input', (e) => {
-                const val = String(e.target.value || '').trim();
-                this.appData.aspectRatio = val || '4:3';
-            });
-            aspectCustom.dataset.listenerAttached = '1';
-        }
-        const supportsPortrait = document.getElementById('supports-portrait');
-        const supportsLandscape = document.getElementById('supports-landscape');
-        if (supportsPortrait && !supportsPortrait.dataset.listenerAttached) {
-            supportsPortrait.addEventListener('change', (e) => {
-                this.appData.supportsPortrait = !!e.target.checked;
-            });
-            supportsPortrait.dataset.listenerAttached = '1';
-        }
-        if (supportsLandscape && !supportsLandscape.dataset.listenerAttached) {
-            supportsLandscape.addEventListener('change', (e) => {
-                this.appData.supportsLandscape = !!e.target.checked;
-            });
-            supportsLandscape.dataset.listenerAttached = '1';
-        }
-
-        // Code editor
-        const appCode = document.getElementById("app-code");
-        if (appCode) {
-            appCode.addEventListener("input", (e) => {
-                if (this.appType === "flutter") {
-                    this.appData.dartCode = e.target.value;
-                } else {
-                    this.appData.code = e.target.value;
-                }
-                this.validateCurrentStep();
-                // If live JS preview is open, update it with debounce
-                try {
-                    const live = document.getElementById('livePreviewModal');
-                    if (live && live.classList.contains('show') && this._livePreviewMode === 'js') {
-                        clearTimeout(this._livePreviewDebounce);
-                        this._livePreviewDebounce = setTimeout(() => this._updateJsLivePreview(), 300);
-                    }
-                } catch (_) {}
-            });
-        }
-
-        // Scopes checkboxes
-        document.querySelectorAll('input[type="checkbox"][value*="."]').forEach(checkbox => {
-            checkbox.addEventListener("change", (e) => {
-                if (e.target.checked) {
-                    if (!this.appData.scopes.includes(e.target.value)) {
-                        this.appData.scopes.push(e.target.value);
-                    }
-                } else {
-                    this.appData.scopes = this.appData.scopes.filter(scope => scope !== e.target.value);
-                }
-                console.log('Scopes atualizados:', this.appData.scopes);
-                // Reforça a consistência entre scopes e nível de acesso
-                this.enforceAccessLevelConsistency();
-            });
-        });
-    },
-
-    removeFormEventListeners() {
-        // This is a placeholder. For a more robust solution, you would
-        // store references to the handlers and remove them specifically.
-        // For now, the `dataset.listenerAttached` check prevents re-binding.
-        const companySelect = document.getElementById("company-select");
-        if (companySelect) delete companySelect.dataset.listenerAttached;
-    },
-
-    validateCurrentStep() {
-        console.log('Validate current step');
-
-        let isValid = false;
-        let nextButton = null;
-
-        switch (this.currentStep) {
-            case 1:
-                nextButton = document.getElementById("step-1-next");
-                isValid = this.appData.company &&
-                    this.appData.company.cnpj &&
-                    this.validateCNPJ(this.appData.company.cnpj);
-                break;
-
-            case 2:
-                nextButton = document.getElementById("step-2-next");
-                isValid = this.appType && (this.appType === "javascript" || this.appType === "flutter");
-                break;
-
-            case 3:
-                nextButton = document.getElementById("step-3-next");
-                isValid = this.appData.title.trim().length > 0 &&
-                    this.appData.slug.trim().length > 0 &&
-                    /^[a-z0-9-]+$/.test(this.appData.slug);
-                break;
-
-            case 4:
-                nextButton = document.getElementById("step-4-next");
-                // Exige aceite de termos quando houver preço > 0
-                if ((parseFloat(this.appData.price) || 0) > 0) {
-                    isValid = !!this.appData.termsAccepted;
-                } else {
-                    isValid = true;
-                }
-                // Exige seleção de empresa quando Privado (2)
-                if (isValid && Number(this.appData.accessLevel) === 2) {
-                    isValid = Array.isArray(this.appData.privateCompanies) && this.appData.privateCompanies.length > 0;
-                }
-                break;
-
-            case 5:
-                nextButton = document.getElementById("step-5-next");
-                if (this.appType === "flutter") {
-                    isValid = this.appData.dartCode.trim().length > 0;
-                } else {
-                    isValid = this.appData.code.trim().length > 0;
-                }
-                break;
-
-            case 6:
-                this.updatePreview();
-                isValid = true;
-                break;
-        }
-
-        if (nextButton) {
-            nextButton.disabled = !isValid;
-        }
-
-        return isValid;
-    },
-
-    // Impede selecionar "Toda a Internet" quando houver scopes marcados (uso do SDK)
-    enforceAccessLevelConsistency() {
-        try {
-            const accessSelect = document.getElementById('access-level');
-            if (!accessSelect) return;
-            const hasScopes = Array.isArray(this.appData.scopes) && this.appData.scopes.length > 0;
-            const requiresLogin = hasScopes || !!this.appData.usesSdk || this.appType === 'flutter';
-            // Desabilita a opção 0 quando houver scopes
-            Array.from(accessSelect.options).forEach(opt => {
-                if (String(opt.value) === '0') {
-                    opt.disabled = !!requiresLogin;
-                }
-            });
-
-            if (requiresLogin && String(accessSelect.value) === '0') {
-                // Força para "Usuários Logados"
-                accessSelect.value = '1';
-                this.appData.accessLevel = 1;
-                const accessHelp = document.getElementById('access-level-help');
-                if (accessHelp) {
-                    accessHelp.insertAdjacentHTML('beforeend', '<div id="access-level-warning" class="form-text text-warning mt-2"><i class="fas fa-info-circle"></i> Nível de acesso ajustado pois apps com WorkzSDK/permissões requerem login.</div>');
-                    setTimeout(() => document.getElementById('access-level-warning')?.remove(), 5000);
-                }
-                if (typeof this.showToast === 'function') {
-                    this.showToast('Apps com WorkzSDK/permissões exigem login e instalação. Nível "Toda a Internet" foi ajustado.', 'warning');
-                }
-            }
-            // Regra: Privado (2) é exclusivo para Negócios (entity_type = 2)
-            const entitySelect = document.getElementById('entity-type');
-            if (String(accessSelect.value) === '2' && entitySelect && String(entitySelect.value) !== '2') {
-                entitySelect.value = '2';
-                this.appData.entityType = 2;
-                if (typeof this.showToast === 'function') {
-                    this.showToast('Modo Privado é exclusivo para Negócios. Tipo ajustado para "Negócios".', 'info');
-                }
-            }
-
-            // Regra: "Toda a Internet" (0) força entity_type = 0 e desabilita o select
-            if (entitySelect) {
-                if (String(accessSelect.value) === '0') {
-                    // Garante que exista a opção Geral (0) e selecione-a
-                    let opt0 = Array.from(entitySelect.options).find(o => String(o.value) === '0');
-                    if (!opt0) {
-                        opt0 = document.createElement('option');
-                        opt0.value = '0';
-                        opt0.textContent = 'Geral';
-                        entitySelect.prepend(opt0);
-                    }
-                    entitySelect.value = '0';
-                    entitySelect.disabled = true;
-                    this.appData.entityType = 0;
-                } else {
-                    // Reabilita select e remove a opção 0 se existir, voltando ao padrão 1/2
-                    entitySelect.disabled = false;
-                    const opt0 = Array.from(entitySelect.options).find(o => String(o.value) === '0');
-                    if (opt0) {
-                        // Se estava selecionado 0, muda para 1 (Usuários) por padrão
-                        if (String(entitySelect.value) === '0') {
-                            entitySelect.value = '1';
-                            this.appData.entityType = 1;
-                        }
-                        entitySelect.removeChild(opt0);
+                },
+                sandbox: {
+                    postMessage: {
+                        allowedOrigins: []
                     }
                 }
             }
-            // Alternar campo de seleção de empresa privada
-            this.togglePrivateCompanySelector();
-        } catch (e) { /* noop */ }
-    },
-
-    // Exibe/oculta checkbox de termos com base no preço
-    togglePriceTermsVisibility() {
-        try {
-            const price = parseFloat(this.appData.price) || 0;
-            const container = document.getElementById('price-terms-container');
-            if (!container) return;
-            container.style.display = price > 0 ? 'block' : 'none';
-            if (price <= 0) {
-                // reset aceite quando voltar a 0
-                const cb = document.getElementById('price-terms');
-                if (cb) cb.checked = false;
-                this.appData.termsAccepted = false;
-            }
-        } catch (_) {}
-    },
-
-    // Exibe/oculta seletor de empresa para modo Privado (2)
-    togglePrivateCompanySelector() {
-        try {
-            const isPrivate = Number(this.appData.accessLevel) === 2;
-            const wrap = document.getElementById('private-company-container');
-            if (!wrap) return;
-            wrap.style.display = isPrivate ? 'block' : 'none';
-            if (!isPrivate) { // Clear selection when not in private mode
-                this.appData.privateCompanies = [];
-                const sel = document.getElementById('private-company-selected');
-                if (sel) sel.innerHTML = '';
-                const list = document.getElementById('private-company-results');
-                if (list) list.innerHTML = '';
-                const input = document.getElementById('private-company-search');
-                if (input) input.value = '';
-            }
-        } catch (_) {}
-    },
-
-    renderSelectedCompanies() {
-        const container = document.getElementById('private-company-selected');
-        if (!container) return;
-
-        if (this.appData.privateCompanies.length === 0) {
-            container.innerHTML = '';
-            return;
         }
+    };
 
-        container.innerHTML = this.appData.privateCompanies.map(company => `
-            <span class="badge bg-primary me-1 mb-1">
-                ${this.escapeHtml(company.name)}
-                <button type="button" class="btn-close btn-close-white ms-1" style="font-size: 0.6em;" aria-label="Remover" onclick="StoreApp.removePrivateCompany(${company.id})"></button>
-            </span>`).join('');
-    },
-    // Auto-complete de empresas (Workz! Companies)
-    setupPrivateCompanySelector() {
-        try {
-            const input = document.getElementById('private-company-search');
-            const list = document.getElementById('private-company-results');
-            const selected = document.getElementById('private-company-selected');
-            if (!input || input.dataset.listenerAttached) return;
+    var cm = null;
+    var debouncedValidate = null;
+    var debouncedDraftSave = null;
+    var sdkFallbackNotified = false;
 
-            let t = null;
-            const render = (items = []) => {
-                if (!list) return;
-                list.innerHTML = '';
-                items.slice(0,10).forEach(c => {
-                    const a = document.createElement('a');
-                    a.href = '#';
-                    a.className = 'list-group-item list-group-item-action';
-                    const cnpj = (c.cnpj || c.national_id || '').toString();
-                    a.innerHTML = `<div class="d-flex align-items-center"><img src="${c.im || '/images/app-default.png'}" style="width:24px;height:24px;border-radius:6px;margin-right:8px;"/> ${this.escapeHtml(c.tt || 'Negócio')} <small class="ms-2 text-muted">${this.escapeHtml(cnpj)}</small></div>`;
-                    a.addEventListener('click', (ev) => {
-                        ev.preventDefault();                        
-                        const newCompany = { id: Number(c.id), name: c.tt, cnpj: cnpj, im: c.im };
-                        // Add company only if it's not already selected
-                        if (!this.appData.privateCompanies.some(pc => pc.id === newCompany.id)) {
-                            this.appData.privateCompanies.push(newCompany);
-                            this.renderSelectedCompanies();
-                        }
-                        // Clear results and input
-                        if (list) list.innerHTML = '';
-                        if (input) input.value = '';
-                        this.validateCurrentStep();
-                    });
-                    list.appendChild(a);
-                });
-            };
+    // === HELPERS ===
+    function log() {
+        if (!DEBUG) return;
+        try { console.log.apply(console, arguments); } catch (_) {}
+    }
 
-            const doSearch = async (term) => {
-                term = String(term || '').trim();
-                if (!term || term.length < 2) { render([]); return; }
-                try {
-                    const payload = {
-                        db: 'workz_companies',
-                        table: 'companies',
-                        columns: ['id','tt','national_id','im'],
-                        conditions: { st: 1, tt: { op: 'LIKE', value: `%${term}%` } },
-                        fetchAll: true,
-                        limit: 20,
-                        order: { by: 'tt', dir: 'ASC' }
-                    };
-                    const res = await this.apiPost('/search', payload);
-                    const rows = Array.isArray(res?.data) ? res.data : (res?.data ? [res.data] : []);
-                    render(rows);
-                } catch (e) {
-                    render([]);
-                }
-            };
-
-            input.addEventListener('input', (e) => {
-                clearTimeout(t); t = setTimeout(() => doSearch(e.target.value), 250);
-            });
-            input.dataset.listenerAttached = '1';
-        } catch (_) {}
-    },
-
-    removePrivateCompany(companyId) {
-        this.appData.privateCompanies = this.appData.privateCompanies.filter(c => c.id !== companyId);
-        this.renderSelectedCompanies();
-        // Re-validate step to enable/disable next button
-        this.validateCurrentStep();
-    },
-
-    setupPreviewListener() {
-        console.log('Setup preview listener');
-    },
-
-    updateSummaryPanel() {
-        try {
-            if (this.viewMode !== 'form') return;
-            const titleEl = document.getElementById('summary-title');
-            const slugEl = document.getElementById('summary-slug');
-            const accessEl = document.getElementById('summary-access');
-            const companyEl = document.getElementById('summary-company');
-            const priceEl = document.getElementById('summary-price');
-            const platformsEl = document.getElementById('summary-platforms');
-
-            if (titleEl) titleEl.textContent = this.appData.title || 'Sem título';
-            if (slugEl) slugEl.textContent = this.appData.slug ? `${this.appData.slug}.workz.co` : 'slug indefinido';
-
-            const accessLevels = { 0: 'Público', 1: 'Usuários logados', 2: 'Privado' };
-            if (accessEl) accessEl.textContent = `Acesso: ${accessLevels[this.appData.accessLevel] || 'N/A'}`;
-
-            if (companyEl) {
-                if (this.appData.company && this.appData.company.name) {
-                    companyEl.textContent = this.appData.company.name;
-                } else {
-                    companyEl.textContent = 'Não selecionada';
-                }
-            }
-
-            if (priceEl) {
-                const price = parseFloat(this.appData.price || 0);
-                priceEl.textContent = price > 0 ? `R$ ${price.toFixed(2)}` : 'Gratuito';
-            }
-
-            if (platformsEl) {
-                const chips = [];
-                const platforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
-                    ? this.appData.buildPlatforms
-                    : ['web'];
-                if (platforms.includes('web')) chips.push('<span class="summary-chip"><i class="fas fa-globe text-info"></i> Web</span>');
-                if (platforms.includes('android')) chips.push('<span class="summary-chip"><i class="fab fa-android text-success"></i> Android (debug)</span>');
-                platformsEl.innerHTML = chips.join('') || '<span class="text-muted small">Nenhuma plataforma selecionada</span>';
-            }
-        } catch (_) { /* ignore summary errors */ }
-    },
-
-    applyStep4State() {
-        const contextSelect = document.getElementById('context-mode');
-        const contextSwitch = document.getElementById('context-switch');
-        const sdkToggle = document.getElementById('uses-sdk');
-        if (contextSelect) {
-            contextSelect.value = this.appData.contextMode || 'user';
-        }
-        if (contextSwitch) {
-            const isHybrid = (this.appData.contextMode || '').toLowerCase() === 'hybrid';
-            const allowSwitch = isHybrid ? true : (this.appData.allowContextSwitch !== false);
-            contextSwitch.checked = allowSwitch;
-            contextSwitch.disabled = isHybrid;
-            this.appData.allowContextSwitch = allowSwitch;
-        }
-        if (sdkToggle) {
-            const forceSdk = this.appType === 'flutter';
-            const shouldUseSdk = forceSdk ? true : !!this.appData.usesSdk;
-            sdkToggle.checked = shouldUseSdk;
-            sdkToggle.disabled = forceSdk;
-            this.appData.usesSdk = shouldUseSdk;
-        }
-
-        const headerToggle = document.getElementById('shell-header');
-        const sidebarToggle = document.getElementById('shell-sidebar');
-        const footerToggle = document.getElementById('shell-footer');
-        if (headerToggle) headerToggle.checked = !!this.appData.shellHeader;
-        if (sidebarToggle) sidebarToggle.checked = !!this.appData.shellSidebar;
-        if (footerToggle) footerToggle.checked = !!this.appData.shellFooterMenu;
-
-        const headerActions = document.getElementById('shell-header-actions');
-        const sidebarItems = document.getElementById('shell-sidebar-items');
-        const sidebarForms = document.getElementById('shell-sidebar-forms');
-        const footerItems = document.getElementById('shell-footer-items');
-        if (headerActions) headerActions.value = this.appData.shellHeaderActions || '';
-        if (sidebarItems) sidebarItems.value = this.appData.shellSidebarItems || '';
-        if (sidebarForms) sidebarForms.value = this.appData.shellSidebarForms || '';
-        if (footerItems) footerItems.value = this.appData.shellFooterItems || '';
-
-        this.updateShellInputsState();
-        this.enforceAccessLevelConsistency();
-    },
-
-    updateShellInputsState() {
-        const headerActions = document.getElementById('shell-header-actions');
-        const sidebarItems = document.getElementById('shell-sidebar-items');
-        const sidebarForms = document.getElementById('shell-sidebar-forms');
-        const footerItems = document.getElementById('shell-footer-items');
-        if (headerActions) headerActions.disabled = !this.appData.shellHeader;
-        if (sidebarItems) sidebarItems.disabled = !this.appData.shellSidebar;
-        if (sidebarForms) sidebarForms.disabled = !this.appData.shellSidebar;
-        if (footerItems) footerItems.disabled = !this.appData.shellFooterMenu;
-    },
-
-    parseShellItems(raw) {
-        const lines = String(raw || '').split('\n').map(line => line.trim()).filter(Boolean);
-        return lines.map((line) => {
-            const parts = line.split('|').map(p => p.trim()).filter(Boolean);
-            const label = parts[0] || '';
-            const action = parts[1] || '';
-            const item = { label };
-            if (action) item.action = action;
-            return item;
-        }).filter(item => item.label);
-    },
-
-    serializeShellItems(items) {
-        if (!Array.isArray(items)) return '';
-        return items.map((item) => {
-            if (typeof item === 'string') return item;
-            if (!item || typeof item !== 'object') return '';
-            const label = String(item.label || '').trim();
-            const action = String(item.action || '').trim();
-            return action ? `${label} | ${action}` : label;
-        }).filter(Boolean).join('\n');
-    },
-
-    buildUiShellPayload() {
+    function getDefaultAppManifest() {
         return {
-            layout: 'standard',
-            header: {
-                enabled: !!this.appData.shellHeader,
-                buttons: this.parseShellItems(this.appData.shellHeaderActions)
+            runtime: 'js',
+            contextRequirements: { mode: 'user', allowContextSwitch: true },
+            capabilities: {
+                api: { allow: ['GET /me'] },
+                storage: {
+                    kv: true,
+                    docs: { enabled: true, types: ['user_data'] },
+                    blobs: true,
+                    scope: 'context'
+                },
+                events: { publish: ['sdk:ready', 'app:test'], subscribe: ['sdk:ready', 'app:test'] },
+                proxy: { sources: [] }
             },
-            sidebar: {
-                enabled: !!this.appData.shellSidebar,
-                items: this.parseShellItems(this.appData.shellSidebarItems),
-                forms: this.parseShellItems(this.appData.shellSidebarForms)
-            },
-            footerMenu: {
-                enabled: !!this.appData.shellFooterMenu,
-                items: this.parseShellItems(this.appData.shellFooterItems)
-            },
-            theme: { primary: this.appData.color || '#3b82f6' }
+            sandbox: { postMessage: { allowedOrigins: [] } }
         };
-    },
+    }
 
-    // Utility functions
-    formatCNPJ(cnpj) {
-        if (!cnpj) return "";
-        return cnpj.replace(/\D/g, "").replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
-    },
-
-    validateCNPJ(cnpj) {
-        const validationElement = document.getElementById("cnpj-validation");
-        if (!cnpj) {
-            if (validationElement) {
-                validationElement.innerHTML = '<i class="fas fa-exclamation-triangle"></i> CNPJ não informado';
-                validationElement.className = "cnpj-validation invalid";
+    function buildStudioManifest() {
+        var manifest = JSON.parse(JSON.stringify(APP_STUDIO_MANIFEST));
+        try {
+            if (window.location && window.location.origin) {
+                manifest.sandbox.postMessage.allowedOrigins = [window.location.origin];
             }
-            return false;
+        } catch (_) {}
+        return manifest;
+    }
+
+    async function initStudioSdk() {
+        if (!window.WorkzSDK || typeof WorkzSDK.init !== 'function') return;
+        var manifest = buildStudioManifest();
+        if (!window.WorkzAppConfig) window.WorkzAppConfig = {};
+        var existing = window.WorkzAppConfig.manifest;
+        var existingSummary = null;
+        if (existing && typeof existing === 'object') {
+            existingSummary = {
+                runtime: typeof existing.runtime,
+                capabilities: typeof existing.capabilities,
+                sandbox: typeof existing.sandbox
+            };
+        } else if (existing !== undefined) {
+            existingSummary = { type: typeof existing };
         }
-
-        const cleanCNPJ = cnpj.replace(/\D/g, "");
-        if (cleanCNPJ.length !== 14) {
-            if (validationElement) {
-                validationElement.innerHTML = '<i class="fas fa-times-circle"></i> CNPJ inválido';
-                validationElement.className = "cnpj-validation invalid";
+        console.warn('[sdk:security] App Studio init manifest override', existingSummary);
+        window.WorkzAppConfig.manifest = manifest;
+        window.WorkzAppConfig.preview = false;
+        try {
+            await WorkzSDK.init({
+                mode: 'standalone',
+                appConfig: window.WorkzAppConfig,
+                manifest: manifest
+            });
+            console.warn('[sdk:security] App Studio manifestValidation', WorkzSDK.manifestValidation, manifest.runtime);
+            if (WorkzSDK && WorkzSDK.contextAllowed === false && WorkzSDK.contextDenyReason) {
+                var deny = WorkzSDK.contextDenyReason || {};
+                var required = deny.required || '';
+                var code = deny.code || '';
+                if (code === 'context_not_allowed' && String(required).toLowerCase() === 'user') {
+                    try {
+                        var meResp = null;
+                        if (WorkzSDK.apiClient && typeof WorkzSDK.apiClient.request === 'function') {
+                            meResp = await WorkzSDK.apiClient.request('GET', '/me');
+                        } else if (WorkzSDK.api && typeof WorkzSDK.api.get === 'function') {
+                            meResp = await WorkzSDK.api.get('/me');
+                        }
+                        var data = (meResp && typeof meResp === 'object' && meResp.data && typeof meResp.data === 'object') ? meResp.data : (meResp || {});
+                        var user = (data && data.user) ? data.user : data;
+                        var userId = (user.id !== undefined && user.id !== null) ? user.id :
+                            (user.us !== undefined && user.us !== null) ? user.us :
+                            (user.user_id !== undefined && user.user_id !== null) ? user.user_id :
+                            (user.uid !== undefined && user.uid !== null) ? user.uid : null;
+                        if (userId && WorkzSDK && typeof WorkzSDK.setContext === 'function') {
+                            WorkzSDK.setContext({ mode: 'user', id: userId });
+                            console.warn('[sdk:security] App Studio context set', userId);
+                        }
+                    } catch (e) {
+                        console.warn('[sdk:security] App Studio context resolve failed', e);
+                    }
+                }
             }
-            return false;
+            if (WorkzSDK.manifestValidation && WorkzSDK.manifestValidation.ok !== true) {
+                notifySdkFallback('manifest_invalid_on_init');
+            }
+        } catch (e) {
+            notifySdkFallback('sdk_init_failed');
         }
+    }
 
-        if (this.isValidCNPJ(cleanCNPJ)) {
-            if (validationElement) {
-                validationElement.innerHTML = '<i class="fas fa-check-circle"></i> CNPJ válido';
-                validationElement.className = "cnpj-validation valid";
-            }
-            return true;
-        } else {
-            if (validationElement) {
-                validationElement.innerHTML = '<i class="fas fa-times-circle"></i> CNPJ inválido';
-                validationElement.className = "cnpj-validation invalid";
-            }
-            return false;
+    function isStudioEndpoint(path) {
+        var p = path.startsWith('/') ? path : '/' + path;
+        return p === '/me' || p.indexOf('/apps/') === 0;
+    }
+
+    function notifySdkFallback(reason) {
+        if (sdkFallbackNotified) return;
+        sdkFallbackNotified = true;
+        console.warn('[sdk:security] App Studio SDK fallback:', reason);
+        showNotice('SDK do App Studio inválido; usando fallback de rede.', 'warning');
+    }
+
+    function safeJsonParse(input, fallback) {
+        try { return JSON.parse(input); } catch (_) { return fallback; }
+    }
+
+    function debounce(fn, wait) {
+        var t;
+        return function () {
+            var args = arguments;
+            clearTimeout(t);
+            t = setTimeout(function () { fn.apply(null, args); }, wait);
+        };
+    }
+
+    function el(tag, opts) {
+        var node = document.createElement(tag);
+        opts = opts || {};
+        if (opts.className) node.className = opts.className;
+        if (opts.text !== undefined) node.textContent = opts.text;
+        if (opts.type) node.type = opts.type;
+        if (opts.value !== undefined) node.value = opts.value;
+        if (opts.id) node.id = opts.id;
+        if (opts.attrs) {
+            Object.keys(opts.attrs).forEach(function (k) { node.setAttribute(k, opts.attrs[k]); });
         }
-    },
+        return node;
+    }
 
-    isValidCNPJ(cnpj) {
+    function qs(sel, root) { return (root || document).querySelector(sel); }
+    function qsa(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+
+    // MVP-Plus #1 — Diagnóstico e Robustez de ID/Lista
+    function getAppId(app) {
+        if (!app || typeof app !== 'object') return null;
+        var id = app.id || app.app_id || app.aid || app.appId || app.ID || app.appid || app.appID || app._id;
+        if (id === undefined || id === null || id === '') return null;
+        if (typeof id === 'number') return String(id);
+        if (typeof id === 'string') return id.trim() || null;
+        return id;
+    }
+
+    // MVP-Plus #4 — Save to Server: payload compat + melhor retorno
+    function extractAppIdFromSaveResponse(resp) {
+        if (!resp || typeof resp !== 'object') return null;
+        var id = resp.app_id || resp.id;
+        if (!id && resp.data && typeof resp.data === 'object') {
+            id = resp.data.id || resp.data.app_id || resp.data.appId;
+        }
+        if (id === undefined || id === null || id === '') return null;
+        if (typeof id === 'number') return String(id);
+        if (typeof id === 'string') return id.trim() || null;
+        return id;
+    }
+
+    // MVP-Plus #3 — CSRF + headers padrão
+    function getCsrfToken() {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? String(meta.getAttribute('content') || '').trim() : '';
+    }
+
+    // MVP-Plus #1 — Diagnóstico e Robustez de ID/Lista
+    function normalizeAppsResponse(response) {
+        if (!response) return [];
+        if (Array.isArray(response)) return response;
+        if (response.data) {
+            if (Array.isArray(response.data)) return response.data;
+            if (response.data.apps && Array.isArray(response.data.apps)) return response.data.apps;
+        }
+        if (response.apps && Array.isArray(response.apps)) return response.apps;
+        return [];
+    }
+
+    // MVP-Plus #7 — Duplicate App (clonar)
+    function getUniqueSlug(base) {
+        var clean = sanitizeSlug(base || 'app');
+        var baseSlug = clean.endsWith('-copy') ? clean : (clean + '-copy');
+        var existing = {};
+        state.apps.forEach(function (item) {
+            if (item && item.slug) existing[String(item.slug).toLowerCase()] = true;
+        });
+        if (!existing[baseSlug]) return baseSlug;
+        var i = 2;
+        while (existing[baseSlug + i]) i += 1;
+        return baseSlug + i;
+    }
+
+    // MVP-Plus #5 — Rascunho persistente por app (localStorage)
+    function getDraftKey(appId, slug) {
+        var key = appId || slug || 'new';
+        return 'appstudio:draft:' + String(key);
+    }
+
+    function saveDraftLocal(appId, slug, payload) {
+        try {
+            var key = getDraftKey(appId, slug);
+            localStorage.setItem(key, JSON.stringify(payload));
+        } catch (_) {}
+    }
+
+    function loadDraftLocal(appId, slug) {
+        try {
+            var key = getDraftKey(appId, slug);
+            var raw = localStorage.getItem(key);
+            return raw ? safeJsonParse(raw, null) : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function discardDraftLocal(appId, slug) {
+        try {
+            var key = getDraftKey(appId, slug);
+            localStorage.removeItem(key);
+        } catch (_) {}
+    }
+
+    function sanitizeTitle(value) {
+        var v = String(value || '').replace(/[\x00-\x1F\x7F]/g, '').trim();
+        if (v.length > 80) v = v.slice(0, 80);
+        return v;
+    }
+
+    function sanitizeSlug(value) {
+        var v = String(value || '').toLowerCase();
+        v = v.replace(/[^a-z0-9-]/g, '-');
+        v = v.replace(/-+/g, '-').replace(/^-|-$/g, '');
+        if (v.length > 40) v = v.slice(0, 40);
+        return v;
+    }
+
+    function toNumber(value, fallback) {
+        var n = Number(String(value || '').replace(',', '.'));
+        return Number.isFinite(n) ? n : (fallback || 0);
+    }
+
+    function isValidCnpj(value) {
+        var cnpj = String(value || '').replace(/\D/g, '');
         if (cnpj.length !== 14) return false;
         if (/^(\d)\1+$/.test(cnpj)) return false;
-
-        let sum = 0;
-        let weight = 5;
-        for (let i = 0; i < 12; i++) {
-            sum += parseInt(cnpj[i]) * weight;
-            weight = weight === 2 ? 9 : weight - 1;
-        }
-        let digit1 = sum % 11 < 2 ? 0 : 11 - (sum % 11);
-        if (parseInt(cnpj[12]) !== digit1) return false;
-
-        sum = 0;
-        weight = 6;
-        for (let i = 0; i < 13; i++) {
-            sum += parseInt(cnpj[i]) * weight;
-            weight = weight === 2 ? 9 : weight - 1;
-        }
-        let digit2 = sum % 11 < 2 ? 0 : 11 - (sum % 11);
-        return parseInt(cnpj[13]) === digit2;
-    },
-
-    generateSlug(text) {
-        return text
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/[\u0300-\u036f]/g, "")
-            .replace(/[^a-z0-9\s-]/g, "")
-            .replace(/\s+/g, "-")
-            .replace(/-+/g, "-")
-            .replace(/^-|-$/g, "")
-            .substring(0, 60);
-    },
-
-    nextStep() {
-        if (this.currentStep < this.maxSteps && this.validateCurrentStep()) {
-            this.currentStep++;
-            this.updateStepDisplay();
-        }
-    },
-
-    prevStep() {
-        if (this.currentStep > 1) {
-            this.currentStep--;
-            this.updateStepDisplay();
-        }
-    },
-
-    updateStepDisplay() {
-        // Update step indicators
-        document.querySelectorAll(".step").forEach((step, index) => {
-            const stepNumber = index + 1;
-            step.classList.remove("active", "completed");
-            if (stepNumber < this.currentStep) {
-                step.classList.add("completed");
-            } else if (stepNumber === this.currentStep) {
-                step.classList.add("active");
+        var calcCheck = function (base) {
+            var sum = 0;
+            var weight = base.length - 7;
+            for (var i = 0; i < base.length; i += 1) {
+                sum += parseInt(base.charAt(i), 10) * weight--;
+                if (weight < 2) weight = 9;
             }
-        });
-
-        // Show/hide form sections
-        document.querySelectorAll(".form-section").forEach((section, index) => {
-            section.classList.remove("active");
-            if (index + 1 === this.currentStep) {
-                section.classList.add("active");
-            }
-        });
-
-        // Update token field visibility when on step 4
-        if (this.currentStep === 4) {
-            setTimeout(() => {
-                this.toggleTokenField();
-                this.applyStep4State();
-            }, 100);
-        }
-
-        // Load code template when on step 5
-        if (this.currentStep === 5) {
-            // A inicialização do editor agora é feita de forma mais robusta
-            // quando o tipo de app é selecionado ou carregado.
-            if (!this.useSimpleEditor && (this.appType === 'flutter' || this.appData.storage_type === 'filesystem')) {
-                setTimeout(() => this.setupFilesystemEditor(), 100);
-            } else { // Modo simples (database editor)
-                setTimeout(() => this.initializeCodeMirror(), 50); // Adicionado timeout para garantir que o DOM está pronto
-                setTimeout(() => this.setupDatabaseEditor(), 100);
-            }
-        }
-
-        // Update preview when on step 6
-        if (this.currentStep === 6) {
-            setTimeout(() => this.updatePreview(), 100);
-        }
-
-        this.validateCurrentStep();
-        this.updateSummaryPanel();
-    },
-
-    loadCodeTemplate() {
-        const codeField = document.getElementById('app-code');
-        if (!codeField) return;
-
-        // Only load template if field is empty and not in edit mode
-        if (codeField.value.trim() === '' && !this.editMode) {
-            if (this.appType === 'flutter') {
-                // Para Flutter, não preencher automaticamente com template;
-                // deixar em branco até o usuário colar código ou usar "Template".
-                codeField.value = this.appData.dartCode || '';
-                this.appData.dartCode = codeField.value;
-            } else {
-                codeField.value = this.appData.code || this.getJavaScriptTemplate();
-                this.appData.code = codeField.value;
-            }
-        }
-    },
-
-    updatePreview() {
-        // Update preview in step 6
-        const elements = {
-            "final-title": this.appData.title || "",
-            "final-description": this.appData.description || "Sem descrição",
-            "final-publisher": this.appData.company?.name || "Negócio",
-            "final-version": this.appData.version || "1.0.0",
-            "final-price": parseFloat(this.appData.price || 0).toFixed(2).replace(".", ","),
-            "final-slug": this.appData.slug || "",
+            var mod = sum % 11;
+            return (mod < 2) ? 0 : (11 - mod);
         };
+        var base12 = cnpj.slice(0, 12);
+        var d1 = calcCheck(base12);
+        var d2 = calcCheck(base12 + d1);
+        return cnpj === base12 + String(d1) + String(d2);
+    }
 
-        Object.entries(elements).forEach(([id, value]) => {
-            const element = document.getElementById(id);
-            if (element) {
-                element.textContent = value;
-            }
-        });
-
-        // Update access level
-        const accessElement = document.getElementById("final-access");
-        if (accessElement) {
-            const accessLevels = { 0: "Toda a Internet", 1: "Usuários logados", 2: "Privado" };
-            accessElement.textContent = accessLevels[this.appData.accessLevel] || "Toda a Internet";
-        }
-
-        // Update entity type
-        const entityElement = document.getElementById("final-entity");
-        if (entityElement) {
-            const entityTypes = { 0: "Geral", 1: "Usuários", 2: "Negócios" };
-            entityElement.textContent = entityTypes[this.appData.entityType] || "Usuários";
-        }
-
-        const contextElement = document.getElementById("final-context");
-        if (contextElement) {
-            const contextLabels = {
-                user: "Usuários",
-                business: "Negócios",
-                team: "Equipes",
-                hybrid: "Híbrido"
-            };
-            const ctxKey = String(this.appData.contextMode || 'user').toLowerCase();
-            contextElement.textContent = contextLabels[ctxKey] || "Usuários";
-        }
-
-        const shellElement = document.getElementById("final-shell");
-        if (shellElement) {
-            const parts = [];
-            if (this.appData.shellHeader) parts.push('Header');
-            if (this.appData.shellSidebar) parts.push('Sidebar');
-            if (this.appData.shellFooterMenu) parts.push('Rodapé');
-            shellElement.textContent = parts.length ? parts.join(' + ') : 'Sem shell';
-        }
-
-        // Update icon
-        const iconElement = document.getElementById("final-icon-preview");
-        if (iconElement && this.appData.icon) {
-            iconElement.src = this.appData.icon;
-        }
-
-        // Update scopes
-        const scopesElement = document.getElementById("final-scopes");
-        if (scopesElement) {
-            scopesElement.innerHTML = "";
-            if (this.appData.scopes.length > 0) {
-                this.appData.scopes.forEach(scope => {
-                    const li = document.createElement("li");
-                    li.innerHTML = `<i class="fas fa-check"></i> ${scope}`;
-                    scopesElement.appendChild(li);
-                });
-            } else {
-                scopesElement.innerHTML = '<li><i class="fas fa-info-circle"></i> Nenhuma permissão especial</li>';
-            }
-        }
-    },
-
-    async initializeCodeMirror() {
-        // Garante que o editor só seja inicializado quando o elemento estiver visível
-        const waitForEditor = () => {
-            return new Promise(resolve => {
-                const check = () => {
-                    const container = document.getElementById('code-editor-container');
-                    const section = document.getElementById('step-5');
-                    if (container && section && section.classList.contains('active')) {
-                        resolve(container);
-                    } else {
-                        setTimeout(check, 50); // Tenta novamente em 50ms
-                    }
-                };
-                check();
+    function domReady() {
+        if (document.readyState === 'loading') {
+            return new Promise(function (resolve) {
+                document.addEventListener('DOMContentLoaded', resolve, { once: true });
             });
-        };
-
-        await waitForEditor();
-
-        // Garante que qualquer instância antiga seja destruída antes de criar uma nova.
-        this.destroyCodeMirror();
-
-        // Garante que todas as dependências, incluindo o modo Dart, estejam carregadas.
-        // Isso resolve a race condition de forma robusta.
-        await this._depsPromise;
-
-        const newMode = this.appType === 'flutter' ? 'dart' : 'javascript';
-
-        // Força a recriação do editor se o modo de linguagem mudou.
-        // Isso resolve o problema de syntax highlighting ao alternar entre tipos de app.
-        if (this._codeMirrorInstance && this._codeMirrorInstance.getOption('mode') !== newMode) {
-            this._codeMirrorInstance.toTextArea();
-            this._codeMirrorInstance = null;
         }
+        return Promise.resolve();
+    }
 
-        if (this._codeMirrorInstance) {
-            // Se a instância já existe, apenas atualize o conteúdo e o modo
-            const code = this.appType === 'flutter' ? (this.appData.dartCode || '') : (this.appData.code || '');
-            if (this._codeMirrorInstance.getValue() !== code) {
-                this._codeMirrorInstance.setValue(code);
-            }
-            this._codeMirrorInstance.refresh();
-            return;
-        }
-
-        const codeField = document.getElementById('app-code');
-        if (codeField && typeof CodeMirror !== 'undefined') {
-            this._codeMirrorInstance = CodeMirror.fromTextArea(codeField, {
-                lineNumbers: true,
-                mode: newMode,
-                theme: 'monokai',
-                tabSize: 2,
-                gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
-                indentWithTabs: false,
-                lineWrapping: false,
-                autofocus: true,
-                matchBrackets: true,
-                foldGutter: true,
-                extraKeys: {
-                    "Ctrl-F": "findPersistent",
-                    "Cmd-F": "findPersistent",
-                    "Ctrl-H": "replace",
-                    "Cmd-Option-F": "replace",
-                    "F11": function(cm) { cm.setOption("fullScreen", !cm.getOption("fullScreen")); },
-                    "Esc": function(cm) { if (cm.getOption("fullScreen")) cm.setOption("fullScreen", false); }
-                }
-            });
-
-            const code = this.appType === 'flutter' ? (this.appData.dartCode || '') : (this.appData.code || '');
-            this._codeMirrorInstance.setValue(code);
-
-            this._codeMirrorInstance.on('change', (cm) => {
-                const value = cm.getValue();
-                if (this.appType === 'flutter') {
-                    this.appData.dartCode = value;
-                } else {
-                    this.appData.code = value;
-                }
-                this.validateCurrentStep();
-            });
-            
-            setTimeout(() => this._codeMirrorInstance.refresh(), 100);
-        }
-    },
-
-    destroyCodeMirror() {
-        if (this._codeMirrorInstance) {
-            try {
-                this._codeMirrorInstance.toTextArea();
-            } catch (e) {
-                console.warn("Falha ao destruir instância do CodeMirror:", e);
-            }
-            this._codeMirrorInstance = null;
-        }
-    },
-
-    // Code editor methods
-    formatCode() {
-        console.log('Format code (disabled)');
-        this.showToast('Funcionalidade de formatação desativada.', 'warning');
-    },
-
-    toggleCodeMirrorFullscreen() {
-        if (this._codeMirrorInstance) {
-            // Usa a API do CodeMirror para alternar o modo de tela cheia
-            this._codeMirrorInstance.setOption("fullScreen", !this._codeMirrorInstance.getOption("fullScreen"));
-        } else {
-            this.showToast('Editor não inicializado.', 'warning');
-        }
-    },
-
-    toggleWordWrap() {
-        if (this._codeMirrorInstance) {
-            const currentStatus = this._codeMirrorInstance.getOption("lineWrapping");
-            this._codeMirrorInstance.setOption("lineWrapping", !currentStatus);
-            this.showToast(`Quebra de linha ${!currentStatus ? 'ativada' : 'desativada'}.`, 'info');
-        } else {
-            this.showToast('Editor não inicializado.', 'warning');
-        }
-    },
-
-    insertTemplate() {
-        const template = this.appType === 'flutter' ? this.getFlutterTemplate() : this.getJavaScriptTemplate();
-        
-        if (this._codeMirrorInstance) {
-            this._codeMirrorInstance.setValue(template);
-            this._codeMirrorInstance.focus();
-        } else {
-            const editor = document.getElementById('app-code');
-            if (editor) editor.value = template;
-        }
-        this.showToast('Template inserido!', 'info');
-    },
-
-    toggleLineNumbers() {
-        console.log('Toggle line numbers');
-    },
-
-    // Build management methods
-    async showCodePreview() {
-        try { // Ensure there is code
-            let code;
-            if (this._codeMirrorInstance) {
-                // Se o CodeMirror está ativo, pegue o valor diretamente dele.
-                code = this._codeMirrorInstance.getValue();
-            } else {
-                // Fallback para o textarea ou estado do app.
-                const codeField = document.getElementById('app-code');
-                code = codeField ? codeField.value : (this.appType === 'flutter' ? (this.appData.dartCode || '') : (this.appData.code || ''));
-            }
-
-            if (!code || code.trim() === '') {
-                this.showToast('Escreva algum código para visualizar o preview.', 'info');
+    function loadCSS(href) {
+        return new Promise(function (resolve, reject) {
+            if (document.querySelector('link[href="' + href + '"]')) {
+                resolve();
                 return;
             }
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = href;
+            link.onload = resolve;
+            link.onerror = reject;
+            document.head.appendChild(link);
+        });
+    }
 
-            if (this.appType === 'javascript') {
-                // Preview de JS via interactive/newWindow, usando um Blob HTML.
-                this._livePreviewMode = 'js';
-                const html = this._buildJsPreviewHtml(code);
-                try {
-                    const blob = new Blob([html], { type: 'text/html' });
-                    const url = URL.createObjectURL(blob);
-                    const title = `Preview: ${this.appData.title || 'JavaScript App'}`;
-                    const hasInteractiveWindow =
-                        typeof window !== 'undefined' &&
-                        typeof window.newWindow === 'function';
-                    if (hasInteractiveWindow) {
-                        window.newWindow(
-                            url,
-                            `preview-js-${Date.now()}`,
-                            '/images/apps/app-studio.png',
-                            title
-                        );
-                    } else {
-                        // Fallback para o modal antigo, se interactive não estiver disponível
-                        const modalHtml = `
-                            <div class="modal fade" id="livePreviewModal" tabindex="-1">
-                                <div class="modal-dialog modal-xl">
-                                    <div class="modal-content">
-                                        <div class="modal-header">
-                                            <h5 class="modal-title"><i class="fas fa-eye"></i> Preview (JavaScript)</h5>
-                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                        </div>
-                                        <div class="modal-body p-0">
-                                            <iframe id="live-preview-frame" style="width:100%; height:70vh; border:0; background:#fff"></iframe>
-                                        </div>
-                                        <div class="modal-footer">
-                                            <small class="text-muted me-auto">Atualiza automaticamente enquanto você digita</small>
-                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>`;
-                        this.showModal(modalHtml, 'livePreviewModal');
-                        setTimeout(() => {
-                            const iframe = document.getElementById('live-preview-frame');
-                            if (iframe) iframe.srcdoc = html;
-                        }, 50);
-                    }
-                } catch (e) {
-                    console.warn('Falha ao abrir preview JS via interactive, usando modal:', e);
-                }
+    function loadJS(src) {
+        return new Promise(function (resolve, reject) {
+            if (document.querySelector('script[src="' + src + '"]')) {
+                resolve();
                 return;
             }
+            var script = document.createElement('script');
+            script.src = src;
+            script.async = false;
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
 
-            // Flutter quick preview via build worker
-            this._livePreviewMode = 'flutter';
-            this.showToast('Gerando preview Flutter em uma nova janela…', 'info');
-            // Para Flutter, delegamos ao worker que retorna uma URL /preview/;
-            // assim que estiver pronta, abrimos via interactive/newWindow.
-            this._generateFlutterPreview(true);
+    function setDirty(value) {
+        state.dirty = !!value;
+        renderDirtyIndicator();
+    }
 
-        } catch (e) {
-            console.error('Preview error:', e);
-            this.showToast('Falha ao abrir preview: ' + (e?.message || e), 'error');
-        }
-    },
-
-    _buildJsPreviewHtml(code) {
-        const safeCode = String(code || '');
-        return `<!doctype html><html><head><meta charset="utf-8"/>
-            <meta name="viewport" content="width=device-width, initial-scale=1"/>
-            <style>html,body{height:100%} body{margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;} #app{min-height:100vh;}</style>
-        </head><body>
-            <div id="app"></div>
-            <script>
-            // Minimal WorkzSDK stub for preview
-            window.WorkzSDK = {
-                init: async () => ({ ok:true }),
-                getUser: () => ({ id: 1, name: 'Preview User' }),
-                getContext: () => ({ type: 'user', id: 1 }),
-                api: { get: async()=>({}), post: async()=>({}), put: async()=>({}), delete: async()=>({}) }
-            };
-            </script>
-            <script>
-            try {
-                (function(){\n${safeCode.replace(/<\/(script)/gi, '<\\/$1')}\n})();
-                if (window.StoreApp && typeof window.StoreApp.bootstrap === 'function') {
-                    Promise.resolve(window.StoreApp.bootstrap()).catch(e => console.error('bootstrap error', e));
-                }
-            } catch (e) {
-                console.error(e);
-                document.body.innerHTML = '<pre style="padding:16px; color:#b91c1c; background:#fee2e2">'+ String(e && (e.stack||e.message)||e) +'</pre>';
-            }
-            </script>
-        </body></html>`;
-    },
-
-    _updateJsLivePreview() {
-        try {
-            const codeField = document.getElementById('app-code');
-            const code = codeField ? codeField.value : this.appData.code || '';
-            const html = this._buildJsPreviewHtml(code);
-            const iframe = document.getElementById('live-preview-frame');
-            if (iframe) iframe.srcdoc = html;
-        } catch (e) { /* ignore */ }
-    },
-
-    async _generateFlutterPreview(openInWindow = false) {
-        const slug = (this.appData.slug || '').trim() || ('preview-' + Date.now());
-        // Obter código atual do editor (CodeMirror ou textarea / estado)
-        let dartCode = '';
-        if (this._codeMirrorInstance) {
-            dartCode = this._codeMirrorInstance.getValue() || '';
+    function renderDirtyIndicator() {
+        var badge = qs('#dirty-indicator');
+        if (!badge) return;
+        if (!state.app.id || state.dirty) {
+            badge.textContent = 'Não salvo';
+            badge.classList.remove('text-slate-500');
+            badge.classList.add('text-amber-600');
         } else {
-            const codeField = document.getElementById('app-code');
-            dartCode = (codeField ? codeField.value : (this.appData.dartCode || '')).trim();
+            badge.textContent = 'Salvo';
+            badge.classList.remove('text-amber-600');
+            badge.classList.add('text-slate-500');
         }
-        if (!dartCode) {
-            this.showToast('Escreva algum código Dart antes de gerar o preview.', 'info');
-            const body = document.getElementById('live-preview-body');
-            if (body) {
-                body.innerHTML = '<div class="p-3 text-warning">Nenhum código Dart encontrado para pré-visualizar.</div>';
-            }
-            return;
-        }
+    }
 
-        // Prefer same-origin proxy (/preview -> nginx -> worker), with fallbacks
-        const bases = [];
-        bases.push(''); // same-origin
+    function showNotice(message, type) {
+        var area = qs('#notice-area');
+        if (!area) return;
+        area.textContent = '';
+        if (!message) return;
+        var alert = el('div', { className: twAlert(type || 'info') });
+        alert.textContent = message;
+        area.appendChild(alert);
+    }
+
+    function updateValidationErrors(errors, warnings) {
+        state.validationErrors = errors || [];
+        state.validationWarnings = warnings || [];
+        var area = qs('#validation-errors');
+        if (!area) return;
+        area.textContent = '';
+        if (!state.validationErrors.length && !state.validationWarnings.length) return;
+        area.className = twAlert(state.validationErrors.length ? 'danger' : 'warning');
+        if (state.validationErrors.length) {
+            area.appendChild(el('div', { className: 'font-semibold mb-1', text: 'Erros' }));
+            var list = el('ul', { className: 'list-disc pl-5 space-y-1' });
+            state.validationErrors.forEach(function (err) {
+                var item = el('li', { text: err });
+                list.appendChild(item);
+            });
+            area.appendChild(list);
+        }
+        if (state.validationWarnings.length) {
+            area.appendChild(el('div', { className: 'font-semibold mt-3 mb-1', text: 'Avisos' }));
+            var listWarn = el('ul', { className: 'list-disc pl-5 space-y-1' });
+            state.validationWarnings.forEach(function (msg) {
+                var itemWarn = el('li', { text: msg });
+                listWarn.appendChild(itemWarn);
+            });
+            area.appendChild(listWarn);
+        }
+    }
+
+    function normalizeManifestFromState() {
+        var origin = (window.location && window.location.origin) ? window.location.origin : '';
+        var refOrigin = '';
         try {
-            if (typeof window !== 'undefined' && window.WORKZ_WORKER_BASE) {
-                bases.push(String(window.WORKZ_WORKER_BASE).replace(/\/$/, ''));
+            if (document.referrer) {
+                refOrigin = new URL(document.referrer).origin;
             }
         } catch (_) {}
-        bases.push('http://localhost:9091');
 
-        let lastError = null;
-        for (const base of bases) {
-            const baseNorm = String(base || '');
-            const urlBase = baseNorm; // '' means same-origin
-            // Important: use trailing slash to match nginx location ^~ /preview/
-            const postUrl = (urlBase ? urlBase : '') + '/preview/';
-            try {
-                const resp = await fetch(postUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ slug, dart_code: dartCode })
-                });
-                const data = await resp.json();
-                if (!resp.ok || !data || !data.success) {
-                    throw new Error(data?.message || (`Falha ao gerar preview em ${postUrl}`));
-                }
-                // Success
-                this._activePreviewBase = urlBase; // track for cleanup and iframe src
-                this._activePreviewToken = data.data?.token || null;
-                const url = data.data?.url || null; // like /preview/<token>/
-                 if (url) {
-                    const fullUrl = (urlBase || '') + url;
+        var manifest = JSON.parse(JSON.stringify(state.app.manifest || {}));
 
-                    const canUseInteractive =
-                        openInWindow &&
-                        typeof window !== 'undefined' &&
-                        typeof window.newWindow === 'function';
-
-                    if (canUseInteractive) {
-                        const title = `Preview: ${this.appData.title || 'Flutter App'}`;
-                        window.newWindow(
-                            fullUrl,
-                            `preview-flutter-${Date.now()}`,
-                            '/images/apps/app-studio.png',
-                            title
-                        );
-                    } else {
-                        // Fallback: criar (se preciso) e usar o modal de preview embutido
-                        let body = document.getElementById('live-preview-body');
-                        if (!body) {
-                            const modalHtml = `
-                                <div class="modal fade" id="livePreviewModal" tabindex="-1">
-                                    <div class="modal-dialog modal-xl">
-                                        <div class="modal-content">
-                                            <div class="modal-header">
-                                                <h5 class="modal-title">
-                                                    <i class="fas fa-eye"></i> Preview (Flutter)
-                                                </h5>
-                                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                            </div>
-                                            <div class="modal-body p-0" id="live-preview-body"></div>
-                                            <div class="modal-footer">
-                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                                                    Fechar
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>`;
-                            this.showModal(modalHtml, 'livePreviewModal');
-                            body = document.getElementById('live-preview-body');
-                        }
-
-                        if (body) {
-                            body.innerHTML =
-                                '<iframe id="live-preview-frame" style="width:100%; height:70vh; border:0; background:#fff"></iframe>';
-                            const iframe = document.getElementById('live-preview-frame');
-                            iframe.src = fullUrl;
-                        }
-                    }
-                    return;
-                } else {
-                    const body = document.getElementById('live-preview-body');
-                    if (body && !openInWindow) {
-                        body.innerHTML = '<div class="p-3 text-danger">Pré-visualização indisponível.</div>';
-                    }
-                }
-                return; // stop after first success
-            } catch (e) {
-                lastError = e;
-                // try next base
-            }
+        // Legacy migration
+        if (!manifest.runtime) manifest.runtime = 'js';
+        if (!manifest.contextRequirements) manifest.contextRequirements = {};
+        if (manifest.contextMode && !manifest.contextRequirements.mode) {
+            manifest.contextRequirements.mode = String(manifest.contextMode).toLowerCase();
         }
-        console.error('Flutter preview failed:', lastError);
-        const body = document.getElementById('live-preview-body');
-        if (body) body.innerHTML = `<div class="p-3 text-danger">Erro: ${this.escapeHtml(lastError?.message || String(lastError))}<br/><small>Tente iniciar o build-worker ou acessar via /preview (proxy nginx).</small></div>`;
-    },
-    async showBuildStatus(appId) {
-        try {
-            const response = await this.getBuildStatusCompat(appId);
-            if (response && response.success && response.data) {
-                this.displayBuildStatusModal(response.data);
-                const status = response.data.build_status;
-                if (status === 'building' || status === 'pending') {
-                    this.startBuildWatch(appId);
-                }
-                return;
-            }
-        } catch (e) {
-            console.warn('Falha inicial ao obter status do build, iniciando polling:', e);
+        if (typeof manifest.allowContextSwitch === 'boolean' && typeof manifest.contextRequirements.allowContextSwitch === 'undefined') {
+            manifest.contextRequirements.allowContextSwitch = manifest.allowContextSwitch;
         }
-        // Se falhar, mostrar modal pendente e iniciar polling
-        this.displayPendingBuildModal(appId);
-        this.startBuildWatch(appId);
-    },
+        delete manifest.contextMode;
+        delete manifest.allowContextSwitch;
+        var allowedModes = { user: true, business: true, team: true, hybrid: true };
+        var rawMode = String(manifest.contextRequirements.mode || '').toLowerCase();
+        if (rawMode === 'company') rawMode = 'business';
+        if (!allowedModes[rawMode]) rawMode = 'user';
+        manifest.contextRequirements.mode = rawMode;
 
-    displayBuildStatusModal(buildData) {
-        const existing = document.getElementById('buildStatusModal');
-        if (!existing) {
-            const modalHtml = `
-                <div class="modal fade" id="buildStatusModal" tabindex="-1">
-                    <div class="modal-dialog modal-lg">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h5 class="modal-title">
-                                    <i class="fas fa-hammer"></i> Status do Build
-                                </h5>
-                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                            </div>
-                            <div class="modal-body">
-                                <div id="build-status-content">${this.renderBuildStatusContent(buildData)}</div>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            this.showModal(modalHtml, 'buildStatusModal');
+        if (!manifest.capabilities) manifest.capabilities = {};
+        if (!manifest.capabilities.api) manifest.capabilities.api = { allow: [] };
+        if (!Array.isArray(manifest.capabilities.api.allow)) manifest.capabilities.api.allow = [];
+
+        if (!manifest.capabilities.events) manifest.capabilities.events = { publish: [], subscribe: [] };
+        if (!Array.isArray(manifest.capabilities.events.publish)) manifest.capabilities.events.publish = [];
+        if (!Array.isArray(manifest.capabilities.events.subscribe)) manifest.capabilities.events.subscribe = [];
+
+        if (!manifest.capabilities.storage) manifest.capabilities.storage = {};
+        if (!manifest.capabilities.storage.docs) {
+            manifest.capabilities.storage.docs = { enabled: false, types: [] };
+        }
+        if (manifest.capabilities.storage.scope === 'app' || !manifest.capabilities.storage.scope) {
+            manifest.capabilities.storage.scope = 'context';
+        }
+        if (manifest.capabilities.storage.scope !== 'user' && manifest.capabilities.storage.scope !== 'context') {
+            manifest.capabilities.storage.scope = 'context';
+        }
+
+        var docs = manifest.capabilities.storage.docs;
+        if (docs.enabled) {
+            if (typeof docs.types === 'undefined') {
+                docs.types = ['user_data'];
+            } else if (!Array.isArray(docs.types)) {
+                docs.types = [];
+            }
+            if (docs.types.length === 0) {
+                return { ok: false, error: 'Docs habilitado, mas \'types\' está vazio. Informe ao menos um tipo (ex.: user_data).' };
+            }
         } else {
-            const content = document.getElementById('build-status-content');
-            if (content) { content.innerHTML = this.renderBuildStatusContent(buildData); }
+            docs.types = [];
+        }
+
+        if (!manifest.capabilities.proxy) {
+            manifest.capabilities.proxy = { sources: [] };
+        }
+        if (!Array.isArray(manifest.capabilities.proxy.sources)) {
+            manifest.capabilities.proxy.sources = [];
+        }
+
+        if (!manifest.sandbox) manifest.sandbox = {};
+        if (!manifest.sandbox.postMessage) manifest.sandbox.postMessage = {};
+        var allowed = manifest.sandbox.postMessage.allowedOrigins;
+        if (!Array.isArray(allowed)) allowed = [];
+        allowed = allowed.filter(function (o) { return o && o !== '*'; });
+        if (!allowed.length) {
+            if (refOrigin) allowed = [refOrigin];
+            else if (origin) allowed = [origin];
+        }
+        manifest.sandbox.postMessage.allowedOrigins = allowed;
+
+        return { ok: true, manifest: manifest };
+    }
+
+    function buildPreviewHtml(code, manifest) {
+        var safeCode = String(code || '').replace(/<\/(script)/gi, '<\\/$1');
+        var manifestJson = JSON.stringify(manifest || {});
+        return '<!doctype html><html><head><meta charset="utf-8" />' +
+            '<meta name="viewport" content="width=device-width, initial-scale=1" />' +
+            '<style>html,body{height:100%}body{margin:0;font-family:system-ui,Arial,sans-serif}#app{min-height:100%}</style>' +
+            '</head><body><div id="app"></div>' +
+            '<script>window.WorkzAppConfig={manifest:' + manifestJson + ',preview:true};</script>' +
+            '<script src="/js/core/workz-sdk-v2.js"></script>' +
+            '<script src="/js/core/workz-app-pro.js"></script>' +
+            '<script>(async function(){' +
+            'var app=document.getElementById(\"app\");' +
+            'var postMessage=function(source,type,msg){try{window.parent.postMessage({source:source,type:type,message:msg},\"*\");}catch(_){}};' +
+            'var postLog=function(type,msg){postMessage(\"appstudio-preview\",type,msg);};' +
+            'var postSdk=function(type,msg){postMessage(\"sdk\",type,msg);};' +
+            'var logContext=function(){' +
+            'var allowed=!!(window.WorkzSDK && WorkzSDK.contextAllowed);' +
+            'var reason=\"\";' +
+            'try{' +
+            'var deny=(WorkzSDK && WorkzSDK.contextDenyReason) ? WorkzSDK.contextDenyReason : null;' +
+            'if (typeof deny === \"string\") reason=deny;' +
+            'else if (deny && typeof deny === \"object\") reason=deny.code || (deny.required ? \"context_not_allowed\" : \"\");' +
+            '}catch(_){}' +
+            'var mode=(window.WorkzAppConfig && WorkzAppConfig.manifest && WorkzAppConfig.manifest.contextRequirements && WorkzAppConfig.manifest.contextRequirements.mode) || \"n/a\";' +
+            'postSdk(\"context\",\"allowed=\"+allowed+\" reason=\"+reason+\" mode=\"+mode);' +
+            '};' +
+            'var renderSdkError=function(e){var m=(e && e.message ? e.message : e);if(app){app.textContent=\"Erro ao iniciar preview (SDK): \" + m;}postSdk(\"error\",String(m));};' +
+            'var renderWorkzAppError=function(e){var m=(e && e.message ? e.message : e);if(app){app.textContent=\"Erro ao iniciar preview (WorkzApp): \" + m;}postLog(\"workzapp\",String(m));};' +
+            'var renderAppError=function(e){var m=(e && e.message ? e.message : e);if(app){app.textContent=\"Erro ao executar app (JS): \" + m;}postLog(\"app\",String(m));};' +
+            'window.onerror=function(msg,src,line,col,err){renderAppError(err||msg);};' +
+            'window.onunhandledrejection=function(ev){renderAppError(ev && ev.reason ? ev.reason : ev);};' +
+            'try{' +
+            'if(!window.WorkzSDK || typeof WorkzSDK.init!==\"function\"){throw new Error(\"WorkzSDK não carregou\");}' +
+            'if (window.WorkzSDK && typeof WorkzSDK.on === \"function\") {' +
+            'WorkzSDK.on(\"sdk:security\", function(p){var msg=\"action=\"+(p && p.action ? p.action : \"n/a\")+\" reason=\"+(p && p.reason ? p.reason : \"n/a\")+\" type=\"+(p && p.type ? p.type : \"n/a\");postSdk(\"security\",msg);});' +
+            'WorkzSDK.on(\"sdk:telemetry\", function(p){var msg=\"type=\"+(p && p.type ? p.type : \"n/a\")+\" ok=\"+(p && typeof p.ok!==\"undefined\" ? p.ok : \"n/a\")+\" ms=\"+(p && p.durationMs ? p.durationMs : 0);postSdk(\"telemetry\",msg);});' +
+            'WorkzSDK.on(\"app:context_denied\", function(p){var msg=\"required=\"+(p && p.required ? p.required : \"n/a\")+\" received=\"+(p && p.received ? p.received : \"n/a\");postSdk(\"context\",msg);});' +
+            'WorkzSDK.on(\"sdk:ready\", function(p){var msg=\"ready v=\"+(p && p.version ? p.version : \"n/a\");postSdk(\"ready\",msg);});' +
+            '}' +
+            'await WorkzSDK.init({mode:\"standalone\",appConfig:window.WorkzAppConfig,manifest:window.WorkzAppConfig.manifest});' +
+            '}catch(e){console.warn(\"WorkzSDK init failed\",e);renderSdkError(e);return;}' +
+            // WorkzApp Pro integration
+            'try{' +
+            'if(!window.WorkzApp || typeof WorkzApp.init!==\"function\"){throw new Error(\"WorkzApp não carregou\");}' +
+            'await WorkzApp.init({sdk:WorkzSDK,appConfig:window.WorkzAppConfig,preview:true,debug:true,initSdk:false});' +
+            '}catch(e){console.warn(\"WorkzApp init failed\",e);renderWorkzAppError(e);return;}' +
+            'try{' +
+            'logContext();' +
+            'var denyReason = (WorkzSDK && WorkzSDK.contextDenyReason) ? WorkzSDK.contextDenyReason : null;' +
+            'var denyCode = (typeof denyReason === \"string\") ? denyReason : (denyReason && typeof denyReason === \"object\" ? denyReason.code : \"\");' +
+            'var required = (denyReason && typeof denyReason === \"object\" && denyReason.required) ? denyReason.required : null;' +
+            'var mode = (window.WorkzAppConfig && WorkzAppConfig.manifest && WorkzAppConfig.manifest.contextRequirements && WorkzAppConfig.manifest.contextRequirements.mode) || \"\";' +
+            'if (WorkzSDK && WorkzSDK.contextAllowed === false && (denyCode === \"context_not_allowed\" || required === \"user\") && String(mode).toLowerCase() === \"user\") {' +
+            'var pf = (WorkzSDK && typeof WorkzSDK.getPlatform === \"function\") ? WorkzSDK.getPlatform() : (WorkzSDK ? WorkzSDK.platform : null);' +
+            'var isIframe = pf && pf.isIframe ? true : false;' +
+            'postSdk(\"context\",\"before iframe=\"+isIframe+\" preview=\"+!!(window.WorkzAppConfig && WorkzAppConfig.preview)+\" sdkPreview=\"+!!(WorkzSDK && WorkzSDK.appConfig && WorkzSDK.appConfig.preview)+\" allowed=\"+WorkzSDK.contextAllowed+\" reason=\"+denyCode);' +
+            'var meResp = null;' +
+            'if (WorkzSDK.apiClient && typeof WorkzSDK.apiClient.request === \"function\") {' +
+            'meResp = await WorkzSDK.apiClient.request(\"GET\", \"/me\");' +
+            '} else if (WorkzSDK.api && typeof WorkzSDK.api.get === \"function\") {' +
+            'meResp = await WorkzSDK.api.get(\"/me\");' +
+            '}' +
+            'var data = (meResp && typeof meResp === \"object\" && meResp.data && typeof meResp.data === \"object\") ? meResp.data : (meResp || {});' +
+            'var user = (data && data.user) ? data.user : data;' +
+            'var userId = (user.id !== undefined && user.id !== null) ? user.id :' +
+            '(user.us !== undefined && user.us !== null) ? user.us :' +
+            '(user.user_id !== undefined && user.user_id !== null) ? user.user_id :' +
+            '(user.uid !== undefined && user.uid !== null) ? user.uid : null;' +
+            'if (userId && WorkzSDK && typeof WorkzSDK.setContext === \"function\") {' +
+            'WorkzSDK.setContext({ mode: \"user\", id: userId });' +
+            'logContext();' +
+            '} else { postSdk(\"context\",\"resolve_failed_no_user\"); }' +
+            '}' +
+            '}catch(e){postSdk(\"context\",\"resolve_failed\");}' +
+            'try{' +
+            '(function(){\n' + safeCode + '\n})();' +
+            '}catch(e){console.warn(\"App code error\",e);renderAppError(e);}' +
+            '})();</script>' +
+            '</body></html>';
+    }
+
+    function readManifestFromForm() {
+        var apiAllow = (qs('#manifest-api-allow') || {}).value || '';
+        var publish = (qs('#manifest-events-publish') || {}).value || '';
+        var subscribe = (qs('#manifest-events-subscribe') || {}).value || '';
+        var origins = (qs('#manifest-origins') || {}).value || '';
+        var ctxMode = (qs('#manifest-context-mode') || {}).value || 'user';
+        var ctxSwitch = (qs('#manifest-allow-context-switch') || {}).checked;
+        var docsEnabled = (qs('#manifest-docs-enabled') || {}).checked;
+        var docsTypes = (qs('#manifest-docs-types') || {}).value || '';
+        var kvEnabled = (qs('#manifest-kv-enabled') || {}).checked;
+        var blobsEnabled = (qs('#manifest-blobs-enabled') || {}).checked;
+        var proxySources = (qs('#manifest-proxy-sources') || {}).value || '';
+        var storageScope = (qs('#manifest-storage-scope') || {}).value || 'context';
+        if (storageScope === 'app') storageScope = 'context';
+        if (storageScope !== 'user' && storageScope !== 'context') storageScope = 'context';
+
+        state.app.manifest.contextRequirements = state.app.manifest.contextRequirements || {};
+        state.app.manifest.contextRequirements.mode = ctxMode;
+        state.app.manifest.contextRequirements.allowContextSwitch = !!ctxSwitch;
+        state.app.manifest.capabilities.api.allow = apiAllow.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
+        state.app.manifest.capabilities.events.publish = publish.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
+        state.app.manifest.capabilities.events.subscribe = subscribe.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
+        state.app.manifest.sandbox.postMessage.allowedOrigins = origins.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
+        state.app.manifest.capabilities.storage.docs.enabled = !!docsEnabled;
+        state.app.manifest.capabilities.storage.docs.types = docsTypes.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
+        state.app.manifest.capabilities.storage.kv = !!kvEnabled;
+        state.app.manifest.capabilities.storage.blobs = !!blobsEnabled;
+        state.app.manifest.capabilities.storage.scope = storageScope;
+        state.app.manifest.capabilities.proxy = state.app.manifest.capabilities.proxy || { sources: [] };
+        state.app.manifest.capabilities.proxy.sources = proxySources.split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+
+    function formatApiAllowList(allow) {
+        if (!Array.isArray(allow)) return [];
+        return allow.map(function (entry) {
+            if (!entry) return '';
+            if (typeof entry === 'string') return entry.trim();
+            if (typeof entry === 'object') {
+                var method = entry.method || entry.m || entry.verb || '';
+                var path = entry.path || entry.url || '';
+                method = String(method || '').toUpperCase().trim();
+                path = String(path || '').trim();
+                if (method && path) return method + ' ' + path;
+            }
+            return '';
+        }).filter(Boolean);
+    }
+
+    function normalizeApiAllowState() {
+        if (!state.app || !state.app.manifest || !state.app.manifest.capabilities || !state.app.manifest.capabilities.api) return;
+        var api = state.app.manifest.capabilities.api;
+        var allow = api.allow;
+        if (!allow && Array.isArray(api.allowlist)) allow = api.allowlist;
+        if (Array.isArray(allow)) {
+            api.allow = formatApiAllowList(allow);
+        }
+    }
+
+    function writeManifestToForm() {
+        if (!qs('#manifest-api-allow')) return;
+        normalizeApiAllowState();
+        var ctxMode = (state.app.manifest.contextRequirements && state.app.manifest.contextRequirements.mode) ? state.app.manifest.contextRequirements.mode : 'user';
+        var ctxSwitch = (state.app.manifest.contextRequirements && typeof state.app.manifest.contextRequirements.allowContextSwitch === 'boolean')
+            ? state.app.manifest.contextRequirements.allowContextSwitch
+            : true;
+        var ctxSelect = qs('#manifest-context-mode');
+        var ctxCheck = qs('#manifest-allow-context-switch');
+        if (ctxSelect) ctxSelect.value = ctxMode;
+        if (ctxCheck) ctxCheck.checked = !!ctxSwitch;
+        qs('#manifest-api-allow').value = formatApiAllowList(state.app.manifest.capabilities.api.allow || []).join('\n');
+        qs('#manifest-events-publish').value = (state.app.manifest.capabilities.events.publish || []).join('\n');
+        qs('#manifest-events-subscribe').value = (state.app.manifest.capabilities.events.subscribe || []).join('\n');
+        qs('#manifest-origins').value = (state.app.manifest.sandbox.postMessage.allowedOrigins || []).join('\n');
+        qs('#manifest-proxy-sources').value = (state.app.manifest.capabilities.proxy && state.app.manifest.capabilities.proxy.sources)
+            ? state.app.manifest.capabilities.proxy.sources.join('\n')
+            : '';
+        qs('#manifest-docs-enabled').checked = !!state.app.manifest.capabilities.storage.docs.enabled;
+        qs('#manifest-docs-types').value = (state.app.manifest.capabilities.storage.docs.types || []).join('\n');
+        qs('#manifest-kv-enabled').checked = !!state.app.manifest.capabilities.storage.kv;
+        qs('#manifest-blobs-enabled').checked = !!state.app.manifest.capabilities.storage.blobs;
+        qs('#manifest-storage-scope').value = state.app.manifest.capabilities.storage.scope || 'context';
+    }
+
+    // === SDK / API ===
+    async function apiCall(method, path, body) {
+        var useSdk = window.WorkzSDK && WorkzSDK.api && typeof WorkzSDK.api[method] === 'function';
+        var sdkOk = useSdk && WorkzSDK.manifestValidation && WorkzSDK.manifestValidation.ok === true;
+        if (useSdk && sdkOk) {
+            var sdkResp = await WorkzSDK.api[method](path, body);
+            var msg = sdkResp && typeof sdkResp.message === 'string' ? sdkResp.message : '';
+            var invalidMsg = msg.indexOf('Manifesto inválido') === 0;
+            if (sdkResp && (sdkResp.code === 'manifest_invalid' || invalidMsg) && isStudioEndpoint(path)) {
+                notifySdkFallback('manifest_invalid');
+            } else if (sdkResp && sdkResp.code === 'context_not_allowed' && isStudioEndpoint(path)) {
+                notifySdkFallback('context_not_allowed');
+            } else {
+                return sdkResp;
+            }
+        } else if (useSdk && !sdkOk && isStudioEndpoint(path)) {
+            notifySdkFallback('manifest_not_ok');
+        }
+        var basePath = path.startsWith('/') ? path : '/' + path;
+        var urls = ['/api' + basePath, basePath];
+        if (state && state.debug) {
+            urls = urls.map(function (u) { return u.indexOf('?') === -1 ? (u + '?debug=1') : (u + '&debug=1'); });
+        }
+        var headers = { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
+        var csrf = getCsrfToken();
+        if (csrf) headers['X-CSRF-TOKEN'] = csrf;
+        if (body !== undefined) headers['Content-Type'] = 'application/json';
+        for (var i = 0; i < urls.length; i += 1) {
+            var url = urls[i];
+            var resp = await fetch(url, {
+                method: method.toUpperCase(),
+                headers: headers,
+                credentials: 'same-origin',
+                body: body !== undefined ? JSON.stringify(body || {}) : undefined
+            });
+            if (resp.status === 404 || resp.status === 405) {
+                continue;
+            }
+            return parseJsonSafe(resp, url);
+        }
+        var lastUrl = urls[urls.length - 1];
+        var lastResp = await fetch(lastUrl, {
+            method: method.toUpperCase(),
+            headers: headers,
+            credentials: 'same-origin',
+            body: body !== undefined ? JSON.stringify(body || {}) : undefined
+        });
+        return parseJsonSafe(lastResp, lastUrl);
+    }
+
+    async function parseJsonSafe(resp, url) {
+        var status = resp && typeof resp.status === 'number' ? resp.status : 0;
+        try {
+            var data = await resp.json();
+            if (!data || typeof data !== 'object') {
+                return { success: false, status: status, message: 'Resposta JSON inválida', __httpStatus: status, __url: url || '' };
+            }
+            data.__httpStatus = status;
+            data.__url = url || '';
+            return data;
+        } catch (_) {
             try {
-                const modal = bootstrap.Modal.getOrCreateInstance(existing);
-                modal.show();
-            } catch (_) { /* ignore bootstrap errors */ }
+                var txt = await resp.text();
+                return { success: false, status: status, message: txt.slice(0, 500), __httpStatus: status, __url: url || '' };
+            } catch (e2) {
+                return { success: false, status: status, message: 'Falha ao interpretar resposta', __httpStatus: status, __url: url || '' };
+            }
         }
-    },
+    }
 
-    renderBuildStatusContent(buildData) {
-        const statusConfig = {
-            'pending': { class: 'alert-warning', icon: 'fa-clock', text: 'Build na fila' },
-            'building': { class: 'alert-info', icon: 'fa-spinner fa-spin', text: 'Compilando...' },
-            'success': { class: 'alert-success', icon: 'fa-check', text: 'Build concluído com sucesso' },
-            'failed': { class: 'alert-danger', icon: 'fa-times', text: 'Build falhou' }
+    function twContainer() {
+        return 'mx-auto w-full max-w-6xl px-4 py-6';
+    }
+
+    function twHeaderRow() {
+        return 'flex flex-wrap items-center justify-between gap-3 mb-4';
+    }
+
+    function twCard() {
+        return 'rounded-xl border border-slate-200 bg-white shadow-sm';
+    }
+
+    function twCardBody() {
+        return 'p-4';
+    }
+
+    function twTitle() {
+        return 'text-2xl font-semibold text-slate-900';
+    }
+
+    function twSectionTitle() {
+        return 'text-lg font-semibold text-slate-900';
+    }
+
+    function twMuted() {
+        return 'text-sm text-slate-500';
+    }
+
+    function twLabel() {
+        return 'block text-sm font-medium text-slate-700 mb-1';
+    }
+
+    function twInput() {
+        return 'w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20';
+    }
+
+    function twTextarea() {
+        return 'w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20';
+    }
+
+    function twSelect() {
+        return twInput() + ' pr-8';
+    }
+
+    function twCheckbox() {
+        return 'h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-500/20';
+    }
+
+    function twBtn(variant, size, outline) {
+        var base = 'inline-flex items-center justify-center rounded-md font-semibold transition focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+        var sizing = size === 'sm' ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm';
+        var styles = {
+            primary: outline ? 'border border-blue-600 text-blue-700 hover:bg-blue-50 focus:ring-blue-500' : 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
+            secondary: outline ? 'border border-slate-300 text-slate-700 hover:bg-slate-50 focus:ring-slate-400' : 'bg-slate-700 text-white hover:bg-slate-800 focus:ring-slate-500',
+            success: outline ? 'border border-emerald-600 text-emerald-700 hover:bg-emerald-50 focus:ring-emerald-500' : 'bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-500',
+            danger: outline ? 'border border-rose-600 text-rose-700 hover:bg-rose-50 focus:ring-rose-500' : 'bg-rose-600 text-white hover:bg-rose-700 focus:ring-rose-500',
+            warning: outline ? 'border border-amber-600 text-amber-700 hover:bg-amber-50 focus:ring-amber-500' : 'bg-amber-500 text-white hover:bg-amber-600 focus:ring-amber-500'
         };
+        var pick = styles[variant] || styles.primary;
+        return [base, sizing, pick].join(' ');
+    }
 
-        const config = statusConfig[buildData.build_status] || statusConfig['success'];
-        const isFlutter = String(buildData.app_type || '').toLowerCase() === 'flutter';
+    function twAlert(type) {
+        var base = 'rounded-md border px-3 py-2 text-sm';
+        var map = {
+            info: 'border-sky-200 bg-sky-50 text-sky-800',
+            success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+            warning: 'border-amber-200 bg-amber-50 text-amber-900',
+            danger: 'border-rose-200 bg-rose-50 text-rose-900'
+        };
+        return base + ' ' + (map[type] || map.info);
+    }
 
-        // Default plataformas: usa preferências salvas no formulário (etapa 4),
-        // se existirem; caso contrário, assume apenas Web.
-        let defaultPlatforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
-            ? this.appData.buildPlatforms
-            : ['web'];
-        // Se o backend enviar algo como build_targets no buildData futuramente, podemos
-        // mesclar aqui sem quebrar o comportamento atual.
-        const webCheckedAttr = defaultPlatforms.includes('web') ? 'checked' : '';
-        const androidCheckedAttr = defaultPlatforms.includes('android') ? 'checked' : '';
+    // === UI ===
+    function render() {
+        var root = qs('#app-root');
+        if (!root) return;
+        root.textContent = '';
+        if (state.view === 'list') {
+            renderList(root);
+        } else {
+            renderEditor(root);
+        }
+    }
 
-        const problems = this.extractBuildProblems(buildData.build_log || '') || [];
-        return `
-            <div class="alert ${config.class}">
-                <div class="d-flex align-items-center">
-                    <i class="fas ${config.icon} fa-2x me-3"></i>
-                    <div>
-                        <h6 class="mb-1">${config.text}</h6>
-                        <small>Última atualização: ${this.formatDateTime(buildData.compiled_at)}</small>
-                    </div>
-                </div>
-            </div>
-            
-            ${isFlutter ? `
-                <div class="mt-2 mb-3">
-                    <h6>Plataformas para novo build:</h6>
-                    <div class="d-flex align-items-center flex-wrap gap-2">
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="checkbox" id="build-target-web" value="web" ${webCheckedAttr}>
-                            <label class="form-check-label" for="build-target-web">
-                                <i class="fas fa-globe text-info"></i> Web
-                            </label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="checkbox" id="build-target-android" value="android" ${androidCheckedAttr}>
-                            <label class="form-check-label" for="build-target-android">
-                                <i class="fab fa-android text-success"></i> Android
-                            </label>
-                        </div>
-                        <button type="button" class="btn btn-sm btn-primary ms-2" onclick="StoreApp.triggerRebuildWithTargets(${buildData.app_id})">
-                            <i class="fas fa-hammer"></i> Rebuild com plataformas selecionadas
-                        </button>
-                    </div>
-                    <small class="text-muted d-block mt-1">Se nenhuma plataforma for selecionada, o build padrão será apenas Web.</small>
-                </div>
-            ` : ''}
-            
-            ${buildData.builds && buildData.builds.length > 0 ? `
-                <h6>Builds por Plataforma:</h6>
-                <div class="row">
-                    ${buildData.builds.map(build => this.renderPlatformBuild(build)).join('')}
-                </div>
-            ` : ''}
-            
-            ${buildData.build_status === 'failed' && problems.length > 0 ? `
-                <div class="mt-3">
-                    <h6>Problemas detectados:</h6>
-                    <div class="alert alert-warning" style="white-space: pre-wrap;">
-                        <ul style="margin:0; padding-left: 18px;">
-                            ${problems.slice(0, 10).map(p => `<li>${this.escapeHtml(p)}</li>`).join('')}
-                        </ul>
-                    </div>
-                </div>
-            ` : ''}
+    function renderList(root) {
+        var container = el('div', { className: twContainer() });
+        var header = el('div', { className: twHeaderRow() });
+        var title = el('h3', { className: twTitle(), text: 'App Studio (JS)' });
+        var button = el('button', { className: twBtn('primary'), text: 'Criar app' });
+        button.addEventListener('click', function () {
+            startNewApp();
+        });
+        header.appendChild(title);
+        header.appendChild(button);
+        container.appendChild(header);
 
-            ${buildData.build_log ? `
-                <div class="mt-3">
-                    <h6>Log do Build:</h6>
-                    <div class="build-log">
-                        <pre class="bg-dark text-light p-3 rounded" style="max-height: 360px; overflow:auto;">${this.escapeHtml(buildData.build_log)}</pre>
-                    </div>
-                </div>
-            ` : ''}
-        `;
-    },
+        var notice = el('div', { id: 'notice-area' });
+        container.appendChild(notice);
 
-    // Extrai uma lista resumida de problemas do log (dart analyze / compiler)
-    extractBuildProblems(logText) {
-        try {
-            const lines = String(logText || '').split(/\r?\n/);
-            const out = [];
-            const reErr = /\bError:\b/i;
-            const reBullet = /\berror\s+•\b/i;
-            const reLoc = /\b(?:lib|src)\/.*\.dart:\d+(?::\d+)?\b/;
-            for (let i = 0; i < lines.length; i++) {
-                const ln = lines[i].trim();
-                if (!ln) continue;
-                if (reErr.test(ln) || reBullet.test(ln) || reLoc.test(ln)) {
-                    out.push(ln);
-                    // Se a próxima linha for um caret ou detalhe, adiciona junto
-                    if (i + 1 < lines.length) {
-                        const next = lines[i + 1].trim();
-                        if (next.startsWith('^') || next.startsWith('│') || next.startsWith('•')) {
-                            out.push(next);
-                            i++;
-                        }
-                    }
+        var list = el('div', { className: 'grid grid-cols-1 gap-4 md:grid-cols-2' });
+        if (state.loadingApps) {
+            var loadWrap = el('div', { className: 'col-span-full flex items-center gap-2 text-sm text-slate-500' });
+            loadWrap.appendChild(el('div', { className: 'h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-transparent', attrs: { role: 'status', 'aria-hidden': 'true' } }));
+            loadWrap.appendChild(el('div', { text: 'Carregando apps...' }));
+            list.appendChild(loadWrap);
+            for (var i = 0; i < 2; i += 1) {
+                var skCard = el('div', { className: twCard() + ' h-full' });
+                var skBody = el('div', { className: twCardBody() + ' animate-pulse space-y-3' });
+                skBody.appendChild(el('div', { className: 'h-4 w-2/3 rounded bg-slate-200' }));
+                skBody.appendChild(el('div', { className: 'h-3 w-1/2 rounded bg-slate-200' }));
+                skBody.appendChild(el('div', { className: 'h-3 w-1/3 rounded bg-slate-200' }));
+                skBody.appendChild(el('div', { className: 'h-8 w-24 rounded bg-slate-200' }));
+                skBody.appendChild(el('div', { className: 'h-8 w-24 rounded bg-slate-200' }));
+                skCard.appendChild(skBody);
+                list.appendChild(skCard);
+            }
+        } else if (!state.apps.length) {
+            var empty = el('div', { className: 'col-span-full text-sm text-slate-500', text: 'Nenhum app encontrado.' });
+            list.appendChild(empty);
+        } else {
+            state.apps.forEach(function (app) {
+                var card = el('div', { className: twCard() + ' h-full' });
+                var body = el('div', { className: twCardBody() + ' flex flex-col gap-2' });
+            var name = el('h5', { className: 'text-lg font-semibold text-slate-900', text: app.tt || app.title || 'Sem título' });
+            var slug = el('div', { className: 'text-sm text-slate-500', text: app.slug ? app.slug + '.workz.co' : 'Sem slug' });
+            var idNote = null;
+            var btn = el('button', { className: twBtn('primary', 'sm', true) + ' mt-3', text: 'Editar', type: 'button' });
+            var dupBtn = el('button', { className: twBtn('secondary', 'sm', true) + ' mt-1', text: 'Duplicar', type: 'button' });
+            var appId = getAppId(app);
+            if (!appId) {
+                idNote = el('div', { className: 'text-xs text-amber-600 mt-2', text: 'Sem id retornado pela API' });
+                btn.setAttribute('aria-disabled', 'true');
+                btn.classList.add('opacity-50');
+                btn.style.cursor = 'not-allowed';
+                btn.addEventListener('click', function () {
+                    log('[AppStudio] Edit click', { appId: appId });
+                    showNotice('App sem id retornado pela API; verifique loadApps().', 'warning');
+                });
+                dupBtn.disabled = true;
+            } else {
+                btn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    log('[AppStudio] Edit click', { appId: appId });
+                    editApp(appId);
+                });
+                dupBtn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    duplicateApp(app);
+                });
+            }
+            body.appendChild(name);
+            body.appendChild(slug);
+            if (idNote) body.appendChild(idNote);
+            body.appendChild(btn);
+            body.appendChild(dupBtn);
+                card.appendChild(body);
+                list.appendChild(card);
+            });
+        }
+        container.appendChild(list);
+        root.appendChild(container);
+    }
+
+    function renderEditor(root) {
+        var container = el('div', { className: twContainer() });
+
+        var header = el('div', { className: twHeaderRow() });
+        var title = el('div');
+        var h3 = el('h3', { className: twTitle(), text: 'Editar app' });
+        var dirty = el('span', { id: 'dirty-indicator', className: 'ml-2 text-sm text-slate-500', text: 'Salvo' });
+        title.appendChild(h3);
+        title.appendChild(dirty);
+        var back = el('button', { className: twBtn('secondary', 'md', true), text: 'Voltar à lista' });
+        back.addEventListener('click', function () { maybeBackToList(); });
+        header.appendChild(title);
+        header.appendChild(back);
+        container.appendChild(header);
+
+        var notice = el('div', { id: 'notice-area' });
+        container.appendChild(notice);
+
+        var topActions = renderActionBar();
+        container.appendChild(topActions);
+
+        if (state.loadingEditor) {
+            var loadingCard = el('div', { className: twCard() + ' mb-4' });
+            var loadingBody = el('div', { className: twCardBody() + ' animate-pulse space-y-3' });
+            loadingBody.appendChild(el('div', { className: 'h-4 w-1/3 rounded bg-slate-200' }));
+            loadingBody.appendChild(el('div', { className: 'h-4 w-2/3 rounded bg-slate-200' }));
+            loadingBody.appendChild(el('div', { className: 'h-4 w-1/2 rounded bg-slate-200' }));
+            loadingBody.appendChild(el('div', { className: 'h-4 w-3/4 rounded bg-slate-200' }));
+            loadingCard.appendChild(loadingBody);
+            container.appendChild(loadingCard);
+            root.appendChild(container);
+            return;
+        }
+
+        var form = el('div', { className: twCard() + ' mb-4' });
+        var body = el('div', { className: twCardBody() });
+
+        body.appendChild(fieldRow('Nome', 'app-title', state.app.title));
+        body.appendChild(fieldRow('Slug', 'app-slug', state.app.slug));
+        body.appendChild(textareaRow('Descrição', 'app-description'));
+        body.appendChild(fieldRow('Versão', 'app-version', state.app.version));
+        var logoWrap = el('div', { className: 'mb-4' });
+        logoWrap.appendChild(el('label', { className: twLabel(), text: 'Logo' }));
+        var logoInput = el('input', { className: twInput(), id: 'app-logo-file', attrs: { type: 'file', accept: 'image/*' } });
+        var logoPreview = el('img', { attrs: { id: 'app-logo-preview', alt: 'Logo preview', style: 'display:none;max-width:120px;max-height:120px;margin-top:8px;border-radius:8px;border:1px solid #eee;' } });
+        if (state.app.logo) {
+            logoPreview.src = state.app.logo;
+            logoPreview.style.display = 'block';
+        }
+        logoWrap.appendChild(logoInput);
+        logoWrap.appendChild(logoPreview);
+        body.appendChild(logoWrap);
+
+        var colorWrap = el('div', { className: 'mb-4' });
+        colorWrap.appendChild(el('label', { className: twLabel(), text: 'Cor' }));
+        var colorInput = el('input', { className: 'h-10 w-20 cursor-pointer rounded-md border border-slate-300 bg-white p-1', id: 'app-color', attrs: { type: 'color' } });
+        colorInput.value = state.app.color || '#000000';
+        colorWrap.appendChild(colorInput);
+        body.appendChild(colorWrap);
+
+        var aspectWrap = el('div', { className: 'mb-4' });
+        aspectWrap.appendChild(el('label', { className: twLabel(), text: 'Aspect ratio' }));
+        var aspectSelect = el('select', { className: twSelect(), id: 'app-aspect-ratio' });
+        ['','4:3','16:9','9:16','1:1','3:4','21:9'].forEach(function (optv) {
+            var o = el('option', { text: optv || 'Padrão', value: optv });
+            aspectSelect.appendChild(o);
+        });
+        aspectSelect.value = state.app.aspectRatio || '';
+        aspectWrap.appendChild(aspectSelect);
+        body.appendChild(aspectWrap);
+
+        var exclusiveWrap = el('div', { className: 'mb-4' });
+        exclusiveWrap.appendChild(el('label', { className: twLabel(), text: 'Exclusivo para negócio' }));
+        var exclusiveSelect = el('select', { className: twSelect(), id: 'app-exclusive-entity' });
+        exclusiveSelect.appendChild(el('option', { text: 'Não exclusivo', value: '' }));
+        if (state.loadingCompanies) {
+            var exclusiveLoading = el('option', { text: 'Carregando negócios...', value: '' });
+            exclusiveLoading.disabled = true;
+            exclusiveSelect.appendChild(exclusiveLoading);
+        }
+        exclusiveSelect.disabled = !!state.loadingCompanies;
+        state.companies.forEach(function (c) {
+            var o = el('option', { text: c.name, value: String(c.id) });
+            if (String(c.id) === String(state.app.exclusiveEntityId)) o.selected = true;
+            exclusiveSelect.appendChild(o);
+        });
+        exclusiveWrap.appendChild(exclusiveSelect);
+        body.appendChild(exclusiveWrap);
+
+        var statusRow = el('div', { className: 'grid grid-cols-1 gap-4 md:grid-cols-3 mb-4' });
+        var statusCol = el('div');
+        statusCol.appendChild(el('label', { className: twLabel(), text: 'Status' }));
+        var statusSelect = el('select', { className: twSelect(), id: 'app-status' });
+        statusSelect.appendChild(el('option', { text: 'Ativo', value: '1' }));
+        statusSelect.appendChild(el('option', { text: 'Inativo', value: '0' }));
+        statusSelect.value = String((state.app.status !== undefined && state.app.status !== null) ? state.app.status : 0);
+        statusCol.appendChild(statusSelect);
+
+        var priceCol = el('div');
+        priceCol.appendChild(el('label', { className: twLabel(), text: 'Valor (R$)' }));
+        var priceInput = el('input', { className: twInput(), id: 'app-price', attrs: { type: 'number', step: '0.01', min: '0' } });
+        priceInput.value = String(state.app.price || 0);
+        priceCol.appendChild(priceInput);
+
+        var orientationCol = el('div');
+        orientationCol.appendChild(el('label', { className: twLabel(), text: 'Orientação' }));
+        var orientationWrap = el('div', { className: 'flex flex-wrap gap-4 mt-1' });
+        var portraitCheck = el('div', { className: 'flex items-center gap-2' });
+        var portraitInput = el('input', { className: twCheckbox(), id: 'app-supports-portrait', type: 'checkbox' });
+        portraitInput.checked = state.app.supportsPortrait !== false;
+        var portraitLabel = el('label', { className: 'text-sm text-slate-700', text: 'Portrait' });
+        portraitLabel.setAttribute('for', 'app-supports-portrait');
+        portraitCheck.appendChild(portraitInput);
+        portraitCheck.appendChild(portraitLabel);
+        var landscapeCheck = el('div', { className: 'flex items-center gap-2' });
+        var landscapeInput = el('input', { className: twCheckbox(), id: 'app-supports-landscape', type: 'checkbox' });
+        landscapeInput.checked = state.app.supportsLandscape !== false;
+        var landscapeLabel = el('label', { className: 'text-sm text-slate-700', text: 'Landscape' });
+        landscapeLabel.setAttribute('for', 'app-supports-landscape');
+        landscapeCheck.appendChild(landscapeInput);
+        landscapeCheck.appendChild(landscapeLabel);
+        orientationWrap.appendChild(portraitCheck);
+        orientationWrap.appendChild(landscapeCheck);
+        orientationCol.appendChild(orientationWrap);
+
+        statusRow.appendChild(statusCol);
+        statusRow.appendChild(priceCol);
+        statusRow.appendChild(orientationCol);
+        body.appendChild(statusRow);
+
+        var companyRow = el('div', { className: 'mb-4' });
+        var companyLabel = el('label', { className: twLabel(), text: 'Empresa (publisher)' });
+        var companySelect = el('select', { className: twSelect(), id: 'company-select' });
+        var opt = el('option', { text: 'Selecionar empresa', value: '' });
+        companySelect.appendChild(opt);
+        if (state.loadingCompanies) {
+            var loadingOpt = el('option', { text: 'Carregando empresas...', value: '' });
+            loadingOpt.disabled = true;
+            companySelect.appendChild(loadingOpt);
+        }
+        companySelect.disabled = !!state.loadingCompanies;
+        state.companies.filter(function (c) {
+            var level = Number(c.nv || 0);
+            return level >= 3 && isValidCnpj(c.cnpj || '');
+        }).forEach(function (c) {
+            var label = c.name || 'Negócio';
+            var cnpj = String(c.cnpj || '').trim();
+            if (cnpj) label += ' — ' + cnpj;
+            var o = el('option', { text: label, value: String(c.id) });
+            if (String(c.id) === String(state.app.companyId)) o.selected = true;
+            companySelect.appendChild(o);
+        });
+        companyRow.appendChild(companyLabel);
+        companyRow.appendChild(companySelect);
+        body.appendChild(companyRow);
+
+        form.appendChild(body);
+        container.appendChild(form);
+
+        var editorCard = el('div', { className: twCard() + ' mb-4', attrs: { id: 'editor-card' } });
+        var editorBody = el('div', { className: twCardBody() + ' editor-card-body' });
+        var editorHeader = el('div', { className: 'flex flex-wrap items-center justify-between gap-3 mb-3' });
+        editorHeader.appendChild(el('h5', { className: twSectionTitle(), text: 'Código' }));
+        var tools = el('div', { className: 'flex flex-wrap gap-2' });
+        var draftBtn = el('button', { className: twBtn('primary', 'sm', true), text: 'Salvar rascunho (Ctrl+S)' });
+        draftBtn.addEventListener('click', function () { saveDraft(); });
+        var discardDraftBtn = el('button', { className: twBtn('danger', 'sm', true), text: 'Descartar rascunho' });
+        discardDraftBtn.addEventListener('click', function () {
+            discardDraftLocal(state.app.id, state.app.slug);
+            showNotice('Rascunho local descartado.', 'info');
+        });
+        var formatBtn = el('button', { className: twBtn('secondary', 'sm', true), text: 'Formatar' });
+        formatBtn.addEventListener('click', function () { formatCode(); });
+        var findBtn = el('button', { className: twBtn('secondary', 'sm', true), text: 'Buscar' });
+        findBtn.addEventListener('click', function () { runEditorFind(); });
+        var replaceBtn = el('button', { className: twBtn('secondary', 'sm', true), text: 'Substituir' });
+        replaceBtn.addEventListener('click', function () { runEditorReplace(); });
+        var wrapBtn = el('button', { className: twBtn('secondary', 'sm', true), text: 'Quebra: Desl.', attrs: { id: 'editor-wrap-toggle' } });
+        wrapBtn.addEventListener('click', function () { toggleEditorWrap(); });
+        var fullscreenBtn = el('button', { className: twBtn('secondary', 'sm', true), text: 'Tela cheia', attrs: { id: 'editor-fullscreen-toggle' } });
+        fullscreenBtn.addEventListener('click', function () { toggleEditorFullscreen(); });
+        tools.appendChild(draftBtn);
+        tools.appendChild(discardDraftBtn);
+        tools.appendChild(formatBtn);
+        tools.appendChild(findBtn);
+        tools.appendChild(replaceBtn);
+        tools.appendChild(wrapBtn);
+        tools.appendChild(fullscreenBtn);
+        editorHeader.appendChild(el('span', { className: twMuted(), text: 'IDE' }));
+        editorBody.appendChild(editorHeader);
+
+        var editorToolbar = el('div', { className: 'mb-3' });
+        editorToolbar.appendChild(tools);
+        editorBody.appendChild(editorToolbar);
+
+        var warning = el('div', { id: 'editor-warning', className: twAlert('warning') + ' hidden' });
+        warning.textContent = 'Falha ao carregar o CodeMirror. Edição e preview desabilitados.';
+        editorBody.appendChild(warning);
+
+        var editorContainer = el('div', { id: 'code-editor-container', className: 'rounded-md border border-slate-200' });
+        var textarea = el('textarea', { id: 'app-code', className: twTextarea(), attrs: { rows: '14' } });
+        textarea.value = state.app.code || '';
+        editorContainer.appendChild(textarea);
+        editorBody.appendChild(editorContainer);
+        editorCard.appendChild(editorBody);
+        container.appendChild(editorCard);
+
+        var manifestCard = el('div', { className: twCard() + ' mb-4' });
+        var manifestBody = el('div', { className: twCardBody() });
+        var manifestHeader = el('div', { className: 'flex flex-wrap items-center justify-between gap-3 mb-4' });
+        manifestHeader.appendChild(el('h5', { className: twSectionTitle(), text: 'Manifesto (PIPE)' }));
+        var resetBtn = el('button', { className: twBtn('secondary', 'sm', true), text: 'Resetar manifesto' });
+        resetBtn.addEventListener('click', function () {
+            if (!confirm('Resetar manifest para os padrões?')) return;
+            state.app.manifest = getDefaultAppManifest();
+            writeManifestToForm();
+            setDirty(true);
+            scheduleValidate();
+        });
+        manifestHeader.appendChild(resetBtn);
+        manifestBody.appendChild(manifestHeader);
+
+        var ctxRow = el('div', { className: 'grid grid-cols-1 gap-4 md:grid-cols-2 mb-4' });
+        var ctxCol = el('div');
+        ctxCol.appendChild(el('label', { className: twLabel(), text: 'Modo de contexto' }));
+        var ctxSelect = el('select', { className: twSelect(), id: 'manifest-context-mode' });
+        ['user', 'business', 'team', 'hybrid'].forEach(function (mode) {
+            var o = el('option', { text: mode, value: mode });
+            ctxSelect.appendChild(o);
+        });
+        ctxCol.appendChild(ctxSelect);
+        var ctxSwitchCol = el('div');
+        var ctxCheck = el('div', { className: 'flex items-center gap-2 mt-6' });
+        var ctxInput = el('input', { className: twCheckbox(), id: 'manifest-allow-context-switch', type: 'checkbox' });
+        var ctxLabel = el('label', { className: 'text-sm text-slate-700', text: 'Permitir troca de contexto' });
+        ctxLabel.setAttribute('for', 'manifest-allow-context-switch');
+        ctxCheck.appendChild(ctxInput);
+        ctxCheck.appendChild(ctxLabel);
+        ctxSwitchCol.appendChild(ctxCheck);
+        ctxRow.appendChild(ctxCol);
+        ctxRow.appendChild(ctxSwitchCol);
+        manifestBody.appendChild(ctxRow);
+
+        manifestBody.appendChild(textareaRow('Allowlist de API (uma por linha)', 'manifest-api-allow'));
+        manifestBody.appendChild(textareaRow('Eventos (publish)', 'manifest-events-publish'));
+        manifestBody.appendChild(textareaRow('Eventos (subscribe)', 'manifest-events-subscribe'));
+        manifestBody.appendChild(textareaRow('Origens permitidas (sem "*", uma por linha)', 'manifest-origins'));
+        manifestBody.appendChild(textareaRow('Fontes de proxy (uma por linha)', 'manifest-proxy-sources'));
+
+        var docsRow = el('div', { className: 'grid grid-cols-1 gap-4 md:grid-cols-3 mb-4' });
+        var docsCol = el('div');
+        var docsCheck = el('div', { className: 'flex items-center gap-2 mt-6' });
+        var docsInput = el('input', { className: twCheckbox(), id: 'manifest-docs-enabled', type: 'checkbox' });
+        var docsLabel = el('label', { className: 'text-sm text-slate-700', text: 'Ativar docs' });
+        docsLabel.setAttribute('for', 'manifest-docs-enabled');
+        docsCheck.appendChild(docsInput);
+        docsCheck.appendChild(docsLabel);
+        docsCol.appendChild(docsCheck);
+
+        var docsTypesCol = el('div');
+        docsTypesCol.appendChild(el('label', { className: twLabel(), text: 'Tipos de docs (um por linha)' }));
+        docsTypesCol.appendChild(el('textarea', { className: twTextarea(), id: 'manifest-docs-types', attrs: { rows: '3' } }));
+
+        var scopeCol = el('div');
+        scopeCol.appendChild(el('label', { className: twLabel(), text: 'Escopo de armazenamento' }));
+        var scopeSelect = el('select', { className: twSelect(), id: 'manifest-storage-scope' });
+        ['context', 'user'].forEach(function (optv) {
+            var o = el('option', { text: optv, value: optv });
+            scopeSelect.appendChild(o);
+        });
+        scopeCol.appendChild(scopeSelect);
+
+        docsRow.appendChild(docsCol);
+        docsRow.appendChild(docsTypesCol);
+        docsRow.appendChild(scopeCol);
+        manifestBody.appendChild(docsRow);
+
+        var kvRow = el('div', { className: 'grid grid-cols-1 gap-4 md:grid-cols-2 mb-3' });
+        kvRow.appendChild(checkRow('manifest-kv-enabled', 'Ativar KV'));
+        kvRow.appendChild(checkRow('manifest-blobs-enabled', 'Ativar Blobs'));
+        manifestBody.appendChild(kvRow);
+
+        var errors = el('div', { id: 'validation-errors', className: twAlert('danger') + ' hidden' });
+        manifestBody.appendChild(errors);
+        var summary = el('div', { id: 'capabilities-summary', className: 'text-xs text-slate-500' });
+        manifestBody.appendChild(summary);
+
+        manifestCard.appendChild(manifestBody);
+        container.appendChild(manifestCard);
+
+        root.appendChild(container);
+
+        bindEditorForm();
+        writeManifestToForm();
+        setTimeout(function () {
+            restoreDraftIfNeeded();
+            initEditor();
+            renderDirtyIndicator();
+            validateForm();
+        }, 0);
+    }
+
+    function fieldRow(labelText, id, value) {
+        var wrap = el('div', { className: 'mb-4' });
+        var label = el('label', { className: twLabel(), text: labelText });
+        label.setAttribute('for', id);
+        var input = el('input', { className: twInput(), id: id });
+        input.value = value || '';
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        return wrap;
+    }
+
+    function textareaRow(labelText, id) {
+        var wrap = el('div', { className: 'mb-4' });
+        var label = el('label', { className: twLabel(), text: labelText });
+        label.setAttribute('for', id);
+        var input = el('textarea', { className: twTextarea(), id: id, attrs: { rows: '3' } });
+        if (id === 'app-description') {
+            input.value = state.app.description || '';
+        }
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        return wrap;
+    }
+
+    function checkRow(id, labelText) {
+        var col = el('div');
+        var check = el('div', { className: 'flex items-center gap-2 mt-6' });
+        var input = el('input', { className: twCheckbox(), id: id, type: 'checkbox' });
+        var label = el('label', { className: 'text-sm text-slate-700', text: labelText });
+        label.setAttribute('for', id);
+        check.appendChild(input);
+        check.appendChild(label);
+        col.appendChild(check);
+        return col;
+    }
+
+    function renderActionBar() {
+        var actions = el('div', { className: twCard() + ' mb-4 sticky top-2 z-20', attrs: { style: 'z-index: 1020;' } });
+        var body = el('div', { className: twCardBody() + ' flex flex-wrap gap-2 items-center' });
+        var saveBtn = el('button', { className: twBtn('success'), text: 'Salvar no servidor' });
+        saveBtn.addEventListener('click', function () { saveApp(); });
+        var previewBtn = el('button', { className: twBtn('primary', 'md', true), text: 'Pré-visualizar (Ctrl+Enter)' });
+        previewBtn.addEventListener('click', function () { showPreview(); });
+        var previewTabBtn = el('button', { className: twBtn('primary', 'md', true), text: 'Abrir preview em nova aba' });
+        previewTabBtn.addEventListener('click', function () { openPreviewInNewTab(); });
+        var importBtn = el('button', { className: twBtn('secondary', 'md', true), text: 'Importar JSON' });
+        var importInput = el('input', { attrs: { type: 'file', accept: 'application/json', style: 'display:none' } });
+        importBtn.addEventListener('click', function () { importInput.click(); });
+        importInput.addEventListener('change', function (e) {
+            var file = e.target.files && e.target.files[0];
+            if (file) importJsonFile(file);
+            e.target.value = '';
+        });
+        var exportBtn = el('button', { className: twBtn('secondary', 'md', true), text: 'Exportar JSON' });
+        exportBtn.addEventListener('click', function () { exportApp(); });
+        var deleteBtn = el('button', { className: twBtn('danger', 'md', true) + ' ml-auto', text: 'Excluir' });
+        deleteBtn.addEventListener('click', function () { deleteApp(); });
+        body.appendChild(saveBtn);
+        body.appendChild(previewBtn);
+        body.appendChild(previewTabBtn);
+        body.appendChild(importBtn);
+        body.appendChild(exportBtn);
+        body.appendChild(importInput);
+        body.appendChild(deleteBtn);
+        actions.appendChild(body);
+        return actions;
+    }
+
+    // === EDITOR ===
+    function ensureEditorStyles() {
+        if (document.getElementById('editor-ide-styles')) return;
+        var style = document.createElement('style');
+        style.id = 'editor-ide-styles';
+        style.textContent = [
+            'body.cm-fullscreen { overflow: hidden; }',
+            '#editor-card.cm-fullscreen { position: fixed; inset: 0; margin: 0; border-radius: 0; z-index: 1050; }',
+            '#editor-card.cm-fullscreen .editor-card-body { height: 100%; display: flex; flex-direction: column; }',
+            '#editor-card.cm-fullscreen #code-editor-container { flex: 1; }',
+            '#editor-card.cm-fullscreen .CodeMirror { height: 100%; }'
+        ].join('\n');
+        document.head.appendChild(style);
+    }
+
+    function updateWrapButton() {
+        var btn = qs('#editor-wrap-toggle');
+        if (!btn) return;
+        btn.textContent = state.editorWrap ? 'Quebra: Lig.' : 'Quebra: Desl.';
+    }
+
+    function updateFullscreenButton() {
+        var btn = qs('#editor-fullscreen-toggle');
+        if (!btn) return;
+        btn.textContent = state.editorFullscreen ? 'Sair da tela cheia' : 'Tela cheia';
+    }
+
+    function toggleEditorWrap(force) {
+        if (typeof force === 'boolean') {
+            state.editorWrap = force;
+        } else {
+            state.editorWrap = !state.editorWrap;
+        }
+        if (cm) cm.setOption('lineWrapping', state.editorWrap);
+        updateWrapButton();
+    }
+
+    function toggleEditorFullscreen(force) {
+        if (typeof force === 'boolean') {
+            state.editorFullscreen = force;
+        } else {
+            state.editorFullscreen = !state.editorFullscreen;
+        }
+        ensureEditorStyles();
+        var card = qs('#editor-card');
+        if (card) {
+            if (state.editorFullscreen) {
+                card.classList.add('cm-fullscreen');
+                document.body.classList.add('cm-fullscreen');
+            } else {
+                card.classList.remove('cm-fullscreen');
+                document.body.classList.remove('cm-fullscreen');
+            }
+        }
+        if (cm) {
+            try { cm.setOption('fullScreen', state.editorFullscreen); } catch (_) {}
+            setTimeout(function () { cm.refresh(); }, 50);
+        }
+        updateFullscreenButton();
+    }
+
+    function fallbackFind() {
+        if (!cm) return;
+        var query = prompt('Buscar');
+        if (!query) return;
+        var text = cm.getValue();
+        var start = cm.indexFromPos(cm.getCursor('to'));
+        var idx = text.indexOf(query, start);
+        if (idx === -1) idx = text.indexOf(query);
+        if (idx === -1) return;
+        var from = cm.posFromIndex(idx);
+        var to = cm.posFromIndex(idx + query.length);
+        cm.setSelection(from, to);
+        cm.focus();
+    }
+
+    function runEditorFind() {
+        if (cm && typeof cm.execCommand === 'function') {
+            try {
+                cm.execCommand('findPersistent');
+                return;
+            } catch (_) {}
+        }
+        fallbackFind();
+    }
+
+    function runEditorReplace() {
+        if (cm && typeof cm.execCommand === 'function') {
+            try {
+                cm.execCommand('replace');
+                return;
+            } catch (_) {}
+        }
+        fallbackFind();
+    }
+
+    function initEditor() {
+        destroyEditor();
+        if (state.editorDisabled) {
+            var warning = qs('#editor-warning');
+            if (warning) warning.classList.remove('hidden');
+            var area = qs('#app-code');
+            if (area) area.disabled = true;
+            return;
+        }
+        var textarea = qs('#app-code');
+        if (!textarea) return;
+        if (typeof window.CodeMirror === 'undefined') {
+            state.editorDisabled = true;
+            initEditor();
+            return;
+        }
+        ensureEditorStyles();
+        cm = window.CodeMirror.fromTextArea(textarea, {
+            lineNumbers: true,
+            mode: 'javascript',
+            theme: 'monokai',
+            tabSize: 2,
+            indentWithTabs: false,
+            lineWrapping: state.editorWrap,
+            autofocus: true,
+            matchBrackets: true,
+            autoCloseBrackets: true,
+            styleActiveLine: true,
+            extraKeys: {
+                'Ctrl-F': runEditorFind,
+                'Cmd-F': runEditorFind,
+                'Ctrl-H': runEditorReplace,
+                'Cmd-Alt-F': runEditorReplace,
+                'Ctrl-G': 'findNext',
+                'Shift-Ctrl-G': 'findPrev',
+                'Ctrl-/': 'toggleComment',
+                'Cmd-/': 'toggleComment',
+                'Alt-Z': function () { toggleEditorWrap(); },
+                'F11': function () { toggleEditorFullscreen(); },
+                'Esc': function () { if (state.editorFullscreen) toggleEditorFullscreen(false); }
+            }
+        });
+        cm.setValue(state.app.code || '');
+        cm.on('change', function (instance) {
+            state.app.code = instance.getValue();
+            setDirty(true);
+            scheduleValidate();
+            scheduleDraftSave();
+        });
+        state.editorReady = true;
+        updateWrapButton();
+        updateFullscreenButton();
+        setTimeout(function () { cm.refresh(); }, 50);
+    }
+
+    function destroyEditor() {
+        if (cm) {
+            try { cm.toTextArea(); } catch (_) {}
+            cm = null;
+        }
+        state.editorReady = false;
+        if (state.editorFullscreen) {
+            state.editorFullscreen = false;
+            var card = qs('#editor-card');
+            if (card) card.classList.remove('cm-fullscreen');
+            document.body.classList.remove('cm-fullscreen');
+        }
+    }
+
+    function formatCode() {
+        var code = state.app.code || '';
+        var formatted = code.replace(/[ \t]+$/gm, '').trim() + '\n';
+        state.app.code = formatted;
+        if (cm) {
+            cm.setValue(formatted);
+        } else {
+            var area = qs('#app-code');
+            if (area) area.value = formatted;
+        }
+        setDirty(true);
+    }
+
+    function saveDraft() {
+        if (state.editorDisabled) return;
+        if (cm) state.app.code = cm.getValue();
+        saveDraftLocal(state.app.id, state.app.slug, buildDraftPayload());
+        showNotice('Rascunho salvo localmente (nao enviado ao servidor).', 'info');
+        setTimeout(function () { showNotice('', ''); }, 1500);
+    }
+
+    function scheduleValidate() {
+        if (!debouncedValidate) debouncedValidate = debounce(validateForm, 120);
+        debouncedValidate();
+    }
+
+    function buildDraftPayload() {
+        return {
+            code: state.app.code || '',
+            manifest: state.app.manifest || {},
+            meta: {
+                title: state.app.title || '',
+                slug: state.app.slug || '',
+                version: state.app.version || ''
+            },
+            ts: Date.now()
+        };
+    }
+
+    function scheduleDraftSave() {
+        if (state.view !== 'editor') return;
+        if (!debouncedDraftSave) debouncedDraftSave = debounce(saveDraftAuto, 800);
+        debouncedDraftSave();
+    }
+
+    function saveDraftAuto() {
+        if (state.editorDisabled) return;
+        var payload = buildDraftPayload();
+        saveDraftLocal(state.app.id, state.app.slug, payload);
+    }
+
+    function restoreDraftIfNeeded() {
+        var draft = loadDraftLocal(state.app.id, state.app.slug);
+        if (!draft || typeof draft !== 'object') return;
+        var current = buildDraftPayload();
+        var draftCode = String(draft.code || '');
+        var currCode = String(current.code || '');
+        var draftManifest = JSON.stringify(draft.manifest || {});
+        var currManifest = JSON.stringify(current.manifest || {});
+        var draftMeta = JSON.stringify(draft.meta || {});
+        var currMeta = JSON.stringify(current.meta || {});
+        if (draftCode === currCode && draftManifest === currManifest && draftMeta === currMeta) {
+            return;
+        }
+        var ok = confirm('Encontramos um rascunho local diferente. Deseja restaurar?');
+        if (!ok) return;
+        state.app.code = draft.code || '';
+        if (draft.manifest && typeof draft.manifest === 'object') {
+            state.app.manifest = draft.manifest;
+        }
+        if (draft.meta && typeof draft.meta === 'object') {
+            state.app.title = sanitizeTitle(draft.meta.title || '');
+            state.app.slug = sanitizeSlug(draft.meta.slug || '');
+            state.app.version = String(draft.meta.version || '').trim();
+        }
+        var titleField = qs('#app-title');
+        var slugField = qs('#app-slug');
+        var descField = qs('#app-description');
+        var versionField = qs('#app-version');
+        var logoField = qs('#app-logo-file');
+        var logoPreview = qs('#app-logo-preview');
+        var colorField = qs('#app-color');
+        var statusField = qs('#app-status');
+        var priceField = qs('#app-price');
+        var aspectField = qs('#app-aspect-ratio');
+        var portraitField = qs('#app-supports-portrait');
+        var landscapeField = qs('#app-supports-landscape');
+        var exclusiveField = qs('#app-exclusive-entity');
+        if (titleField) titleField.value = state.app.title;
+        if (slugField) slugField.value = state.app.slug;
+        if (descField) descField.value = state.app.description || '';
+        if (versionField) versionField.value = state.app.version;
+        if (logoPreview && state.app.logo) {
+            logoPreview.src = state.app.logo;
+            logoPreview.style.display = 'block';
+        }
+        if (colorField) colorField.value = state.app.color || '';
+        if (statusField) statusField.value = String((state.app.status !== undefined && state.app.status !== null) ? state.app.status : 0);
+        if (priceField) priceField.value = String(state.app.price || 0);
+        if (aspectField) aspectField.value = state.app.aspectRatio || '';
+        if (portraitField) portraitField.checked = state.app.supportsPortrait !== false;
+        if (landscapeField) landscapeField.checked = state.app.supportsLandscape !== false;
+        if (exclusiveField) exclusiveField.value = state.app.exclusiveEntityId || '';
+        writeManifestToForm();
+        setDirty(true);
+        showNotice('Rascunho local restaurado.', 'info');
+    }
+
+    // === MANIFEST ===
+    function validateForm() {
+        var errors = [];
+        var warnings = [];
+        var title = sanitizeTitle(state.app.title);
+        var slug = sanitizeSlug(state.app.slug);
+        if (!title) errors.push('Nome é obrigatório.');
+        if (!slug) errors.push('Slug é obrigatório (a-z, 0-9, hífen).');
+        if (slug.length > 40) errors.push('Slug está muito longo.');
+        readManifestFromForm();
+        var norm = normalizeManifestFromState();
+        if (!norm.ok) errors.push(norm.error);
+        var code = cm ? cm.getValue() : (qs('#app-code') ? qs('#app-code').value : state.app.code);
+        if (code) {
+            var apiHints = /\/me\b|WorkzSDK\.api|apiClient/i.test(code);
+            var allow = (state.app.manifest.capabilities && state.app.manifest.capabilities.api && Array.isArray(state.app.manifest.capabilities.api.allow))
+                ? state.app.manifest.capabilities.api.allow
+                : [];
+            var hasGetMe = allow.some(function (entry) {
+                return String(entry || '').toLowerCase().replace(/\s+/g, ' ').trim() === 'get /me';
+            });
+            if (apiHints && !hasGetMe) {
+                warnings.push('Code parece chamar API (/me ou WorkzSDK.api); confira manifest.capabilities.api.allow (ex.: GET /me).');
+            }
+            if (/WorkzSDK\.emit\s*\(|events\.publish\s*\(/i.test(code)) {
+                warnings.push('Code parece emitir eventos; confira manifest.capabilities.events.publish.');
+            }
+            if (/WorkzSDK\.on\s*\(|events\.on\s*\(/i.test(code)) {
+                warnings.push('Code parece assinar eventos; confira manifest.capabilities.events.subscribe.');
+            }
+            if (/WorkzSDK\.storage|WorkzApp\.storage|storage\./i.test(code)) {
+                warnings.push('Code parece usar storage; confira manifest.capabilities.storage (kv/docs/blobs).');
+            }
+            if (/docs\./i.test(code)) {
+                warnings.push('Code parece usar docs; confira manifest.capabilities.storage.docs e docs.types.');
+            }
+            if (/blobs\./i.test(code)) {
+                warnings.push('Code parece usar blobs; confira manifest.capabilities.storage.blobs.');
+            }
+        }
+        updateCapabilitiesSummary();
+        updateValidationErrors(errors, warnings);
+        var box = qs('#validation-errors');
+        if (box) {
+            if (errors.length || warnings.length) box.classList.remove('hidden');
+            else box.classList.add('hidden');
+        }
+        return errors.length === 0;
+    }
+
+    // MVP-Plus #9 — Manifest UI essencial (sem complicar)
+    function updateCapabilitiesSummary() {
+        var el = qs('#capabilities-summary');
+        if (!el) return;
+        var caps = state.app.manifest.capabilities || {};
+        var apiCount = (caps.api && Array.isArray(caps.api.allow)) ? caps.api.allow.length : 0;
+        var docsEnabled = caps.storage && caps.storage.docs && caps.storage.docs.enabled;
+        var docsTypes = (caps.storage && caps.storage.docs && Array.isArray(caps.storage.docs.types)) ? caps.storage.docs.types.length : 0;
+        var kv = caps.storage && caps.storage.kv ? 'KV' : '';
+        var blobs = caps.storage && caps.storage.blobs ? 'Blobs' : '';
+        var scope = (caps.storage && caps.storage.scope) ? caps.storage.scope : 'context';
+        var pub = (caps.events && Array.isArray(caps.events.publish)) ? caps.events.publish.length : 0;
+        var sub = (caps.events && Array.isArray(caps.events.subscribe)) ? caps.events.subscribe.length : 0;
+        var proxyCount = (caps.proxy && Array.isArray(caps.proxy.sources)) ? caps.proxy.sources.length : 0;
+        var mode = (state.app.manifest.contextRequirements && state.app.manifest.contextRequirements.mode) ? state.app.manifest.contextRequirements.mode : 'user';
+        var parts = [
+            'Contexto: ' + mode,
+            'API: ' + apiCount,
+            'Storage: ' + [kv, blobs].filter(Boolean).join(' ') + ' (' + scope + ')',
+            'Docs: ' + (docsEnabled ? ('ativo, ' + docsTypes + ' tipos') : 'inativo'),
+            'Eventos: ' + pub + '/' + sub,
+            'Proxy: ' + proxyCount
+        ];
+        el.textContent = parts.join(' | ');
+    }
+
+    // === EVENTS ===
+    function bindEditorForm() {
+        var titleInput = qs('#app-title');
+        var slugInput = qs('#app-slug');
+        var descInput = qs('#app-description');
+        var verInput = qs('#app-version');
+        var logoInput = qs('#app-logo-file');
+        var logoPreview = qs('#app-logo-preview');
+        var colorInput = qs('#app-color');
+        var statusInput = qs('#app-status');
+        var priceInput = qs('#app-price');
+        var aspectInput = qs('#app-aspect-ratio');
+        var portraitInput = qs('#app-supports-portrait');
+        var landscapeInput = qs('#app-supports-landscape');
+        var exclusiveInput = qs('#app-exclusive-entity');
+        var companySelect = qs('#company-select');
+
+        if (titleInput && !titleInput.dataset.bound) {
+            titleInput.addEventListener('input', function (e) {
+                var value = sanitizeTitle(e.target.value);
+                state.app.title = value;
+                e.target.value = value;
+                if (!state.slugTouched) {
+                    var s = sanitizeSlug(value);
+                    state.app.slug = s;
+                    if (slugInput) slugInput.value = s;
                 }
-                if (out.length > 30) break;
-            }
-            return out;
-        } catch (_) { return []; }
-    },
-
-    // Escapa HTML para exibição segura em <pre> e itens
-    escapeHtml(s) {
-        return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-    },
-
-    renderPlatformBuild(build) {
-        const platformIcons = {
-            'web': 'fas fa-globe text-info',
-            'android': 'fab fa-android text-success',
-            'ios': 'fas fa-mobile-alt text-primary',
-            'windows': 'fab fa-windows text-info',
-            'macos': 'fab fa-apple text-secondary',
-            'linux': 'fab fa-linux text-warning'
-        };
-
-        const statusColors = {
-            'success': 'text-success',
-            'failed': 'text-danger',
-            'building': 'text-info',
-            'pending': 'text-warning'
-        };
-
-        const icon = platformIcons[build.platform] || 'fas fa-desktop';
-        const statusColor = statusColors[build.status] || 'text-muted';
-
-        return `
-            <div class="col-md-6 mb-3">
-                <div class="card">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <h6 class="mb-1">
-                                    <i class="${icon}"></i> ${build.platform.charAt(0).toUpperCase() + build.platform.slice(1)}
-                                </h6>
-                                <small class="text-muted">v${build.build_version || '1.0.0'}</small>
-                            </div>
-                            <div class="text-end">
-                                <div class="${statusColor}">
-                                    <i class="fas fa-circle"></i> ${build.status}
-                                </div>
-                                ${build.download_url ? `
-                                    <a href="${build.download_url}" class="btn btn-sm btn-outline-primary mt-1" download>
-                                        <i class="fas fa-download"></i>
-                                    </a>
-                                ` : ''}
-                                ${build.store_url ? `
-                                    <a href="${build.store_url}" class="btn btn-sm btn-outline-success mt-1" target="_blank">
-                                        <i class="fas fa-store"></i>
-                                    </a>
-                                ` : ''}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    async showArtifacts(appId) {
-        try {
-            const response = await this.getBuildStatusCompat(appId);
-            if (response && response.success && response.data) {
-                this.displayArtifactsModal(response.data);
-            }
-        } catch (e) {
-            console.error("Erro ao carregar artefatos:", e);
-            alert("Erro ao carregar artefatos: " + e.message);
-        }
-    },
-
-    displayArtifactsModal(buildData) {
-        const modalHtml = `
-            <div class="modal fade" id="artifactsModal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">
-                                <i class="fas fa-download"></i> Downloads e Artefatos
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            ${this.renderArtifactsContent(buildData)}
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                            <button type="button" class="btn btn-primary" onclick="StoreApp.downloadAllArtifacts(${buildData.app_id})">
-                                <i class="fas fa-download"></i> Baixar Todos
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        this.showModal(modalHtml, 'artifactsModal');
-    },
-
-    renderArtifactsContent(buildData) {
-        if (!buildData.builds || buildData.builds.length === 0) {
-            return `
-                <div class="text-center py-4">
-                    <i class="fas fa-box-open fa-3x text-muted mb-3"></i>
-                    <h5 class="text-muted">Nenhum artefato disponível</h5>
-                    <p class="text-muted">Execute um build para gerar os artefatos de download.</p>
-                </div>
-            `;
+                setDirty(true);
+                scheduleValidate();
+                scheduleDraftSave();
+            });
+            titleInput.dataset.bound = '1';
         }
 
-        return `
-            <div class="artifacts-grid">
-                ${buildData.builds.map(build => this.renderArtifactCard(build)).join('')}
-            </div>
-            
-            <div class="mt-4">
-                <h6>Informações de Deploy:</h6>
-                <div class="deploy-info">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <small class="text-muted">
-                                <strong>Última compilação:</strong><br>
-                                ${this.formatDateTime(buildData.compiled_at)}
-                            </small>
-                        </div>
-                        <div class="col-md-6">
-                            <small class="text-muted">
-                                <strong>Status geral:</strong><br>
-                                <span class="badge bg-${buildData.build_status === 'success' ? 'success' : 'warning'}">
-                                    ${buildData.build_status}
-                                </span>
-                            </small>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    renderArtifactCard(build) {
-        const platformInfo = {
-            'web': { name: 'Web App', icon: 'fas fa-globe', color: 'primary', ext: 'zip' },
-            'android': { name: 'Android APK', icon: 'fab fa-android', color: 'success', ext: 'apk' },
-            'ios': { name: 'iOS IPA', icon: 'fas fa-mobile-alt', color: 'info', ext: 'ipa' },
-            'windows': { name: 'Windows EXE', icon: 'fab fa-windows', color: 'info', ext: 'exe' },
-            'macos': { name: 'macOS App', icon: 'fab fa-apple', color: 'secondary', ext: 'dmg' },
-            'linux': { name: 'Linux AppImage', icon: 'fab fa-linux', color: 'warning', ext: 'appimage' }
-        };
-
-        const info = platformInfo[build.platform] || { name: build.platform, icon: 'fas fa-desktop', color: 'secondary', ext: 'zip' };
-
-        return `
-            <div class="artifact-card mb-3">
-                <div class="card">
-                    <div class="card-body">
-                        <div class="row align-items-center">
-                            <div class="col-md-8">
-                                <div class="d-flex align-items-center">
-                                    <div class="artifact-icon me-3">
-                                        <i class="${info.icon} fa-2x text-${info.color}"></i>
-                                    </div>
-                                    <div>
-                                        <h6 class="mb-1">${info.name}</h6>
-                                        <small class="text-muted">
-                                            Versão ${build.build_version || '1.0.0'} • 
-                                            ${this.formatDate(build.created_at)}
-                                        </small>
-                                        <div class="mt-1">
-                                            <span class="badge bg-${build.status === 'success' ? 'success' : 'warning'}">
-                                                ${build.status}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4 text-end">
-                                ${build.download_url ? `
-                                    <a href="${build.download_url}" class="btn btn-outline-primary btn-sm mb-1" download>
-                                        <i class="fas fa-download"></i> Download
-                                    </a>
-                                ` : ''}
-                                ${build.store_url ? `
-                                    <a href="${build.store_url}" class="btn btn-outline-success btn-sm mb-1" target="_blank">
-                                        <i class="fas fa-store"></i> Loja
-                                    </a>
-                                ` : ''}
-                                <div>
-                                    <small class="text-muted">
-                                        ${this.getFileSizeEstimate(build.platform)}
-                                    </small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    async showBuildHistory(appId) { // Corrigido para buscar dados reais
-        this.showModal(`
-            <div class="modal fade" id="buildHistoryModal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">
-                                <i class="fas fa-history"></i> Histórico de Builds
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div id="build-history-content" class="text-center p-4">
-                                <i class="fas fa-spinner fa-spin fa-2x text-muted"></i>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                            <button type="button" class="btn btn-primary" onclick="StoreApp.triggerNewBuild(${appId})">
-                                <i class="fas fa-hammer"></i> Novo Build
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `, 'buildHistoryModal');
-
-        try {
-            // Simula uma chamada de API para buscar o histórico real
-            const response = await this.apiGet(`/apps/${appId}/build-history`); // Endpoint hipotético
-            const historyContentEl = document.getElementById('build-history-content');
-            if (response && response.success) {
-                historyContentEl.innerHTML = this.renderBuildHistoryContent(response.data);
-            } else {
-                historyContentEl.innerHTML = '<div class="alert alert-warning">Não foi possível carregar o histórico de builds.</div>';
-            }
-        } catch (e) {
-            const historyContentEl = document.getElementById('build-history-content');
-            historyContentEl.innerHTML = `<div class="alert alert-danger">Erro ao carregar histórico: ${e.message}</div>`;
+        if (slugInput && !slugInput.dataset.bound) {
+            slugInput.addEventListener('input', function (e) {
+                state.slugTouched = true;
+                var value = sanitizeSlug(e.target.value);
+                state.app.slug = value;
+                e.target.value = value;
+                setDirty(true);
+                scheduleValidate();
+                scheduleDraftSave();
+            });
+            slugInput.dataset.bound = '1';
         }
-    },
 
-    renderBuildHistoryContent(buildHistory) { // Corrigido para receber dados
-        if (!buildHistory || buildHistory.length === 0) {
-            return '<div class="text-center p-4 text-muted">Nenhum histórico de build encontrado.</div>';
+        if (descInput && !descInput.dataset.bound) {
+            descInput.addEventListener('input', function (e) {
+                state.app.description = String(e.target.value || '');
+                setDirty(true);
+                scheduleDraftSave();
+            });
+            descInput.dataset.bound = '1';
         }
-        return `
-            <div class="build-history-list">
-                ${buildHistory.map(build => this.renderBuildHistoryItem(build)).join('')}
-            </div>
-        `;
-    },
 
-    renderBuildHistoryItem(build) {
-        const statusConfig = {
-            'success': { class: 'text-success', icon: 'fa-check-circle' },
-            'failed': { class: 'text-danger', icon: 'fa-times-circle' },
-            'building': { class: 'text-info', icon: 'fa-spinner fa-spin' }
-        };
-
-        const config = statusConfig[build.status] || statusConfig['success'];
-
-        return `
-            <div class="build-history-item mb-3">
-                <div class="card">
-                    <div class="card-body">
-                        <div class="row align-items-center">
-                            <div class="col-md-8">
-                                <div class="d-flex align-items-start">
-                                    <div class="build-status-icon me-3">
-                                        <i class="fas ${config.icon} ${config.class} fa-lg"></i>
-                                    </div>
-                                    <div>
-                                        <h6 class="mb-1">
-                                            Build v${build.version}
-                                            <span class="badge bg-secondary ms-2">${build.status}</span>
-                                        </h6>
-                                        <p class="mb-1 text-muted">${build.commit_message}</p>
-                                        <small class="text-muted">
-                                            <i class="fas fa-code-branch"></i> ${build.commit_hash} • 
-                                            <i class="fas fa-clock"></i> ${build.duration} • 
-                                            <i class="fas fa-calendar"></i> ${this.formatDateTime(build.created_at)}
-                                        </small>
-                                        ${build.error ? `
-                                            <div class="mt-2">
-                                                <small class="text-danger">
-                                                    <i class="fas fa-exclamation-triangle"></i> ${build.error}
-                                                </small>
-                                            </div>
-                                        ` : ''}
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4 text-end">
-                                <div class="platform-badges mb-2">
-                                    ${build.platforms.map(platform => `
-                                        <span class="badge bg-light text-dark me-1">
-                                            <i class="fas fa-${platform === 'web' ? 'globe' : platform === 'android' ? 'robot' : 'mobile-alt'}"></i>
-                                            ${platform}
-                                        </span>
-                                    `).join('')}
-                                </div>
-                                <div class="build-actions">
-                                    <button class="btn btn-sm btn-outline-info" onclick="StoreApp.viewBuildDetails(${build.id})">
-                                        <i class="fas fa-eye"></i> Detalhes
-                                    </button>
-                                    ${build.status === 'success' ? `
-                                        <button class="btn btn-sm btn-outline-success" onclick="StoreApp.downloadBuildArtifacts(${build.id})">
-                                            <i class="fas fa-download"></i>
-                                        </button>
-                                    ` : ''}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-    },
-
-    // Build action methods
-    async retryBuild(appId) {
-        try {
-            // Simulate build retry
-            this.showToast('Build reiniciado com sucesso!', 'info');
-            bootstrap.Modal.getInstance(document.getElementById('buildStatusModal')).hide();
-        } catch (e) {
-            console.error('Error retrying build:', e);
-            this.showToast('Erro ao reiniciar build: ' + e.message, 'error');
+        if (verInput && !verInput.dataset.bound) {
+            verInput.addEventListener('input', function (e) {
+                state.app.version = String(e.target.value || '').trim();
+                setDirty(true);
+                scheduleDraftSave();
+            });
+            verInput.dataset.bound = '1';
         }
-    },
 
-    async triggerNewBuild(appId) {
-        try {
-            // Simulate new build trigger
-            this.showToast('Novo build iniciado!', 'info');
-            bootstrap.Modal.getInstance(document.getElementById('buildHistoryModal')).hide();
-        } catch (e) {
-            console.error('Error triggering build:', e);
-            this.showToast('Erro ao iniciar build: ' + e.message, 'error');
+        if (logoInput && !logoInput.dataset.bound) {
+            logoInput.addEventListener('change', function (e) {
+                var file = e.target.files && e.target.files[0];
+                if (!file) return;
+                var reader = new FileReader();
+                reader.onload = function () {
+                    var dataUrl = String(reader.result || '');
+                    state.app.logo = dataUrl;
+                    if (logoPreview) {
+                        logoPreview.src = dataUrl;
+                        logoPreview.style.display = 'block';
+                    }
+                    setDirty(true);
+                    scheduleDraftSave();
+                };
+                reader.readAsDataURL(file);
+            });
+            logoInput.dataset.bound = '1';
         }
-    },
 
-    async downloadAllArtifacts(appId) {
-        try {
-            // Simulate download all
-            this.showToast('Preparando download de todos os artefatos...', 'info');
-        } catch (e) {
-            console.error('Error downloading artifacts:', e);
-            this.showToast('Erro ao baixar artefatos: ' + e.message, 'error');
+        if (colorInput && !colorInput.dataset.bound) {
+            colorInput.addEventListener('input', function (e) {
+                state.app.color = String(e.target.value || '').trim();
+                setDirty(true);
+                scheduleDraftSave();
+            });
+            colorInput.dataset.bound = '1';
         }
-    },
 
-    viewBuildDetails(buildId) {
-        console.log('Viewing build details for:', buildId);
-        // Would show detailed build information
-    },
+        if (statusInput && !statusInput.dataset.bound) {
+            statusInput.addEventListener('change', function (e) {
+                state.app.status = Number(e.target.value || 0);
+                setDirty(true);
+                scheduleDraftSave();
+            });
+            statusInput.dataset.bound = '1';
+        }
 
-    downloadBuildArtifacts(buildId) {
-        console.log('Downloading artifacts for build:', buildId);
-        // Would trigger download
-    },
+        if (priceInput && !priceInput.dataset.bound) {
+            priceInput.addEventListener('input', function (e) {
+                state.app.price = toNumber(e.target.value, 0);
+                setDirty(true);
+                scheduleDraftSave();
+            });
+            priceInput.dataset.bound = '1';
+        }
 
-    // Utility methods for build management
-    formatDateTime(dateString) {
-        if (!dateString) return 'N/A';
-        return new Date(dateString).toLocaleString('pt-BR');
-    },
+        if (aspectInput && !aspectInput.dataset.bound) {
+            aspectInput.addEventListener('input', function (e) {
+                state.app.aspectRatio = String(e.target.value || '').trim();
+                setDirty(true);
+                scheduleDraftSave();
+            });
+            aspectInput.dataset.bound = '1';
+        }
 
-    getFileSizeEstimate(platform) {
-        const sizes = {
-            'web': '~2.5 MB',
-            'android': '~15 MB',
-            'ios': '~20 MB',
-            'windows': '~25 MB',
-            'macos': '~30 MB',
-            'linux': '~18 MB'
-        };
-        return sizes[platform] || '~10 MB';
-    },
+        if (portraitInput && !portraitInput.dataset.bound) {
+            portraitInput.addEventListener('change', function (e) {
+                state.app.supportsPortrait = !!e.target.checked;
+                setDirty(true);
+                scheduleDraftSave();
+            });
+            portraitInput.dataset.bound = '1';
+        }
 
-    // Flutter-specific functions
-    async openFlutterApp(appId) {
-        const url = `/apps/flutter/${appId}/web/index.html?ts=${Date.now()}`;
+        if (landscapeInput && !landscapeInput.dataset.bound) {
+            landscapeInput.addEventListener('change', function (e) {
+                state.app.supportsLandscape = !!e.target.checked;
+                setDirty(true);
+                scheduleDraftSave();
+            });
+            landscapeInput.dataset.bound = '1';
+        }
+
+        if (exclusiveInput && !exclusiveInput.dataset.bound) {
+            exclusiveInput.addEventListener('change', function (e) {
+                state.app.exclusiveEntityId = String(e.target.value || '').trim();
+                setDirty(true);
+                scheduleDraftSave();
+            });
+            exclusiveInput.dataset.bound = '1';
+        }
+
+        if (companySelect && !companySelect.dataset.bound) {
+            companySelect.addEventListener('change', function (e) {
+                state.app.companyId = e.target.value || '';
+                setDirty(true);
+                scheduleDraftSave();
+            });
+            companySelect.dataset.bound = '1';
+        }
+
+        qsa('#manifest-api-allow,#manifest-events-publish,#manifest-events-subscribe,#manifest-origins,#manifest-proxy-sources,#manifest-docs-types').forEach(function (node) {
+            if (node.dataset.bound) return;
+            node.addEventListener('input', function () {
+                setDirty(true);
+                scheduleValidate();
+                scheduleDraftSave();
+            });
+            node.dataset.bound = '1';
+        });
+
+        qsa('#manifest-docs-enabled,#manifest-kv-enabled,#manifest-blobs-enabled,#manifest-storage-scope,#manifest-context-mode,#manifest-allow-context-switch').forEach(function (node) {
+            if (node.dataset.bound) return;
+            node.addEventListener('change', function () {
+                setDirty(true);
+                scheduleValidate();
+                scheduleDraftSave();
+            });
+            node.dataset.bound = '1';
+        });
+
+        if (!document.body.dataset.shortcutsBound) {
+            document.addEventListener('keydown', function (e) {
+                var key = String(e.key || '').toLowerCase();
+                var meta = e.ctrlKey || e.metaKey;
+                if (!meta) return;
+                if (key === 's') {
+                    e.preventDefault();
+                    if (state.view === 'editor') saveDraft();
+                }
+                if (key === 'enter') {
+                    e.preventDefault();
+                    if (state.view === 'editor') showPreview();
+                }
+            }, { passive: false });
+            document.body.dataset.shortcutsBound = '1';
+        }
+    }
+
+    // === PREVIEW ===
+    function showPreview() {
+        if (state.editorDisabled) {
+        showNotice('Preview desabilitado porque o editor não carregou.', 'warning');
+            return;
+        }
+        if (!validateForm()) {
+        showNotice('Corrija os erros de validação antes do preview.', 'warning');
+            return;
+        }
+        readManifestFromForm();
+        var norm = normalizeManifestFromState();
+        if (!norm.ok) {
+            showNotice(norm.error, 'warning');
+            return;
+        }
+        var code = cm ? cm.getValue() : (qs('#app-code') ? qs('#app-code').value : state.app.code);
+        if (!code || !code.trim()) {
+        showNotice('Adicione código antes do preview.', 'warning');
+            return;
+        }
+        var html = buildPreviewHtml(code, norm.manifest);
+        openPreviewModal(html);
+    }
+
+    // MVP-Plus #10 — Preview mais fiel + diagnóstico
+    function openPreviewInNewTab() {
+        if (state.editorDisabled) {
+        showNotice('Preview desabilitado porque o editor não carregou.', 'warning');
+            return;
+        }
+        if (!validateForm()) {
+        showNotice('Corrija os erros de validação antes do preview.', 'warning');
+            return;
+        }
+        readManifestFromForm();
+        var norm = normalizeManifestFromState();
+        if (!norm.ok) {
+            showNotice(norm.error, 'warning');
+            return;
+        }
+        var code = cm ? cm.getValue() : (qs('#app-code') ? qs('#app-code').value : state.app.code);
+        if (!code || !code.trim()) {
+        showNotice('Adicione código antes do preview.', 'warning');
+            return;
+        }
+        var html = buildPreviewHtml(code, norm.manifest);
+        var blob = new Blob([html], { type: 'text/html' });
+        var url = URL.createObjectURL(blob);
         window.open(url, '_blank');
-    },
+        setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    }
 
-    async rebuildApp(appId) {
-        try {
-            this.showToast('Iniciando rebuild do app Flutter...', 'info');
-
-            // Respeita as plataformas configuradas na Etapa 4 (buildPlatforms)
-            let platforms = Array.isArray(this.appData.buildPlatforms) && this.appData.buildPlatforms.length
-                ? this.appData.buildPlatforms
-                : ['web'];
-
-            const response = await this.postRebuildCompat(appId, platforms);
-            const httpOk = response && typeof response.status === 'number' && response.status >= 200 && response.status < 300;
-            if (response && (response.success || httpOk)) {
-                this.showToast('Rebuild iniciado com sucesso para: ' + platforms.join(', '), 'success');
-                // Atualiza o status do build após alguns segundos
-                setTimeout(() => this.checkBuildStatus(appId), 2000);
-            } else {
-                throw new Error(response.message || 'Erro ao iniciar rebuild');
-            }
-        } catch (e) {
-            console.error('Error rebuilding app:', e);
-            this.showToast('Erro ao fazer rebuild: ' + e.message, 'error');
+    function openPreviewModal(html) {
+        var modal = qs('#preview-modal');
+        if (!modal) {
+            modal = el('div', { id: 'preview-modal', className: 'fixed inset-0 z-50 hidden' });
+            var overlay = el('div', { className: 'absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4' });
+            var panel = el('div', { className: 'w-full max-w-6xl bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]' });
+            var header = el('div', { className: 'flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-200' });
+            var title = el('div', { className: 'text-base font-semibold text-slate-900', text: 'Pré-visualização' });
+            var close = el('button', { className: twBtn('secondary', 'sm', true), text: 'Fechar' });
+            close.addEventListener('click', function () { modal.classList.add('hidden'); });
+            header.appendChild(title);
+            header.appendChild(close);
+            var body = el('div', { className: 'flex-1 min-h-[60vh] bg-white' });
+            var iframe = el('iframe', { id: 'preview-iframe', className: 'w-full h-full', attrs: { sandbox: 'allow-scripts allow-same-origin' } });
+            body.appendChild(iframe);
+            var logs = el('div', { id: 'preview-log-panel', className: 'border-t border-slate-200 px-4 py-2 text-xs text-slate-500', text: 'Logs:' });
+            var logBody = el('pre', { id: 'preview-log-body', className: 'm-0 whitespace-pre-wrap' });
+            logs.appendChild(logBody);
+            panel.appendChild(header);
+            panel.appendChild(body);
+            panel.appendChild(logs);
+            overlay.appendChild(panel);
+            modal.appendChild(overlay);
+            document.body.appendChild(modal);
         }
-    },
+        var iframeEl = qs('#preview-iframe');
+        var logBodyEl = qs('#preview-log-body');
+        if (logBodyEl) logBodyEl.textContent = '';
+        iframeEl.srcdoc = html;
+        modal.classList.remove('hidden');
 
-    async triggerRebuildWithTargets(appId) {
-        try {
-            const webCb = document.getElementById('build-target-web');
-            const androidCb = document.getElementById('build-target-android');
-            const targets = [];
-            if (webCb && webCb.checked) targets.push('web');
-            if (androidCb && androidCb.checked) targets.push('android');
-            if (!targets.length) {
-                alert('Selecione pelo menos uma plataforma para o build.');
+        if (!window.__previewLogListener) {
+            window.addEventListener('message', function (event) {
+                if (event.origin !== window.location.origin) return;
+                var data = event.data || {};
+                var target = qs('#preview-log-body');
+                if (!target) return;
+                if (data.source === 'appstudio-preview') {
+                    var line = '[' + data.type + '] ' + data.message + '\\n';
+                    target.textContent += line;
+                    return;
+                }
+                if (data.source === 'sdk') {
+                    var lineSdk = '[sdk:' + (data.type || 'log') + '] ' + data.message + '\\n';
+                    target.textContent += lineSdk;
+                    return;
+                }
+                // WorkzApp Pro integration
+                if (data.source === 'workzapp') {
+                    var payload = data.payload || {};
+                    var msg = '';
+                    if (typeof payload === 'string') msg = payload;
+                    else if (payload && typeof payload.message === 'string') msg = payload.message;
+                    else if (payload && typeof payload.name === 'string') msg = 'event=' + payload.name;
+                    else msg = JSON.stringify(payload || {}).slice(0, 300);
+                    var line2 = '[workzapp:' + (data.type || 'log') + '] ' + msg + '\\n';
+                    target.textContent += line2;
+                }
+            });
+            window.__previewLogListener = true;
+        }
+    }
+
+    // === EXPORT ===
+    function exportApp() {
+        if (!validateForm()) {
+        showNotice('Corrija os erros de validação antes de exportar.', 'warning');
+            return;
+        }
+        readManifestFromForm();
+        var norm = normalizeManifestFromState();
+        if (!norm.ok) {
+            showNotice(norm.error, 'warning');
+            return;
+        }
+        var code = cm ? cm.getValue() : (qs('#app-code') ? qs('#app-code').value : state.app.code);
+        var payload = {
+            manifest: norm.manifest,
+            code: code || '',
+            metadata: {
+                title: state.app.title,
+                slug: state.app.slug,
+                version: state.app.version
+            }
+        };
+        var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var a = el('a', { attrs: { href: url, download: (state.app.slug || 'app') + '.json' } });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+    }
+
+    // MVP-Plus #6 — Import JSON
+    function importJsonFile(file) {
+        var reader = new FileReader();
+        reader.onload = function () {
+            var raw = String(reader.result || '');
+            var data = safeJsonParse(raw, null);
+            if (!data || typeof data !== 'object') {
+                showNotice('Falha ao importar: JSON inválido.', 'warning');
                 return;
             }
-            this.showToast('Iniciando build Flutter para: ' + targets.join(', '), 'info');
-            const response = await this.postRebuildCompat(appId, targets);
-            const httpOk = response && typeof response.status === 'number' && response.status >= 200 && response.status < 300;
-            if (response && (response.success || httpOk)) {
-                this.showToast('Build iniciado com sucesso!', 'success');
-                setTimeout(() => this.checkBuildStatus(appId), 2000);
-            } else {
-                throw new Error(response.message || 'Erro ao iniciar build');
+            if (data.metadata && typeof data.metadata === 'object') {
+                state.app.title = sanitizeTitle(data.metadata.title || state.app.title);
+                state.app.slug = sanitizeSlug(data.metadata.slug || state.app.slug);
+                state.app.version = String(data.metadata.version || state.app.version || '').trim();
             }
-        } catch (e) {
-            console.error('Error triggering platform build:', e);
-            this.showToast('Erro ao iniciar build: ' + e.message, 'error');
-        }
-    },
+            if (data.manifest && typeof data.manifest === 'object') {
+                state.app.manifest = data.manifest;
+            }
+            if (typeof data.code === 'string') {
+                state.app.code = data.code;
+            }
+            var titleField = qs('#app-title');
+            var slugField = qs('#app-slug');
+            var versionField = qs('#app-version');
+            var codeField = qs('#app-code');
+            if (titleField) titleField.value = state.app.title;
+            if (slugField) slugField.value = state.app.slug;
+            if (versionField) versionField.value = state.app.version;
+            writeManifestToForm();
+            if (cm) {
+                cm.setValue(state.app.code || '');
+            } else if (codeField) {
+                codeField.value = state.app.code || '';
+            }
+            setDirty(true);
+            scheduleValidate();
+            showNotice('Import realizado. Revise e salve.', 'info');
+        };
+        reader.onerror = function () {
+            showNotice('Falha ao importar: erro ao ler arquivo.', 'warning');
+        };
+        reader.readAsText(file);
+    }
 
-    async checkBuildStatus(appId) {
+    // === DATA FLOW ===
+    async function loadCompanies() {
+        state.loadingCompanies = true;
+        render();
         try {
-            const response = await this.getBuildStatusCompat(appId);
-            if (response && response.success) {
-                this.showBuildStatusModal(response.data);
+            var response = await apiCall('get', '/me');
+            var companies = null;
+            if (response && response.companies) companies = response.companies;
+            if (response && response.data && response.data.companies) companies = response.data.companies;
+            if (companies && Array.isArray(companies)) {
+                state.companies = companies.map(function (c) {
+                    return {
+                        id: c.id,
+                        name: c.name || c.tt || 'Negócio',
+                        nv: c.nv,
+                        cnpj: c.cnpj || c.national_id || ''
+                    };
+                });
+            }
+        } catch (_) {
+            state.companies = [];
+        }
+        state.loadingCompanies = false;
+        render();
+    }
+
+    async function loadApps() {
+        state.loadingApps = true;
+        render();
+        try {
+            var response = await apiCall('get', '/apps/my-apps');
+            if (response && response.success === false) {
+                var msg = response.message || 'Falha ao carregar apps.';
+                var st = response.__httpStatus || response.status || 'n/a';
+                var url = response.__url || 'n/a';
+                showNotice(msg + ' (status ' + st + ', url ' + url + ')', 'warning');
+                state.apps = [];
+                state.loadingApps = false;
+                render();
+                return;
+            }
+            state.apps = normalizeAppsResponse(response);
+        } catch (e) {
+            state.apps = [];
+            showNotice('Falha ao carregar apps.', 'warning');
+        }
+        state.loadingApps = false;
+        render();
+    }
+
+    function resetAppState() {
+        state.app = {
+            id: null,
+            title: '',
+            slug: '',
+            description: '',
+            version: '1.0.0',
+            companyId: '',
+            accessLevel: 1,
+            logo: '',
+            color: '',
+            status: 1,
+            price: 0,
+            aspectRatio: '',
+            supportsPortrait: true,
+            supportsLandscape: true,
+            exclusiveEntityId: '',
+            code: DEFAULT_STARTER_CODE,
+            manifest: getDefaultAppManifest()
+        };
+        state.slugTouched = false;
+        state.loadingEditor = false;
+        setDirty(false);
+    }
+
+    function startNewApp() {
+        resetAppState();
+        state.view = 'editor';
+        render();
+    }
+
+    // MVP-Plus #2 — Edit confiável (sem “reset falso”)
+    async function editApp(appId) {
+        if (!appId) {
+            showNotice('Não foi possível editar: id do app inválido.', 'warning');
+            return;
+        }
+        state.view = 'editor';
+        state.loadingEditor = true;
+        render();
+        showNotice('Carregando app...', 'info');
+        try {
+            var response = await apiCall('get', '/apps/' + appId);
+            if (response && response.success === false) {
+                var msg = response.message || 'Falha ao carregar app.';
+                var st = response.__httpStatus || response.status || 'n/a';
+                var url = response.__url || 'n/a';
+                showNotice(msg + ' (status ' + st + ', url ' + url + ')', 'warning');
+                state.loadingEditor = false;
+                render();
+                return;
+            }
+            var app = (response && response.data) ? response.data : response;
+            if (!app || typeof app !== 'object') {
+                showNotice('Falha ao carregar app (resposta inválida).', 'warning');
+                state.loadingEditor = false;
+                render();
+                return;
+            }
+            destroyEditor();
+            resetAppState();
+            state.app.id = appId;
+            state.app.title = sanitizeTitle(app.tt || app.title || '');
+            state.app.slug = sanitizeSlug(app.slug || '');
+            state.app.description = String(app.ds || app.description || '');
+            state.app.version = app.version || '1.0.0';
+            state.app.companyId = app.publisher || app.company_id || '';
+            state.app.logo = app.im || app.logo || '';
+            state.app.color = app.color || '';
+            state.app.status = Number((app.st !== undefined && app.st !== null) ? app.st : (app.status !== undefined && app.status !== null ? app.status : 0));
+            state.app.price = toNumber(app.vl || app.price || 0, 0);
+            state.app.aspectRatio = app.aspect_ratio || app.aspectRatio || '';
+            state.app.supportsPortrait = (app.supports_portrait !== undefined) ? !!app.supports_portrait : (app.supportsPortrait !== undefined ? !!app.supportsPortrait : true);
+            state.app.supportsLandscape = (app.supports_landscape !== undefined) ? !!app.supports_landscape : (app.supportsLandscape !== undefined ? !!app.supportsLandscape : true);
+            state.app.exclusiveEntityId = app.exclusive_to_entity_id || app.exclusiveEntityId || '';
+            state.app.code = app.js_code || app.source_code || app.code || '';
+            var manifestRaw = app.manifest || app.manifest_json;
+            if (manifestRaw && typeof manifestRaw === 'string') {
+                state.app.manifest = safeJsonParse(manifestRaw, state.app.manifest);
+            } else if (manifestRaw && typeof manifestRaw === 'object') {
+                state.app.manifest = manifestRaw;
+            }
+            // Migrate legacy manifest fields in-memory to v2 schema
+            if (state.app.manifest.contextMode && !state.app.manifest.contextRequirements) {
+                state.app.manifest.contextRequirements = { mode: String(state.app.manifest.contextMode).toLowerCase() };
+            }
+            if (typeof state.app.manifest.allowContextSwitch === 'boolean') {
+                state.app.manifest.contextRequirements = state.app.manifest.contextRequirements || {};
+                state.app.manifest.contextRequirements.allowContextSwitch = state.app.manifest.allowContextSwitch;
+            }
+            state.app.manifest.runtime = state.app.manifest.runtime || 'js';
+            if (!state.app.manifest.capabilities) state.app.manifest.capabilities = {};
+            if (!state.app.manifest.capabilities.storage) state.app.manifest.capabilities.storage = {};
+            if (state.app.manifest.capabilities.storage.scope === 'app') {
+                state.app.manifest.capabilities.storage.scope = 'context';
+            }
+            if (!state.app.manifest.sandbox || !state.app.manifest.sandbox.postMessage) {
+                state.app.manifest.sandbox = { postMessage: { allowedOrigins: [] } };
+            }
+            normalizeApiAllowState();
+            state.loadingEditor = false;
+            setDirty(false);
+            showNotice('', '');
+        state.view = 'editor';
+        render();
+    } catch (e) {
+        state.loadingEditor = false;
+        render();
+        showNotice('Falha ao carregar app.', 'warning');
+    }
+    }
+
+    async function duplicateApp(app) {
+        var baseId = getAppId(app);
+        if (!baseId) {
+            showNotice('Não foi possível duplicar: id do app inválido.', 'warning');
+            return;
+        }
+        var baseTitle = String(app.tt || app.title || 'App');
+        var baseSlug = sanitizeSlug(app.slug || baseTitle || 'app');
+        var proposed = baseSlug + '-copy';
+        var newSlug = getUniqueSlug(proposed);
+            var ok = confirm('Duplicar app "' + baseTitle + '" como "' + newSlug + '"?');
+        if (!ok) return;
+
+        var manifestRaw = app.manifest || app.manifest_json || null;
+        var manifestObj = null;
+        if (manifestRaw && typeof manifestRaw === 'object') manifestObj = manifestRaw;
+        if (manifestRaw && typeof manifestRaw === 'string') manifestObj = safeJsonParse(manifestRaw, null);
+        if (!manifestObj) manifestObj = JSON.parse(JSON.stringify(state.app.manifest));
+        var payload = {
+            title: baseTitle + ' (Copy)',
+            slug: newSlug,
+            description: app.ds || app.description || '',
+            version: app.version || '1.0.0',
+            app_type: 'javascript',
+            js_code: app.js_code || app.source_code || app.code || '',
+            manifest: JSON.stringify(manifestObj),
+            manifest_json: JSON.stringify(manifestObj),
+            im: app.im || app.logo || '',
+            color: app.color || '',
+            st: Number((app.st !== undefined && app.st !== null) ? app.st : (app.status !== undefined && app.status !== null ? app.status : 0)),
+            vl: toNumber(app.vl || app.price || 0, 0),
+            aspect_ratio: app.aspect_ratio || app.aspectRatio || '',
+            supports_portrait: (app.supports_portrait !== undefined) ? (app.supports_portrait ? 1 : 0) : (app.supportsPortrait ? 1 : 0),
+            supports_landscape: (app.supports_landscape !== undefined) ? (app.supports_landscape ? 1 : 0) : (app.supportsLandscape ? 1 : 0),
+            exclusive_to_entity_id: app.exclusive_to_entity_id || app.exclusiveEntityId || null
+        };
+        if (app.publisher || app.company_id || app.exclusive_to_entity_id) {
+            payload.company_id = app.publisher || app.company_id || app.exclusive_to_entity_id;
+            payload.publisher = payload.company_id;
+        }
+        try {
+            var resp = await apiCall('post', '/apps/create', payload);
+            if (resp && resp.success) {
+                showNotice('App duplicado com sucesso.', 'success');
+                await loadApps();
             } else {
-                throw new Error(response.message || 'Erro ao verificar status');
+                var msg = (resp && resp.message ? resp.message : 'unknown error');
+                var st = (resp && resp.__httpStatus) ? resp.__httpStatus : (resp && resp.status ? resp.status : 'n/a');
+                var url = (resp && resp.__url) ? resp.__url : 'n/a';
+                showNotice('Falha ao duplicar: ' + msg + ' (status ' + st + ', url ' + url + ')', 'warning');
             }
         } catch (e) {
-            console.error('Error checking build status:', e);
-            this.showToast('Erro ao verificar status do build: ' + e.message, 'error');
+            showNotice('Falha ao duplicar app.', 'warning');
         }
-    },
+    }
 
-    showBuildStatusModal(buildData) {
-        const modalHtml = `
-            <div class="modal fade" id="buildStatusModal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">
-                                <i class="fas fa-hammer"></i> Status do Build Flutter
-                            </h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <strong>App ID:</strong> ${buildData.app_id}
-                                </div>
-                                <div class="col-md-6">
-                                    <strong>Tipo:</strong> ${buildData.app_type}
-                                </div>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <strong>Status Geral:</strong>
-                                <span class="badge ${this.getBuildStatusClass(buildData.build_status)}">
-                                    ${buildData.build_status}
-                                </span>
-                            </div>
-                            
-                            ${buildData.compiled_at ? `
-                                <div class="mb-3">
-                                    <strong>Última Compilação:</strong> ${new Date(buildData.compiled_at).toLocaleString()}
-                                </div>
-                            ` : ''}
-                            
-                            ${buildData.build_log ? `
-                                <div class="mb-3">
-                                    <strong>Log do Build:</strong>
-                                    <pre class="bg-light p-3 rounded" style="max-height: 200px; overflow-y: auto;">${buildData.build_log}</pre>
-                                </div>
-                            ` : ''}
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-                            <button type="button" class="btn btn-primary" onclick="StoreApp.rebuildApp(${buildData.app_id})">
-                                <i class="fas fa-hammer"></i> Rebuild
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Remove existing modal
-        const existingModal = document.getElementById('buildStatusModal');
-        if (existingModal) {
-            existingModal.remove();
+    async function saveApp() {
+        if (!validateForm()) {
+            showNotice('Corrija os erros de validação antes de salvar.', 'warning');
+            return;
+        }
+        readManifestFromForm();
+        var norm = normalizeManifestFromState();
+        if (!norm.ok) {
+            showNotice(norm.error, 'warning');
+            return;
+        }
+        var code = cm ? cm.getValue() : (qs('#app-code') ? qs('#app-code').value : state.app.code);
+        var payload = {
+            title: state.app.title,
+            slug: state.app.slug,
+            description: state.app.description,
+            version: state.app.version,
+            app_type: 'javascript',
+            js_code: code || '',
+            manifest: JSON.stringify(norm.manifest),
+            manifest_json: JSON.stringify(norm.manifest),
+            im: state.app.logo || '',
+            color: state.app.color || '',
+            st: Number((state.app.status !== undefined && state.app.status !== null) ? state.app.status : 0),
+            vl: toNumber(state.app.price || 0, 0),
+            aspect_ratio: state.app.aspectRatio || '',
+            supports_portrait: state.app.supportsPortrait ? 1 : 0,
+            supports_landscape: state.app.supportsLandscape ? 1 : 0,
+            exclusive_to_entity_id: state.app.exclusiveEntityId ? parseInt(state.app.exclusiveEntityId, 10) : null
+        };
+        if (state.app.companyId) {
+            payload.company_id = parseInt(state.app.companyId, 10);
+            payload.publisher = parseInt(state.app.companyId, 10);
         }
 
-        // Add new modal
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-        // Show modal
-        const modal = new bootstrap.Modal(document.getElementById('buildStatusModal'));
-        modal.show();
-    },
-
-    getBuildStatusClass(status) {
-        const statusClasses = {
-            'success': 'bg-success',
-            'failed': 'bg-danger',
-            'building': 'bg-info',
-            'pending': 'bg-warning'
-        };
-        return statusClasses[status] || 'bg-secondary';
-    },
-
-    getPlatformIcon(platform) {
-        const icons = {
-            'web': 'fas fa-globe',
-            'android': 'fab fa-android',
-            'ios': 'fab fa-apple',
-            'windows': 'fab fa-windows',
-            'macos': 'fab fa-apple',
-            'linux': 'fab fa-linux'
-        };
-        return icons[platform] || 'fas fa-desktop';
-    },
-
-    renderError(message) {
-        document.getElementById("app-root").innerHTML = `
-            <div class="alert alert-danger">
-                <h4>Erro</h4>
-                <p>${message}</p>
-            </div>
-        `;
+        try {
+            var resp;
+            if (state.app.id) {
+                resp = await apiCall('post', '/apps/update/' + state.app.id, payload);
+            } else {
+                resp = await apiCall('post', '/apps/create', payload);
+            }
+            if (resp && resp.success) {
+                var newId = extractAppIdFromSaveResponse(resp);
+                if (newId) state.app.id = newId;
+                setDirty(false);
+                showNotice('App salvo.', 'success');
+                await loadApps();
+            } else {
+                var msg = (resp && resp.message ? resp.message : 'unknown error');
+                var st = (resp && resp.__httpStatus) ? resp.__httpStatus : (resp && resp.status ? resp.status : 'n/a');
+                var url = (resp && resp.__url) ? resp.__url : 'n/a';
+                var details = '';
+                if (resp && resp.errors && Array.isArray(resp.errors)) {
+                    details = ' - ' + resp.errors.join(', ');
+                } else if (resp && resp.validation && typeof resp.validation === 'object') {
+                    try { details = ' - ' + Object.keys(resp.validation).join(', '); } catch (_) {}
+                }
+                showNotice('Falha ao salvar: ' + msg + details + ' (status ' + st + ', url ' + url + ')', 'warning');
+            }
+        } catch (e) {
+            showNotice('Falha ao salvar: erro de rede.', 'warning');
+        }
     }
-};
 
-// Auto-initialize when DOM is ready
-// Only auto-initialize if not running inside the Workz app runner,
-// which will call bootstrap manually.
-if (typeof WorkzSDKRunner === 'undefined') {
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => StoreApp.bootstrap());
-    } else {
-        StoreApp.bootstrap();
+    // MVP-Plus #8 — Delete App (com segurança)
+    async function deleteApp() {
+        if (!state.app.id) {
+            showNotice('Não foi possível excluir: id do app inválido.', 'warning');
+            return;
+        }
+        var name = state.app.title || '';
+        var slug = state.app.slug || '';
+        var ok = confirm('Excluir app "' + name + '" (' + slug + ')? Esta ação não pode ser desfeita.');
+        if (!ok) return;
+        try {
+            var resp = await apiCall('post', '/apps/delete/' + state.app.id);
+            if (!resp || resp.success === false) {
+                resp = await apiCall('delete', '/apps/' + state.app.id);
+            }
+            if (resp && resp.success) {
+                showNotice('App excluído.', 'success');
+                await loadApps();
+                state.view = 'list';
+                render();
+            } else {
+                var msg = (resp && resp.message ? resp.message : 'unknown error');
+                var st = (resp && resp.__httpStatus) ? resp.__httpStatus : (resp && resp.status ? resp.status : 'n/a');
+                var url = (resp && resp.__url) ? resp.__url : 'n/a';
+                showNotice('Falha ao excluir: ' + msg + ' (status ' + st + ', url ' + url + ')', 'warning');
+            }
+        } catch (e) {
+            showNotice('Falha ao excluir app.', 'warning');
+        }
     }
-}
+
+    function maybeBackToList() {
+        if (state.dirty) {
+            var ok = confirm('Você tem alterações não salvas. Descartar e voltar?');
+            if (!ok) return;
+        }
+        destroyEditor();
+        state.view = 'list';
+        render();
+    }
+
+    window.initApp = function initApp() {
+        if (window.StoreApp && typeof window.StoreApp.init === 'function') {
+            return window.StoreApp.init();
+        }
+    };
+
+    // === INIT ===
+    async function init() {
+        await domReady();
+        await initStudioSdk();
+        try {
+            await loadJS(TAILWIND_JS);
+        } catch (_) {}
+
+        try {
+            await loadCSS(CODEMIRROR_CSS);
+            await loadCSS(CODEMIRROR_THEME);
+            await loadCSS(CODEMIRROR_DIALOG_CSS);
+            await loadCSS(CODEMIRROR_FULLSCREEN_CSS);
+            await loadJS(CODEMIRROR_JS);
+            await loadJS(CODEMIRROR_MODE_JS);
+            await loadJS(CODEMIRROR_DIALOG_JS);
+            await loadJS(CODEMIRROR_SEARCHCURSOR_JS);
+            await loadJS(CODEMIRROR_SEARCH_JS);
+            await loadJS(CODEMIRROR_MATCHBRACKETS_JS);
+            await loadJS(CODEMIRROR_CLOSEBRACKETS_JS);
+            await loadJS(CODEMIRROR_ACTIVE_LINE_JS);
+            await loadJS(CODEMIRROR_COMMENT_JS);
+            await loadJS(CODEMIRROR_FULLSCREEN_JS);
+        } catch (e) {
+            state.editorDisabled = true;
+            state.editorError = 'Falha ao carregar o CodeMirror.';
+        }
+
+        await loadCompanies();
+        await loadApps();
+        render();
+    }
+
+    window.StoreApp = {
+        init: init,
+        state: state,
+        version: VERSION
+    };
+
+    if (typeof window.WorkzSDKRunner === 'undefined') {
+        init();
+    }
+})();
+
+/*
+MVP-Plus Manual QA
+1) Load list: list renders; cards with missing id show warning + disabled Edit/Duplicate.
+2) Edit flow: click Edit shows loading notice, then editor opens only after data arrives; failure shows status/url.
+3) CSRF: if meta csrf-token exists, save uses X-CSRF-TOKEN header and same-origin credentials.
+4) Save: save success shows “App saved.” and keeps editor; failure shows status + url.
+5) Drafts: type code, wait autosave, reload page -> restore prompt; Discard Draft removes it.
+6) Import JSON: import exported JSON populates title/slug/version/manifest/code and marks dirty.
+7) Duplicate: duplicate from list creates copy with -copy suffix and refreshes list.
+8) Delete: delete from editor confirms and removes app; list refreshes after delete.
+9) Manifest UI: change context mode/allow switch; capabilities summary updates; docs types empty blocks.
+10) Preview: open preview modal/new tab, SDK init errors show clearly; iframe logs appear in panel.
+*/

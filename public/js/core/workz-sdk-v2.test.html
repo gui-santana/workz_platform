@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <title>WorkzSDK v2 Manifest Validator Tests</title>
+  </head>
+  <body>
+    <h1>WorkzSDK v2 Manifest Validator Tests</h1>
+    <script src="./workz-sdk-v2.js"></script>
+    <script>
+      (function() {
+        function assert(condition, message) {
+          if (!condition) throw new Error(message || 'Assertion failed');
+        }
+
+        function test(name, fn) {
+          try {
+            fn();
+            console.log('PASS:', name);
+          } catch (e) {
+            console.error('FAIL:', name, '-', e.message);
+          }
+        }
+
+        window.addEventListener('load', function() {
+          test('Valid manifest normaliza rotas e arrays', function() {
+            const manifest = {
+              runtime: 'JavaScript',
+              contextRequirements: { mode: 'User' },
+              capabilities: {
+                api: {
+                  allow: [
+                    'get /Me',
+                    { method: 'post', path: 'apps/my-apps' }
+                  ]
+                },
+                storage: { kv: true, docs: false, blobs: true },
+                events: ['sdk:ready', 'app:context_denied']
+              },
+              sandbox: {
+                postMessage: {
+                  allowedOrigins: ['https://example.com', ' https://foo.bar ']
+                }
+              }
+            };
+            const result = WorkzSDK.validateManifest(manifest);
+            assert(result.ok, 'manifest deveria ser valido');
+            const normalized = result.normalizedManifest;
+            assert(normalized.runtime === 'javascript', 'runtime normalizado');
+            assert(normalized.capabilities.api.allow.length === 2, 'allow list normalizada');
+            assert(normalized.capabilities.api.allow[0].method === 'GET', 'method uppercase');
+            assert(normalized.capabilities.api.allow[0].path === '/me', 'path lowercase');
+            assert(normalized.capabilities.api.allow[1].path === '/apps/my-apps', 'path com barra');
+            assert(normalized.sandbox.postMessage.allowedOrigins.length === 2, 'allowedOrigins normalizado');
+          });
+
+          test('Manifest incompleto retorna erros claros', function() {
+            const result = WorkzSDK.validateManifest({ runtime: '' });
+            assert(!result.ok, 'manifest deveria ser invalido');
+            const hasRuntimeError = result.errors.some(function(msg) {
+              return msg.indexOf('manifest.runtime') !== -1;
+            });
+            assert(hasRuntimeError, 'erro de runtime esperado');
+          });
+
+          test('API allow inválido é detectado', function() {
+            const result = WorkzSDK.validateManifest({
+              runtime: 'javascript',
+              contextRequirements: { mode: 'user' },
+              capabilities: { api: { allow: ['invalid-entry'] } },
+              sandbox: { postMessage: { allowedOrigins: '*' } }
+            });
+            assert(!result.ok, 'manifest deveria ser invalido');
+            const hasAllowError = result.errors.some(function(msg) {
+              return msg.indexOf('capabilities.api.allow[0]') !== -1;
+            });
+            assert(hasAllowError, 'erro de allow esperado');
+          });
+
+          test('Events boolean false desabilita eventos', function() {
+            const result = WorkzSDK.validateManifest({
+              runtime: 'javascript',
+              contextRequirements: { mode: 'hybrid' },
+              capabilities: { api: {}, events: false },
+              sandbox: { postMessage: { allowedOrigins: '*' } }
+            });
+            assert(result.ok, 'manifest deveria ser valido');
+            assert(result.normalizedManifest.capabilities.events.enabled === false, 'events desabilitado');
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -7,9 +7,26 @@ namespace Workz\Platform\Controllers;
 use Workz\Platform\Core\UniversalRuntime;
 use Workz\Platform\Models\General;
 use Workz\Platform\Policies\BusinessPolicy;
+use Workz\Platform\Services\ManifestNormalizer;
 
 class UniversalAppController
 {
+    private ?string $lastColumnError = null;
+
+    private function hasColumn(string $table, string $column): bool
+    {
+        $this->lastColumnError = null;
+        try {
+            $pdo = \Workz\Platform\Core\Database::getInstance('workz_apps');
+            $quoted = $pdo->quote($column);
+            $stmt = $pdo->query("SHOW COLUMNS FROM `{$table}` LIKE {$quoted}");
+            return (bool)$stmt->fetch();
+        } catch (\Throwable $e) {
+            $this->lastColumnError = $e->getMessage();
+            return false;
+        }
+    }
+
     /**
      * GET /api/apps/{id}/build-status
      * Status de build universal (genérico)
@@ -128,6 +145,13 @@ class UniversalAppController
             }
             
             error_log("UpdateApp Universal - App $appId - Dados: " . json_encode($input));
+            if (!empty($_ENV['DEBUG'])) {
+                $keys = array_keys($input);
+                $manifestIn = $input['manifest'] ?? $input['manifest_json'] ?? null;
+                $manifestLen = is_string($manifestIn) ? strlen($manifestIn) : (is_array($manifestIn) ? strlen(json_encode($manifestIn)) : 0);
+                $jsLen = isset($input['js_code']) ? strlen((string)$input['js_code']) : (isset($input['jsCode']) ? strlen((string)$input['jsCode']) : 0);
+                error_log("App $appId: update payload keys=" . json_encode($keys) . " manifest_len=" . $manifestLen . " js_len=" . $jsLen);
+            }
 
             $generalModel = new General();
             
@@ -371,6 +395,40 @@ class UniversalAppController
                 $updateData['supports_landscape'] = (int)((bool)$input['supports_landscape']);
             }
 
+            // Manifest JSON (App Studio / universal)
+            $hasManifestColumn = $this->hasColumn('apps', 'manifest_json');
+            if ($hasManifestColumn) {
+                if (array_key_exists('manifest', $input) || array_key_exists('manifest_json', $input)) {
+                    $rawManifest = $input['manifest'] ?? $input['manifest_json'] ?? null;
+                    $pipe = null;
+                    if (is_array($rawManifest)) {
+                        $pipe = $rawManifest;
+                    } elseif (is_string($rawManifest) && trim($rawManifest) !== '') {
+                        $decoded = json_decode($rawManifest, true);
+                        if (is_array($decoded)) {
+                            $pipe = $decoded;
+                        }
+                    }
+                    if (!is_array($pipe)) {
+                        // Fallback para manifesto padrão caso o payload venha inválido
+                        $pipe = [];
+                    }
+                    $appType = strtolower((string)($input['app_type'] ?? $existingApp['app_type'] ?? 'javascript'));
+                    $manifestPayload = ManifestNormalizer::buildFromPipe($pipe, $appType, $_SERVER['HTTP_HOST'] ?? null);
+                    $updateData['manifest_json'] = json_encode($manifestPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                    if ($this->hasColumn('apps', 'manifest_updated_at')) {
+                        $updateData['manifest_updated_at'] = date('Y-m-d H:i:s');
+                    }
+                    if (!empty($_ENV['DEBUG'])) {
+                        error_log("App $appId: manifest_json set (len=" . strlen((string)$updateData['manifest_json']) . ")");
+                    }
+                }
+            } else {
+                if (!empty($_ENV['DEBUG']) && (array_key_exists('manifest', $input) || array_key_exists('manifest_json', $input))) {
+                    error_log("App $appId: manifest_json column not found; manifest payload ignored.");
+                }
+            }
+
             // Atualizar no banco (genérico)
             $dbUpdated = false;
             if (!empty($updateData)) {
@@ -469,6 +527,19 @@ class UniversalAppController
                 $returnApp['price'] = (float)$returnApp['vl'];
             }
 
+            $debugFlag = !empty($_ENV['DEBUG']) || (isset($_GET['debug']) && $_GET['debug']);
+            $debugPayload = [];
+            if ($debugFlag) {
+                $debugPayload = [
+                    'manifest_column' => $hasManifestColumn ?? null,
+                    'manifest_column_db' => 'workz_apps',
+                    'manifest_column_error' => $this->lastColumnError ?? null,
+                    'db_update_attempted' => $dbUpdateAttempted,
+                    'update_keys' => array_values(array_keys($updateData ?? [])),
+                    'manifest_len' => isset($updateData['manifest_json']) ? strlen((string)$updateData['manifest_json']) : 0
+                ];
+            }
+
             echo json_encode([
                 'success' => true,
                 'message' => $message,
@@ -478,6 +549,7 @@ class UniversalAppController
                 'app_compiled' => $appCompiled,
                 'has_code_changes' => $hasCodeChanges,
                 'build_status' => ($returnApp['build_status'] ?? $buildStatus),
+                'debug' => $debugPayload,
                 'data' => $returnApp
             ]);
 
@@ -685,30 +757,36 @@ class UniversalAppController
 
             $generalModel = new General();
             
+            $fields = [
+                'id',
+                'tt',
+                'slug',
+                'ds',
+                'im',
+                'color',
+                'vl',
+                'access_level',
+                'entity_type',
+                'version',
+                'js_code',
+                'dart_code',
+                'app_type',
+                'scopes',
+                'publisher',
+                'st',
+                'build_status',
+                'aspect_ratio',
+                'supports_portrait',
+                'supports_landscape'
+            ];
+            if ($this->hasColumn('apps', 'manifest_json')) {
+                $fields[] = 'manifest_json';
+            }
+
             $app = $generalModel->search(
                 'workz_apps',
                 'apps',
-                [
-                    'id',
-                    'tt',
-                    'slug',
-                    'ds',
-                    'im',
-                    'color',
-                    'vl',
-                    'access_level',
-                    'entity_type',
-                    'version',
-                    'js_code',
-                    'dart_code',
-                    'app_type',
-                    'scopes',
-                    'publisher',
-                    'build_status',
-                    'aspect_ratio',
-                    'supports_portrait',
-                    'supports_landscape'
-                ],
+                $fields,
                 ['id' => $appId],
                 false
             );
@@ -723,6 +801,10 @@ class UniversalAppController
 
                 // Compatibilidade: expõe preço também como "price" para o App Builder
                 $app['price'] = isset($app['vl']) ? (float)$app['vl'] : 0;
+                // Compatibilidade: expõe status também como "status" para o App Builder
+                if (!isset($app['status']) && array_key_exists('st', $app)) {
+                    $app['status'] = $app['st'];
+                }
 
                 // Adicionar informações extras (genérico)
                 $app['token'] = 'app_' . $appId . '_' . md5($app['slug'] ?? '');

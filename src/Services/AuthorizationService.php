@@ -24,6 +24,7 @@ class AuthorizationService
         'gappBusiness' => [], // [businessId][appId] => bool
         'gappTeam' => [],     // [teamId][appId] => bool
         'gappUser' => [],
+        'appPublisher' => [], // [appId] => publisherId
         'appIdBySlug' => [],  // [slug] => appId
         'userBusinesses' => [], // [userId] => [businessId...]
         'gappColumns' => [], // [column] => bool
@@ -112,6 +113,16 @@ class AuthorizationService
         if (strpos($action, 'app.') === 0) {
             if (!$appId) {
                 return AuthorizationResult::deny('app.context_required');
+            }
+
+            $publisherId = $this->getAppPublisherId($appId);
+            if ($publisherId > 0) {
+                if ($publisherId === $userId || $this->businessPolicy->canManage($userId, $publisherId)) {
+                    return AuthorizationResult::allow([
+                        'publisher' => $publisherId,
+                        'owner_override' => true,
+                    ]);
+                }
             }
 
             // Personal context (legacy user-level apps)
@@ -335,9 +346,10 @@ class AuthorizationService
             $hasSubscription = $this->gappHasColumn('subscription');
             $subClause = $hasSubscription ? '(st = 1 OR subscription = 1)' : 'st = 1';
             if ($hasCm) {
-                $stmt = $pdo->prepare("SELECT id FROM gapp WHERE em = :em AND ap = :ap AND (cm IS NULL OR cm = 0) AND us IS NULL AND {$subClause} LIMIT 1");
+                // Permite entitlement de empresa mesmo se houver "us" preenchido (compra feita por um usuário).
+                $stmt = $pdo->prepare("SELECT id FROM gapp WHERE em = :em AND ap = :ap AND (cm IS NULL OR cm = 0) AND {$subClause} LIMIT 1");
             } else {
-                $stmt = $pdo->prepare("SELECT id FROM gapp WHERE em = :em AND ap = :ap AND us IS NULL AND {$subClause} LIMIT 1");
+                $stmt = $pdo->prepare("SELECT id FROM gapp WHERE em = :em AND ap = :ap AND {$subClause} LIMIT 1");
             }
             $stmt->execute([':em' => $businessId, ':ap' => $appId]);
             $result = (bool)$stmt->fetch(PDO::FETCH_ASSOC);
@@ -357,13 +369,19 @@ class AuthorizationService
         try {
             $pdo = Database::getInstance('workz_apps');
             if (!$this->gappHasColumn('cm')) {
-                self::$cache['gappTeam'][$teamId][$appId] = false;
-                return false;
+                // Sem coluna cm: equipe herda o entitlement da empresa.
+                $result = $this->hasBusinessApp($businessId, $appId);
+                self::$cache['gappTeam'][$teamId][$appId] = $result;
+                return $result;
             }
             $subClause = $this->gappHasColumn('subscription') ? '(st = 1 OR subscription = 1)' : 'st = 1';
             $stmt = $pdo->prepare("SELECT id FROM gapp WHERE em = :em AND cm = :cm AND ap = :ap AND {$subClause} LIMIT 1");
             $stmt->execute([':em' => $businessId, ':cm' => $teamId, ':ap' => $appId]);
             $result = (bool)$stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$result) {
+                // Fallback: se a empresa assinou o app, liberar para as equipes.
+                $result = $this->hasBusinessApp($businessId, $appId);
+            }
         } catch (\Throwable $e) {
             $result = false;
         }
@@ -394,6 +412,27 @@ class AuthorizationService
         }
         self::$cache['gappUser'][$userId][$appId] = $result;
         return $result;
+    }
+
+    protected function getAppPublisherId(int $appId): int
+    {
+        if (isset(self::$cache['appPublisher'][$appId])) {
+            return self::$cache['appPublisher'][$appId];
+        }
+        $publisher = 0;
+        try {
+            $pdo = Database::getInstance('workz_apps');
+            $stmt = $pdo->prepare('SELECT publisher FROM apps WHERE id = :id LIMIT 1');
+            $stmt->execute([':id' => $appId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row && isset($row['publisher']) && is_numeric($row['publisher'])) {
+                $publisher = (int)$row['publisher'];
+            }
+        } catch (\Throwable $e) {
+            $publisher = 0;
+        }
+        self::$cache['appPublisher'][$appId] = $publisher;
+        return $publisher;
     }
 
     protected function resolveAppIdBySlug(string $slug): ?int

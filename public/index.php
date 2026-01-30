@@ -1,3 +1,25 @@
+<?php
+$host = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+$path = parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/';
+$hostNoPort = preg_replace('/:\d+$/', '', $host);
+$isLocalSubdomain = $hostNoPort !== '' && $hostNoPort !== 'localhost' && substr($hostNoPort, -10) === '.localhost';
+
+if ($isLocalSubdomain) {
+	$slug = preg_replace('/\.localhost$/', '', $hostNoPort);
+	$slug = preg_replace('/[^a-z0-9-]/', '', $slug);
+	if ($slug !== '' && ($path === '/' || $path === '' || $path === '/index.php')) {
+		$_SERVER['WORKZ_REQUEST_URI'] = '/app/shell/' . $slug;
+		require __DIR__ . '/../api/index.php';
+		exit;
+	}
+}
+
+if (strpos($path, '/app/') === 0 || strpos($path, '/api/') === 0) {
+	$_SERVER['WORKZ_REQUEST_URI'] = $path;
+	require __DIR__ . '/../api/index.php';
+	exit;
+}
+?>
 <!DOCTYPE HTML>
 <html id="html" class="no-js" lang="pt-br">
 	<head>
@@ -23,6 +45,7 @@
 		<div id="main-wrapper" class="w-full h-screen overflow-y-auto overflow-x-hidden snap-y"></div>
 		<div id="sidebar-wrapper" class="fixed p-0 m-0 top-0 right-0 z-3 w-0 h-full bg-gray-100 overflow-y-auto transition-all ease-in-out duration-500"></div>
 		<script src="https://unpkg.com/imask"></script>
+		<script src="/js/core/workz-host-bridge.js"></script>
 		<script type="module" src="/js/main.js"></script> 		
 	</body>
 </html>

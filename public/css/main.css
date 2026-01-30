@@ -190,6 +190,27 @@ border: 0px solid #ffffff;
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
 }
 
+.app-item-button {
+    width: var(--app-icon-size, 60px);
+    max-width: var(--app-icon-size, 60px);
+    height: var(--app-grid-tile-height, 96px);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.app-item-label {
+    height: var(--app-label-height, 20px);
+    line-height: var(--app-label-height, 20px);
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
+}
+
 .app-icon-image {
     width: 100%;
     height: 100%;
@@ -205,6 +226,72 @@ border: 0px solid #ffffff;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* App Library vertical carousel */
+#app-grid.app-grid-viewport {
+  --app-icon-size: 60px;
+  --app-label-height: 20px;
+  --app-grid-gap: 12px;
+  --app-grid-cols: 4;
+  --app-grid-rows: 2;
+  --app-grid-tile-height: calc(var(--app-icon-size) + var(--app-label-height) + 6px);
+  height: calc(var(--app-grid-rows) * var(--app-grid-tile-height) + (var(--app-grid-rows) - 1) * var(--app-grid-gap));
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+}
+#app-grid-container {
+  display: flex;
+  flex-direction: column;
+}
+#app-grid {
+  margin-top: auto;
+  margin-bottom: auto;
+}
+#app-grid.app-grid-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+@media (max-width: 900px) {
+  #app-grid.app-grid-viewport {
+    --app-grid-cols: 3;
+  }
+}
+
+@media (max-width: 640px) {
+  #app-grid.app-grid-viewport {
+    --app-icon-size: 70px;
+    --app-grid-cols: 2;
+    --app-grid-rows: 3;
+  }
+}
+
+.app-grid-page {
+  height: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-grid-inner {
+  display: grid;
+  grid-template-columns: repeat(var(--app-grid-cols), minmax(0, 1fr));
+  gap: var(--app-grid-gap);
+  justify-items: center;
+  align-content: center;
+}
+
+#quickbar-track {
+  scroll-padding-left: 16px;
+}
+
+#quickbar-track.is-centered {
+  justify-content: center;
 }
 
 /* Animation for app icons */
